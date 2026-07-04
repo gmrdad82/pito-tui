@@ -302,6 +302,7 @@ func TestHandshakeCarriesCookieOriginAndSubprotocol(t *testing.T) {
 	srv := newScriptServer(t, []step{
 		send(`{"type":"welcome"}`),
 		expectSubscribe(testUUID),
+		send(`{"type":"confirm_subscription","identifier":"{\"channel\":\"Pito::JsonChannel\",\"uuid\":\"u1\"}"}`),
 	})
 	srv.checkReq = func(r *http.Request) {
 		if c, err := r.Cookie("pito_session"); err != nil || c.Value != "s3cr3t" {
@@ -326,7 +327,10 @@ func TestHandshakeCarriesCookieOriginAndSubprotocol(t *testing.T) {
 	cfg := rec.config(srv.srv.URL, testUUID, time.Second)
 	cfg.Jar = jar
 	runClient(t, cfg)
-	rec.waitState(t, StateConnecting)
+	// Wait for the CONFIRMED subscription: ending on "connecting" races
+	// the teardown against the server script still reading the subscribe
+	// frame (flaked on CI runners, never locally).
+	rec.waitState(t, StateConnected)
 }
 
 func TestUnknownFramesAndForeignBroadcastsIgnored(t *testing.T) {
