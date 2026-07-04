@@ -1,5 +1,6 @@
-> ping
-pong
+┃ 11:59 ping
+
+┃ 11:59 pong
 
 
 
@@ -19,7 +20,6 @@ pong
 
 
 
-
-⚠ disconnected — reconnecting…
-> message or /command
-● disconnected · release prep · 127.0.0.1:0 · dev
+ ⚠ disconnected — reconnecting…
+> /help to see available commands
+                          ■ 127.0.0.1:0 · release prep · disconnected · dev

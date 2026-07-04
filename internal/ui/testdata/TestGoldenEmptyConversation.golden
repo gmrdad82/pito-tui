@@ -1,4 +1,4 @@
-── no messages yet — say something
+[!] TIP — say something; the server knows the grammar. /help lists it.
 
 
 
@@ -20,5 +20,5 @@
 
 
 
-> message or /command
-● not connected · new conversation · 127.0.0.1:0 · dev
+> /help to see available commands
+                     ■ 127.0.0.1:0 · new conversation · not connected · dev

@@ -6,7 +6,9 @@ package ui
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"regexp"
 	"strings"
 	"time"
 
@@ -35,6 +37,13 @@ const maxNotices = 3
 // layer supplies it; tests record it.
 type ConnectFunc func(uuid string)
 
+// ImageDisplay pins one image to the terminal (kitty graphics). nil on
+// terminals without image support — everything degrades to text.
+type ImageDisplay interface {
+	Show(data []byte, row, col, cols, rows int)
+	Clear()
+}
+
 // Notifier plays UI sounds; the zero implementation is silence.
 type Notifier interface {
 	Send()
@@ -50,10 +59,12 @@ type Model struct {
 	client  *api.Client
 	connect ConnectFunc
 	sounds  Notifier
+	images  ImageDisplay
 
-	mode        mode
-	plainRender bool
-	renderer    *render.R
+	mode         mode
+	plainRender  bool
+	glamourStyle string
+	renderer     *render.R
 
 	// picker state
 	rows   []pickerRow
@@ -61,19 +72,21 @@ type Model struct {
 	now    func() time.Time
 
 	// chat state
-	vp             viewport.Model
-	input          textinput.Model
-	spin           spinner.Model
-	transcript     *Transcript
-	conv           api.Conversation
-	conn           cable.ConnState
-	sawDisconnect  bool
-	cableStarted   bool
-	pending        map[int64]bool
-	follow         bool
-	notices        []string
-	sessionExpired bool
-	loadErr        string
+	vp            viewport.Model
+	input         textinput.Model
+	spin          spinner.Model
+	transcript    *Transcript
+	conv          api.Conversation
+	conn          cable.ConnState
+	sawDisconnect bool
+	cableStarted  bool
+	pending       map[int64]bool
+	follow        bool
+	notices       []string
+	needsLogin    bool
+	showHelp      bool
+	loadErr       string
+	pickerNotice  string
 
 	width, height int
 	ready         bool
@@ -96,14 +109,36 @@ func WithNewConversation() Option {
 	return func(m *Model) { m.mode = modeChat }
 }
 
+// WithLoginRequired opens an unauthenticated chat: the resume picker is
+// unavailable (it would 401), so the user lands in a fresh conversation
+// with a banner saying to send /login <code> — the server grammar mints
+// the session and the reply cookie lands in the jar automatically.
+func WithLoginRequired() Option {
+	return func(m *Model) {
+		m.mode = modeChat
+		m.needsLogin = true
+	}
+}
+
 // WithPlainRender disables glamour/color variance for golden tests.
 func WithPlainRender() Option {
 	return func(m *Model) { m.plainRender = true }
 }
 
+// WithGlamourStyle sets the markdown style ("dark"/"light"), resolved by
+// the app BEFORE the program starts (querying inside the TUI deadlocks).
+func WithGlamourStyle(style string) Option {
+	return func(m *Model) { m.glamourStyle = style }
+}
+
 // WithNow pins the clock (relative timestamps in golden tests).
 func WithNow(now func() time.Time) Option {
 	return func(m *Model) { m.now = now }
+}
+
+// WithImages wires the terminal image display (kitty graphics).
+func WithImages(d ImageDisplay) Option {
+	return func(m *Model) { m.images = d }
 }
 
 // WithSounds wires the sound player.
@@ -117,11 +152,26 @@ func WithSounds(n Notifier) Option {
 
 func NewModel(client *api.Client, connect ConnectFunc, opts ...Option) Model {
 	input := textinput.New()
-	input.Placeholder = "message or /command"
+	input.Placeholder = "/help to see available commands"
+	input.PlaceholderStyle = lipgloss.NewStyle().Foreground(render.ColorFaint)
 	input.Prompt = "> "
+	input.PromptStyle = lipgloss.NewStyle().Foreground(render.ColorAccent).Bold(true)
+	input.Cursor.Style = lipgloss.NewStyle().Foreground(render.ColorAccent)
 	input.Focus()
 
-	spin := spinner.New(spinner.WithSpinner(spinner.MiniDot))
+	// The web's post-command comet (shell/post_command_dots): a bright
+	// head sweeping across a trail of dots.
+	comet := spinner.Spinner{
+		Frames: []string{
+			"●∙∙∙∙∙∙∙", "∙●∙∙∙∙∙∙", "∙∙●∙∙∙∙∙", "∙∙∙●∙∙∙∙",
+			"∙∙∙∙●∙∙∙", "∙∙∙∙∙●∙∙", "∙∙∙∙∙∙●∙", "∙∙∙∙∙∙∙●",
+		},
+		FPS: time.Second / 10,
+	}
+	spin := spinner.New(
+		spinner.WithSpinner(comet),
+		spinner.WithStyle(lipgloss.NewStyle().Foreground(render.ColorAccent)),
+	)
 
 	m := Model{
 		client:  client,
@@ -193,9 +243,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SendResultMsg:
 		return m.onSendResult(msg)
 	case CableEventMsg:
-		return m.onCableEvent(msg), nil
+		return m.onCableEvent(msg)
 	case ConnStateMsg:
 		return m.onConnState(msg)
+	case ImageFetchedMsg:
+		if m.images != nil && m.width > 46 {
+			// Pin to the top-right corner, clear of the scrollback's left
+			// column; kitty scales into the cell box.
+			m.images.Show(msg.Data, 2, m.width-40, 38, 11)
+		}
+		return m, nil
 	case spinner.TickMsg:
 		if len(m.pending) == 0 {
 			return m, nil // pending drained: let the tick loop die
@@ -213,6 +270,9 @@ func (m Model) onResize(msg tea.WindowSizeMsg) Model {
 	opts := []render.Option{}
 	if m.plainRender {
 		opts = append(opts, render.WithPlain())
+	}
+	if m.glamourStyle != "" {
+		opts = append(opts, render.WithStyle(m.glamourStyle))
 	}
 	m.renderer = render.New(m.contentWidth(), opts...)
 	renderer := m.renderer
@@ -291,6 +351,9 @@ func (m Model) onChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// key belongs to the text input (no focus toggle to learn).
 	if m.input.Value() == "" {
 		switch msg.String() {
+		case "?":
+			m.showHelp = !m.showHelp
+			return m, nil
 		case "j":
 			m.vp.ScrollDown(1)
 			m.follow = m.vp.AtBottom()
@@ -321,21 +384,32 @@ func (m Model) onResume(msg ResumeFetchedMsg) Model {
 		return m
 	}
 	m.rows = pickerRows(msg.List)
+	m.needsLogin = false // resume is auth-gated too
 	m.loadErr = ""
 	return m
 }
 
 func (m Model) onChatFetched(msg ChatFetchedMsg) (tea.Model, tea.Cmd) {
 	if msg.Err != nil {
-		if isUnauthorized(msg.Err) {
-			m.sessionExpired = true
-		} else {
+		switch {
+		case isUnauthorized(msg.Err):
+			m.needsLogin = true
+		case errors.Is(msg.Err, api.ErrNotFound):
+			// Unknown uuid (stale config, deleted conversation): back to
+			// the picker rather than a dead chat.
+			m.mode = modePicker
+			m.conv = api.Conversation{}
+			m.cursor = 0
+			m.pickerNotice = "that conversation does not exist anymore"
+			return m, m.fetchResumeCmd()
+		default:
 			m.pushNotice("scrollback fetch failed: " + msg.Err.Error())
 		}
 		m.refreshViewport()
 		return m, nil
 	}
 	m.conv = msg.Page.Conversation
+	m.needsLogin = false // the backfill is auth-gated: fetching it proves the session
 	m.transcript.Merge(msg.Page.Events)
 	// A fetched page can carry the first events of turns still marked
 	// pending (created-conversation paint, reconnect re-sync) — the cable
@@ -361,7 +435,7 @@ func (m Model) onChatFetched(msg ChatFetchedMsg) (tea.Model, tea.Cmd) {
 func (m Model) onSendResult(msg SendResultMsg) (tea.Model, tea.Cmd) {
 	if msg.Err != nil {
 		if isUnauthorized(msg.Err) {
-			m.sessionExpired = true
+			m.needsLogin = true
 		} else {
 			m.pushNotice("send failed: " + msg.Err.Error())
 		}
@@ -380,18 +454,28 @@ func (m Model) onSendResult(msg SendResultMsg) (tea.Model, tea.Cmd) {
 		// turn pending, then paint and subscribe exactly like a picked
 		// conversation.
 		m.conv.UUID = res.CreatedUUID
-		if res.TurnID != 0 {
+		if res.TurnID != 0 && !m.transcript.HasTurn(res.TurnID) {
 			m.pending[res.TurnID] = true
 		}
 		return m, tea.Batch(m.fetchChatCmd(res.CreatedUUID, false), m.spin.Tick)
 	default:
+		if res.TurnID == 0 {
+			// turn_id is null for reply mutations (confirmation replies):
+			// nothing new is pending, the replace arrives on the cable.
+			return m, nil
+		}
+		if m.transcript.HasTurn(res.TurnID) {
+			// The cable beat the HTTP ack — the turn's events already
+			// rendered. Marking it pending now would strand the spinner.
+			return m, nil
+		}
 		m.pending[res.TurnID] = true
 		m.refreshViewport()
 		return m, m.spin.Tick
 	}
 }
 
-func (m Model) onCableEvent(msg CableEventMsg) Model {
+func (m Model) onCableEvent(msg CableEventMsg) (tea.Model, tea.Cmd) {
 	ev := msg.M.Event
 	switch msg.M.Type {
 	case cable.TypeEventAppend:
@@ -401,26 +485,83 @@ func (m Model) onCableEvent(msg CableEventMsg) Model {
 		}
 		m.transcript.Append(ev)
 	case cable.TypeEventReplace:
+		// A replace proves the turn is flowing too — the thinking
+		// resolve (event.replace, resolved: true) is THE turn-done
+		// signal per the contract, so pending must not survive it.
+		delete(m.pending, ev.TurnID)
 		m.transcript.Replace(ev)
 	default:
-		return m // unknown stream message type: ignore
+		return m, nil // unknown stream message type: ignore
 	}
 	m.refreshViewport()
-	return m
+	return m, m.imageCmd(ev)
+}
+
+// imageCmd fetches a message's thumbnail for the pinned display. Only on
+// image-capable terminals, only for card-bearing kinds, never blocking.
+func (m Model) imageCmd(ev api.Event) tea.Cmd {
+	if m.images == nil {
+		return nil
+	}
+	switch ev.Kind {
+	case api.KindSystem, api.KindEnhanced, api.KindSystemFollowUp, api.KindEnhancedFollowUp:
+	default:
+		return nil
+	}
+	src := extractImageSrc(ev.Payload)
+	if src == "" {
+		return nil
+	}
+	client := m.client
+	return func() tea.Msg {
+		data, err := client.FetchRaw(context.Background(), src)
+		if err != nil {
+			return nil
+		}
+		return ImageFetchedMsg{Data: data}
+	}
+}
+
+// thumbnailRe finds the first non-avatar image in a card body.
+var thumbnailRe = regexp.MustCompile(`<img[^>]+>`)
+
+var srcRe = regexp.MustCompile(`src="([^"]+)"`)
+
+func extractImageSrc(payload []byte) string {
+	var p struct {
+		Body string `json:"body"`
+		HTML bool   `json:"html"`
+	}
+	if json.Unmarshal(payload, &p) != nil || !p.HTML || p.Body == "" {
+		return ""
+	}
+	for _, tag := range thumbnailRe.FindAllString(p.Body, 4) {
+		if strings.Contains(tag, "tiny-avatar") {
+			continue // list avatars: too small to pin
+		}
+		if match := srcRe.FindStringSubmatch(tag); match != nil && strings.HasPrefix(match[1], "/") {
+			return match[1]
+		}
+	}
+	return ""
 }
 
 func (m Model) onConnState(msg ConnStateMsg) (tea.Model, tea.Cmd) {
 	previous := m.conn
 	m.conn = msg.State
 	if isUnauthorized(msg.Err) {
-		m.sessionExpired = true
+		m.needsLogin = true
 	}
 	switch msg.State {
 	case cable.StateDisconnected:
 		m.sawDisconnect = true
 	case cable.StateConnected:
-		if m.sawDisconnect && previous != cable.StateConnected {
-			// The cable has no replay: refetch and diff-merge.
+		if previous != cable.StateConnected && m.conv.UUID != "" {
+			// Re-sync on EVERY confirmed subscription, first connect
+			// included: events broadcast between the initial backfill and
+			// the confirm are otherwise lost (live-observed: a thinking
+			// resolve stuck unresolved). The merge is ID-idempotent, so
+			// an extra fetch is cheap insurance.
 			m.sawDisconnect = false
 			return m, m.fetchChatCmd(m.conv.UUID, true)
 		}
@@ -431,8 +572,12 @@ func (m Model) onConnState(msg ConnStateMsg) (tea.Model, tea.Cmd) {
 // ── View ────────────────────────────────────────────────────────────────
 
 var (
-	statusStyle  = lipgloss.NewStyle().Faint(true)
-	bannerStyle  = lipgloss.NewStyle().Reverse(true).Bold(true)
+	statusStyle  = lipgloss.NewStyle().Foreground(render.ColorDim)
+	warnBanner   = lipgloss.NewStyle().Background(render.ColorWarn).Foreground(render.ColorInk).Bold(true)
+	errBanner    = lipgloss.NewStyle().Background(render.ColorErr).Foreground(render.ColorInk).Bold(true)
+	dotOK        = lipgloss.NewStyle().Foreground(render.ColorOK).Render("■")
+	dotWarn      = lipgloss.NewStyle().Foreground(render.ColorWarn).Render("■")
+	dotErr       = lipgloss.NewStyle().Foreground(render.ColorErr).Render("■")
 	noticeSpacer = "\n"
 )
 
@@ -441,7 +586,10 @@ func (m Model) View() string {
 		return "loading…"
 	}
 	if m.mode == modePicker {
-		body := pickerView(m.rows, m.cursor, m.width, m.now())
+		body := pickerView(m.rows, m.cursor, m.width, m.height, m.now())
+		if m.pickerNotice != "" {
+			body += "\n" + statusStyle.Render("· "+m.pickerNotice)
+		}
 		if m.loadErr != "" {
 			body += "\n" + lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Render(m.loadErr)
 		}
@@ -449,6 +597,9 @@ func (m Model) View() string {
 	}
 
 	sections := []string{m.vp.View()}
+	if m.showHelp {
+		sections = append(sections, m.helpLine())
+	}
 	if banner := m.bannerLine(); banner != "" {
 		sections = append(sections, banner)
 	}
@@ -458,22 +609,44 @@ func (m Model) View() string {
 
 func (m Model) bannerLine() string {
 	switch {
-	case m.sessionExpired:
-		return bannerStyle.Width(m.width).Render("⚠ session expired — restart pito-tui to log in again")
+	case m.needsLogin:
+		return warnBanner.Width(m.width).Render(" ⚠ not logged in — send /login <code> to authenticate")
 	case m.sawDisconnect && m.conn != cable.StateConnected:
 		// Only after an actual drop — the initial connect is not an outage
 		// (the status line already says "connecting").
-		return bannerStyle.Width(m.width).Render("⚠ disconnected — reconnecting…")
+		return errBanner.Width(m.width).Render(" ⚠ disconnected — reconnecting…")
 	default:
 		return ""
 	}
 }
 
+// helpLine is the '?'-toggled keymap strip (keybinding/hint's cousin).
+func (m Model) helpLine() string {
+	key := lipgloss.NewStyle().Foreground(render.ColorDim).Bold(true)
+	dim := statusStyle
+	pairs := []struct{ k, v string }{
+		{"j/k", "scroll"}, {"ctrl-d/u", "half page"}, {"g/G", "top/bottom"},
+		{"enter", "send"}, {"?", "help"}, {"ctrl-c", "quit"},
+	}
+	parts := make([]string, 0, len(pairs))
+	for _, p := range pairs {
+		parts = append(parts, key.Render(p.k)+dim.Render(" "+p.v))
+	}
+	return dim.Render(" ") + strings.Join(parts, dim.Render(" · "))
+}
+
+// statusLine mirrors the web's right-aligned mini status: presence dot,
+// host, conversation, connection state, version.
 func (m Model) statusLine() string {
-	dot := "●"
+	dot := dotErr
 	state := m.conn.String()
-	if !m.cableStarted {
-		state = "not connected"
+	switch {
+	case !m.cableStarted:
+		dot, state = dotWarn, "not connected"
+	case m.conn == cable.StateConnected:
+		dot = dotOK
+	case m.conn == cable.StateConnecting:
+		dot = dotWarn
 	}
 	name := m.conv.Label()
 	if name == "" {
@@ -487,12 +660,13 @@ func (m Model) statusLine() string {
 	if m.client != nil {
 		host = m.client.BaseURL().Host
 	}
-	parts := []string{dot + " " + state, name}
-	if host != "" {
-		parts = append(parts, host)
+	sep := statusStyle.Render(" · ")
+	line := dot + " " + host + sep + statusStyle.Render(name) + sep +
+		statusStyle.Render(state) + sep + statusStyle.Render(version.String())
+	if pad := m.width - lipgloss.Width(line) - 1; pad > 0 {
+		line = strings.Repeat(" ", pad) + line
 	}
-	parts = append(parts, version.String())
-	return statusStyle.Width(m.width).Render(strings.Join(parts, " · "))
+	return line
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────
@@ -504,7 +678,9 @@ func (m *Model) refreshViewport() {
 	m.vp.Height = m.chatViewportHeight()
 	content := m.transcript.View(m.contentWidth())
 	if content == "" {
-		content = statusStyle.Render("── no messages yet — say something")
+		badge := lipgloss.NewStyle().Foreground(render.ColorWarn).Bold(true).Render("[!]")
+		tip := lipgloss.NewStyle().Foreground(render.ColorPrimary).Bold(true).Render(" TIP ")
+		content = badge + tip + statusStyle.Render("— say something; the server knows the grammar. /help lists it.")
 	}
 	if len(m.pending) > 0 {
 		content += noticeSpacer + m.spin.View() + " thinking…"

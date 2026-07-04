@@ -226,3 +226,15 @@ func TestCacheIsNamespacedPerBackend(t *testing.T) {
 		t.Errorf("cacheDir = %q, want host-suffixed", a.cacheDir)
 	}
 }
+
+func TestAfplayServesMacOS(t *testing.T) {
+	// darwin has no paplay/mpv out of the box — afplay is the built-in.
+	e := &fakeExec{binaries: map[string]bool{"afplay": true}}
+	p, _ := newPlayer(t, e)
+	p.play(CueSend)
+
+	runs := e.ran()
+	if len(runs) != 1 || !strings.HasPrefix(runs[0], "afplay ") {
+		t.Errorf("runs = %v, want one afplay invocation", runs)
+	}
+}

@@ -127,6 +127,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          # Fine-grained PAT, contents:write on gmrdad82/homebrew-tap only —
+          # the workflow token cannot push to a sibling repo.
+          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
 
       - name: Notify Slack
         if: always()
@@ -135,8 +138,8 @@ jobs:
         with:
           # Bold must not wrap the code span — Slack mrkdwn won't close a `*`
           # that directly follows a backtick (same lesson as pito 1.0.0 G17).
-          headline: ":package: *pito-tui ${{ github.ref_name }} is out* — binaries, deb, and AUR published"
-          extra: "Get it: `yay -S pito-tui-bin`"
+          headline: ":package: *pito-tui ${{ github.ref_name }} is out* — binaries, deb, and Homebrew published"
+          extra: "Get it: `brew install gmrdad82/tap/pito-tui`"
           status: ${{ job.status }}
           webhook: ${{ secrets.SLACK_WEBHOOK }}
           github-token: ${{ github.token }}

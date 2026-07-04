@@ -20,6 +20,7 @@ import (
 
 func TestMain(m *testing.M) {
 	lipgloss.SetColorProfile(termenv.Ascii)
+	time.Local = time.UTC // deterministic HH:MM stamps in golden frames
 	os.Exit(m.Run())
 }
 
@@ -335,7 +336,7 @@ func TestReconnectTriggersResyncMerge(t *testing.T) {
 	}
 }
 
-func TestSessionExpiredShowsBanner(t *testing.T) {
+func TestExpiredSessionAsksForInAppLogin(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /chat/u1.json", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -344,8 +345,40 @@ func TestSessionExpiredShowsBanner(t *testing.T) {
 	m = sized(m)
 	m = drive(m, m.fetchChatCmd("u1", false)())
 
-	if !strings.Contains(m.View(), "session expired") {
-		t.Errorf("view missing the session-expired banner:\n%s", m.View())
+	if !strings.Contains(m.View(), "send /login") {
+		t.Errorf("view missing the login banner:\n%s", m.View())
+	}
+}
+
+func TestLoginRequiredFlowEndsWithChat(t *testing.T) {
+	// The /login send goes through the normal chat pipeline: the server
+	// creates the conversation, mints the cookie, and the banner clears.
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /chat", func(w http.ResponseWriter, r *http.Request) {
+		http.SetCookie(w, &http.Cookie{Name: "pito_session", Value: "minted", Path: "/"})
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"uuid":"fresh","turn_id":9}`))
+	})
+	mux.HandleFunc("GET /chat/fresh.json", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"conversation":{"uuid":"fresh","title":""},"events":[]}`))
+	})
+	m, rec := newTestModel(t, mux, WithLoginRequired())
+	m = sized(m)
+
+	if !strings.Contains(m.View(), "send /login") {
+		t.Fatalf("unauthenticated start missing the login banner:\n%s", m.View())
+	}
+	m.input.SetValue("/login 123456")
+	m, cmd := driveCmd(m, key("enter"))
+	m, cmd = driveCmd(m, cmd()) // SendResultMsg: created + minted
+	m = runCmd(m, cmd)          // fetch succeeds — the auth-gated proof
+	if strings.Contains(m.View(), "send /login") {
+		t.Error("banner must clear once an auth-gated fetch succeeds")
+	}
+	if got := rec.calls(); len(got) != 1 || got[0] != "fresh" {
+		t.Errorf("connect calls = %v, want [fresh]", got)
 	}
 }
 
@@ -476,7 +509,7 @@ func TestSendFailureBranches(t *testing.T) {
 		}
 	})
 
-	t.Run("401 flips the session-expired banner", func(t *testing.T) {
+	t.Run("401 asks for in-app login", func(t *testing.T) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("POST /chat", func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusUnauthorized)
@@ -486,8 +519,8 @@ func TestSendFailureBranches(t *testing.T) {
 		m.input.SetValue("hi")
 		m, cmd := driveCmd(m, key("enter"))
 		m = drive(m, cmd())
-		if !strings.Contains(m.View(), "session expired") {
-			t.Errorf("view missing the expiry banner:\n%s", m.View())
+		if !strings.Contains(m.View(), "send /login") {
+			t.Errorf("view missing the login banner:\n%s", m.View())
 		}
 	})
 }
@@ -536,5 +569,191 @@ func TestRelativeTime(t *testing.T) {
 		if got := relativeTime(fixedNow.Add(-d), fixedNow); got != want {
 			t.Errorf("relativeTime(-%s) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestUnknownConversationFallsBackToPicker(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /chat/gone.json", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":"not_found"}`))
+	})
+	mux.HandleFunc("GET /resume.json", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(resumeJSON))
+	})
+	m, _ := newTestModel(t, mux, WithConversation("gone"))
+	m = sized(m)
+
+	m, cmd := driveCmd(m, m.fetchChatCmd("gone", false)())
+	if m.mode != modePicker {
+		t.Fatal("a 404 conversation must fall back to the picker")
+	}
+	if cmd == nil {
+		t.Fatal("the fallback must fetch the resume list")
+	}
+	m = drive(m, cmd())
+	view := m.View()
+	if !strings.Contains(view, "does not exist anymore") || !strings.Contains(view, "release prep") {
+		t.Errorf("picker fallback view wrong:\n%s", view)
+	}
+}
+
+func TestAnonymousSendDoesNotClearLoginBanner(t *testing.T) {
+	// api.md: unauthenticated sends are ACCEPTED (echo + error arrive as
+	// events) — a 201 is NOT proof of authentication. Only an auth-gated
+	// fetch clears the banner.
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /chat", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"uuid":"anon","turn_id":3}`))
+	})
+	mux.HandleFunc("GET /chat/anon.json", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized) // still a guest
+	})
+	m, _ := newTestModel(t, mux, WithLoginRequired())
+	m = sized(m)
+
+	m.input.SetValue("ls games")
+	m, cmd := driveCmd(m, key("enter"))
+	m, cmd = driveCmd(m, cmd())
+	m = runCmd(m, cmd)
+	if !strings.Contains(m.View(), "send /login") {
+		t.Errorf("banner must survive an anonymous send:\n%s", m.View())
+	}
+}
+
+func TestPickerWindowsLongLists(t *testing.T) {
+	rows := `{"recent": [`
+	for i := 1; i <= 60; i++ {
+		if i > 1 {
+			rows += ","
+		}
+		rows += `{"uuid": "u` + string(rune('0'+i%10)) + `", "title": "Unnamed ` + string(rune('0'+i%10)) + `", "last_activity_at": "2026-07-04T11:00:00Z"}`
+	}
+	rows += `], "older": []}`
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /resume.json", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(rows))
+	})
+	m, _ := newTestModel(t, mux)
+	m = sized(m) // 80×24
+	m = drive(m, m.fetchResumeCmd()())
+
+	view := m.View()
+	if lines := strings.Count(view, "\n"); lines > 24 {
+		t.Errorf("picker view has %d lines for a 24-row terminal", lines)
+	}
+	if !strings.Contains(view, "conversations") {
+		t.Error("title must stay visible with long lists")
+	}
+	if !strings.Contains(view, "start a new conversation") {
+		t.Error("cursor row (new conversation) must stay visible at the top")
+	}
+	if !strings.Contains(view, "more") {
+		t.Error("overflow indicator missing")
+	}
+
+	// Cursor at the bottom: the tail must scroll into view.
+	for range 70 {
+		m = drive(m, key("j"))
+	}
+	view = m.View()
+	if !strings.Contains(view, "↑") {
+		t.Errorf("scrolled-down view missing the top overflow indicator:\n%s", view)
+	}
+	if lines := strings.Count(view, "\n"); lines > 24 {
+		t.Errorf("scrolled picker view has %d lines", lines)
+	}
+}
+
+func TestAckArrivingAfterEventsDoesNotStrandTheSpinner(t *testing.T) {
+	// Live-observed race: dev dispatches fast enough that the turn's
+	// events arrive over the cable BEFORE the HTTP ack returns.
+	m, _ := newTestModel(t, chatServer(t), WithConversation("u1"))
+	m = sized(m)
+	m = drive(m, m.fetchChatCmd("u1", false)())
+
+	m = drive(m, CableEventMsg{M: cable.StreamMessage{
+		Type:  cable.TypeEventAppend,
+		Event: api.Event{ID: 30, TurnID: 12, Kind: "echo", Payload: []byte(`{"text":"hi"}`)},
+	}})
+	m, cmd := driveCmd(m, SendResultMsg{Res: &api.SendResult{TurnID: 12}})
+	if len(m.pending) != 0 {
+		t.Error("ack for an already-rendered turn must not pend")
+	}
+	if cmd != nil {
+		t.Error("no spinner loop for an already-rendered turn")
+	}
+	if strings.Contains(m.View(), "thinking…") {
+		t.Errorf("stranded spinner:\n%s", m.View())
+	}
+}
+
+func TestReplaceClearsPendingToo(t *testing.T) {
+	// The thinking resolve arrives as event.replace and is the turn-done
+	// signal — pending must not survive it.
+	m, _ := newTestModel(t, chatServer(t), WithConversation("u1"))
+	m = sized(m)
+	m = drive(m, m.fetchChatCmd("u1", false)())
+	m.pending[7] = true // turn 7's appends were merged via fetch earlier
+
+	m = drive(m, CableEventMsg{M: cable.StreamMessage{
+		Type:  cable.TypeEventReplace,
+		Event: api.Event{ID: 2, TurnID: 7, Kind: "thinking", Payload: []byte(`{"resolved":true,"elapsed_seconds":0.7}`)},
+	}})
+	if len(m.pending) != 0 {
+		t.Error("event.replace must clear the turn's pending state")
+	}
+}
+
+type imageRecorder struct {
+	shows  int
+	clears int
+	last   []byte
+}
+
+func (r *imageRecorder) Show(data []byte, row, col, cols, rows int) {
+	r.shows++
+	r.last = data
+}
+func (r *imageRecorder) Clear() { r.clears++ }
+
+func TestDetailCardThumbnailShowsOnKittyTerminals(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /thumb.jpg", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("jpeg-bytes"))
+	})
+	rec := &imageRecorder{}
+	m, _ := newTestModel(t, mux, WithConversation("u1"), WithImages(rec))
+	m = sized(m)
+
+	body := `{"body":"<div><img class=\"pito-channel-tiny-avatar\" src=\"/avatar.jpg\"/><img alt=\"x\" src=\"/thumb.jpg\"/></div>","html":true}`
+	m, cmd := driveCmd(m, CableEventMsg{M: cable.StreamMessage{
+		Type:  cable.TypeEventAppend,
+		Event: api.Event{ID: 9, TurnID: 4, Kind: "system", Payload: []byte(body)},
+	}})
+	if cmd == nil {
+		t.Fatal("card with a thumbnail must fetch it")
+	}
+	_ = drive(m, cmd()) // ImageFetchedMsg → Show
+	if rec.shows != 1 || string(rec.last) != "jpeg-bytes" {
+		t.Errorf("Show calls = %d, data = %q — thumbnail must pin (avatar skipped)", rec.shows, rec.last)
+	}
+}
+
+func TestNoImageDisplayMeansNoFetch(t *testing.T) {
+	m, _ := newTestModel(t, chatServer(t), WithConversation("u1"))
+	m = sized(m)
+	body := `{"body":"<img src=\"/thumb.jpg\"/>","html":true}`
+	_, cmd := driveCmd(m, CableEventMsg{M: cable.StreamMessage{
+		Type:  cable.TypeEventAppend,
+		Event: api.Event{ID: 9, TurnID: 4, Kind: "system", Payload: []byte(body)},
+	}})
+	if cmd != nil {
+		t.Error("plain terminals must not fetch thumbnails")
 	}
 }

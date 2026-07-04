@@ -30,7 +30,7 @@ func TestAppendGroupsByTurnInArrivalOrder(t *testing.T) {
 	tr.Append(ev(3, 2, "echo", `{}`))
 
 	view := tr.View(80)
-	want := "[1/1 echo {}]\n[1/2 system {}]\n\n[2/3 echo {}]\n"
+	want := "[1/1 echo {}]\n\n[1/2 system {}]\n\n[2/3 echo {}]\n"
 	if view != want {
 		t.Errorf("view =\n%q\nwant\n%q", view, want)
 	}

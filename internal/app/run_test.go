@@ -1,11 +1,26 @@
 package app
 
 import (
-	"bufio"
 	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/gmrdad82/pito-tui/internal/api"
 )
+
+// newTestClient wires a real api.Client at an httptest server.
+func newTestClient(t *testing.T, handler http.Handler) (*api.Client, *httptest.Server) {
+	t.Helper()
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+	client, err := api.New(srv.URL, filepath.Join(t.TempDir(), "cookies.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return client, srv
+}
 
 func TestPreflightPassesWithValidSession(t *testing.T) {
 	mux := http.NewServeMux()
@@ -15,40 +30,27 @@ func TestPreflightPassesWithValidSession(t *testing.T) {
 	})
 	client, _ := newTestClient(t, mux)
 
-	var out strings.Builder
-	if err := Preflight(t.Context(), client, newBufReader(""), &out); err != nil {
-		t.Fatalf("Preflight = %v", err)
-	}
-	if out.Len() != 0 {
-		t.Errorf("valid session must be silent, got %q", out.String())
+	authed, err := Preflight(t.Context(), client)
+	if err != nil || !authed {
+		t.Fatalf("Preflight = %v, %v; want authed and no error", authed, err)
 	}
 }
 
-func TestPreflightLogsInOn401(t *testing.T) {
-	authed := false
+func TestPreflightUnauthenticatedStartsInAppLogin(t *testing.T) {
+	// 401 is NOT an error: the TUI opens unauthenticated and the user
+	// types /login <code> — the server grammar owns the login flow.
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /resume.json", func(w http.ResponseWriter, r *http.Request) {
-		if !authed {
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"recent":[],"older":[]}`))
-	})
-	mux.HandleFunc("POST /session", func(w http.ResponseWriter, r *http.Request) {
-		authed = true
-		http.SetCookie(w, &http.Cookie{Name: "pito_session", Value: "ok", Path: "/"})
-		w.WriteHeader(http.StatusCreated)
+		w.WriteHeader(http.StatusUnauthorized)
 	})
 	client, _ := newTestClient(t, mux)
 
-	var out strings.Builder
-	err := Preflight(t.Context(), client, newBufReader("123456\n"), &out)
+	authed, err := Preflight(t.Context(), client)
 	if err != nil {
-		t.Fatalf("Preflight = %v", err)
+		t.Fatalf("Preflight = %v; a 401 must not be an error", err)
 	}
-	if !strings.Contains(out.String(), "TOTP code:") {
-		t.Errorf("output %q missing the prompt", out.String())
+	if authed {
+		t.Error("authed = true on a 401")
 	}
 }
 
@@ -59,53 +61,27 @@ func TestPreflightUnreachableInstance(t *testing.T) {
 	})
 	client, _ := newTestClient(t, mux)
 
-	err := Preflight(t.Context(), client, newBufReader(""), &strings.Builder{})
+	_, err := Preflight(t.Context(), client)
 	if err == nil || !strings.Contains(err.Error(), "cannot reach") {
 		t.Errorf("err = %v, want a reachability error", err)
 	}
 }
 
-func TestStdinPrompterTrimsAndReads(t *testing.T) {
+func TestRunStopsGracefullyWithoutServer(t *testing.T) {
 	var out strings.Builder
-	p := &stdinPrompter{in: newBufReader("  123456  \n"), out: &out}
-	code, err := p.TOTP()
-	if err != nil || code != "123456" {
-		t.Errorf("TOTP = %q, %v", code, err)
+	err := Run(Options{
+		ConfigPath: filepath.Join(t.TempDir(), "config.toml"),
+		Stdout:     &out,
+	})
+	if err == nil {
+		t.Fatal("no configured server must stop the run")
 	}
-}
-
-func TestStdinPrompterEOFWithoutInput(t *testing.T) {
-	p := &stdinPrompter{in: newBufReader(""), out: &strings.Builder{}}
-	if _, err := p.TOTP(); err == nil {
-		t.Error("EOF with no input must error")
+	msg := err.Error()
+	if !strings.Contains(msg, "no PITO instance configured") ||
+		!strings.Contains(msg, "pito-tui config server=") {
+		t.Errorf("message must explain the way in:\n%s", msg)
 	}
-}
-
-func newBufReader(s string) *bufio.Reader {
-	return bufio.NewReader(strings.NewReader(s))
-}
-
-func TestPromptInstanceURL(t *testing.T) {
-	cases := map[string]struct{ input, want string }{
-		"enter keeps default":     {"\n", "https://app.pitomd.com"},
-		"bare host gets https":    {"dev.pitomd.com\n", "https://dev.pitomd.com"},
-		"full url passes through": {"http://localhost:3000\n", "http://localhost:3000"},
-		"trailing slash trimmed":  {"https://pito.example.com/\n", "https://pito.example.com"},
-		"nonsense is re-asked":    {"ftp://nope\ndev.pitomd.com\n", "https://dev.pitomd.com"},
-	}
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			var out strings.Builder
-			got, err := promptInstanceURL(newBufReader(tc.input), &out, "https://app.pitomd.com")
-			if err != nil || got != tc.want {
-				t.Errorf("promptInstanceURL(%q) = %q, %v; want %q", tc.input, got, err, tc.want)
-			}
-		})
-	}
-}
-
-func TestPromptInstanceURLEOF(t *testing.T) {
-	if _, err := promptInstanceURL(newBufReader(""), &strings.Builder{}, "x"); err == nil {
-		t.Error("EOF must surface an error, not hang or default silently")
+	if strings.Contains(msg, "pitomd.com") {
+		t.Errorf("the message must not propose any particular install:\n%s", msg)
 	}
 }

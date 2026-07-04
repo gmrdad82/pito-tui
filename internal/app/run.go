@@ -1,23 +1,23 @@
 // Package app wires everything into a runnable client: config, the
-// pre-TUI login preflight, the cable→Bubble Tea bridge, and program
-// startup. main() stays a flag parser; the logic lives here where tests
-// can reach it.
+// backend preflight, the cable→Bubble Tea bridge, and program startup.
+// main() stays a flag parser; the logic lives here where tests reach it.
 package app
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
-	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/muesli/termenv"
 
 	"github.com/gmrdad82/pito-tui/internal/api"
 	"github.com/gmrdad82/pito-tui/internal/cable"
 	"github.com/gmrdad82/pito-tui/internal/config"
+	"github.com/gmrdad82/pito-tui/internal/img"
 	"github.com/gmrdad82/pito-tui/internal/sound"
 	"github.com/gmrdad82/pito-tui/internal/ui"
 )
@@ -28,15 +28,11 @@ type Options struct {
 	InstanceURL  *string // nil → not set on the CLI
 	Sounds       *bool   // nil → not set on the CLI
 	Conversation string  // positional argument, "" → picker
-	Stdin        io.Reader
 	Stdout       io.Writer
 }
 
-// Run is the program: load config (prompting for the backend on first
-// run), ensure a session, start the TUI.
+// Run is the program: load config, check the backend, start the TUI.
 func Run(opts Options) error {
-	in := bufio.NewReader(opts.Stdin)
-
 	cfgPath := opts.ConfigPath
 	if cfgPath == "" {
 		var err error
@@ -50,19 +46,16 @@ func Run(opts Options) error {
 	}
 	cfg = cfg.WithFlags(opts.InstanceURL, opts.Sounds, opts.Conversation)
 
-	// First run with no config file and no --instance: ask which backend
-	// this client should talk to and persist the answer. A one-off
-	// --instance run never writes the file — flags stay per-run.
-	if !config.Exists(cfgPath) && opts.InstanceURL == nil {
-		chosen, err := promptInstanceURL(in, opts.Stdout, cfg.InstanceURL)
-		if err != nil {
-			return fmt.Errorf("no config at %s and no --instance flag; cannot ask interactively: %w", cfgPath, err)
-		}
-		cfg.InstanceURL = chosen
-		if err := config.Save(cfgPath, cfg); err != nil {
-			return err
-		}
-		fmt.Fprintf(opts.Stdout, "Saved %s — edit it or use --instance <url> to switch backends.\n", cfgPath)
+	// No instance configured: stop gracefully with the way in. There is
+	// deliberately NO default and NO suggestion — pito is self-hosted and
+	// this client points wherever the owner says, nowhere else.
+	if cfg.InstanceURL == "" {
+		return fmt.Errorf(`no PITO instance configured.
+
+Point pito-tui at your install:
+
+  pito-tui config server=https://pito.example.com   (saved to %s)
+  pito-tui --instance https://pito.example.com      (this run only)`, cfgPath)
 	}
 
 	dir, err := config.Dir()
@@ -77,11 +70,20 @@ func Run(opts Options) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := Preflight(ctx, client, in, opts.Stdout); err != nil {
-		return fmt.Errorf("%w\n(switch backends with --instance <url> or by editing %s)", err, cfgPath)
+	authed, err := Preflight(ctx, client)
+	if err != nil {
+		return fmt.Errorf("%w\n(switch backends with --instance <url> or `pito-tui config server=<url>`)", err)
 	}
 
 	player := sound.New(cfg.InstanceURL, cfg.Sounds)
+
+	// Resolve the markdown style NOW, before Bubble Tea owns the terminal:
+	// termenv's background query talks over stdin, and doing it inside the
+	// program deadlocks against tea's input reader (the "loading…" freeze).
+	glamourStyle := "dark"
+	if !termenv.HasDarkBackground() {
+		glamourStyle = "light"
+	}
 
 	var program *tea.Program
 	connect := func(uuid string) {
@@ -102,73 +104,43 @@ func Run(opts Options) error {
 		go func() { _ = cab.Run(ctx) }()
 	}
 
-	modelOpts := []ui.Option{ui.WithSounds(player)}
-	if cfg.Conversation != "" {
+	modelOpts := []ui.Option{ui.WithSounds(player), ui.WithGlamourStyle(glamourStyle)}
+	// Terminal images: dynamic capability detection (kitty/ghostty/
+	// WezTerm speak the kitty graphics protocol); text-only elsewhere.
+	var shower *img.Shower
+	if img.Supported() {
+		shower = img.NewShower(os.Stdout)
+		modelOpts = append(modelOpts, ui.WithImages(shower))
+	}
+	switch {
+	case !authed:
+		// Login is the app's own grammar: the user types /login <code>
+		// into the chat, exactly like the web chatbox. No side-channel
+		// prompt — the TUI opens unauthenticated and says so.
+		modelOpts = append(modelOpts, ui.WithLoginRequired())
+	case cfg.Conversation != "":
 		modelOpts = append(modelOpts, ui.WithConversation(cfg.Conversation))
 	}
 	model := ui.NewModel(client, connect, modelOpts...)
 
 	program = tea.NewProgram(model, tea.WithAltScreen())
 	_, err = program.Run()
+	shower.Clear() // nil-safe: drop any pinned image before handing back the shell
 	return err
 }
 
-// promptInstanceURL is the first-run backend question. Enter keeps the
-// suggested default; anything else is normalized (bare hosts get https://)
-// and re-asked on nonsense instead of failing later with a dial error.
-func promptInstanceURL(in *bufio.Reader, out io.Writer, suggested string) (string, error) {
-	for {
-		fmt.Fprintf(out, "PITO instance URL [%s]: ", suggested)
-		line, err := in.ReadString('\n')
-		if err != nil && line == "" {
-			return "", err
-		}
-		line = strings.TrimSpace(line)
-		if line == "" {
-			return suggested, nil
-		}
-		normalized, err := config.NormalizeInstanceURL(line)
-		if err != nil {
-			fmt.Fprintln(out, err.Error())
-			continue
-		}
-		return normalized, nil
+// Preflight distinguishes "reachable but not logged in" (the TUI starts
+// unauthenticated and the user types /login <code> — the app's own
+// grammar, like the web chatbox) from "cannot reach the backend at all"
+// (an error worth stopping for).
+func Preflight(ctx context.Context, client *api.Client) (authed bool, err error) {
+	_, err = client.Resume(ctx)
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, api.ErrUnauthorized):
+		return false, nil
+	default:
+		return false, fmt.Errorf("cannot reach %s: %w", client.BaseURL().Host, err)
 	}
-}
-
-// Preflight makes sure the session cookie works before the TUI takes over
-// the terminal: one cheap authenticated call, and on 401 the interactive
-// TOTP login (the jar may be empty, or past its 24h idle timeout).
-func Preflight(ctx context.Context, client *api.Client, in *bufio.Reader, out io.Writer) error {
-	_, err := client.Resume(ctx)
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, api.ErrUnauthorized) {
-		return fmt.Errorf("cannot reach %s: %w", client.BaseURL().Host, err)
-	}
-	fmt.Fprintf(out, "Logging in to %s\n", client.BaseURL().Host)
-	if err := EnsureLogin(ctx, client.Login, &stdinPrompter{in: in, out: out}, out); err != nil {
-		return err
-	}
-	if _, err := client.Resume(ctx); err != nil {
-		return fmt.Errorf("login succeeded but the session does not stick: %w", err)
-	}
-	return nil
-}
-
-// stdinPrompter reads the TOTP code from the terminal. The code is a
-// 6-digit one-time value — no masking needed, same as the web chatbox.
-type stdinPrompter struct {
-	in  *bufio.Reader
-	out io.Writer
-}
-
-func (p *stdinPrompter) TOTP() (string, error) {
-	fmt.Fprint(p.out, "TOTP code: ")
-	line, err := p.in.ReadString('\n')
-	if err != nil && line == "" {
-		return "", err
-	}
-	return strings.TrimSpace(line), nil
 }

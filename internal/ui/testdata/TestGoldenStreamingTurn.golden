@@ -1,10 +1,12 @@
-> ping
-pong
+┃ 11:59 ping
 
-> show game 5
+┃ 11:59 pong
+
+┃ 12:00 show game 5
+
 thinking…
 
-⠋ thinking…
+●∙∙∙∙∙∙∙ thinking…
 
 
 
@@ -18,7 +20,5 @@ thinking…
 
 
 
-
-
-> message or /command
-● connecting · release prep · 127.0.0.1:0 · dev
+> /help to see available commands
+                            ■ 127.0.0.1:0 · release prep · connecting · dev

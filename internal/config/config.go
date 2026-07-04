@@ -12,8 +12,6 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-const DefaultInstanceURL = "https://app.pitomd.com"
-
 type Config struct {
 	// InstanceURL is the PITO instance the client talks to. Everything —
 	// login, scrollback, cable, sounds — derives from this one URL.
@@ -26,9 +24,11 @@ type Config struct {
 }
 
 func defaults() Config {
+	// No default instance: pito is self-hosted, and this client must not
+	// steer anyone toward any particular install. Unconfigured means
+	// unconfigured — the app stops with instructions instead.
 	return Config{
-		InstanceURL: DefaultInstanceURL,
-		Sounds:      true,
+		Sounds: true,
 	}
 }
 
@@ -50,8 +50,7 @@ func DefaultPath() (string, error) {
 	return filepath.Join(dir, "config.toml"), nil
 }
 
-// Exists reports whether a config file is present at path (first-run
-// detection — a missing file triggers the interactive instance prompt).
+// Exists reports whether a config file is present at path.
 func Exists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
@@ -64,10 +63,14 @@ func Save(path string, cfg Config) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("config: creating %s: %w", dir, err)
 	}
+	conversation := "# conversation = \"\""
+	if cfg.Conversation != "" {
+		conversation = fmt.Sprintf("conversation = %q", cfg.Conversation)
+	}
 	body := fmt.Sprintf(`# pito-tui configuration.
 
-# The PITO backend this client talks to. Change it here, or per-run with
-# --instance <url>.
+# The PITO backend this client talks to. Change it here, or with
+# `+"`pito-tui config server=<url>`"+`; --instance <url> overrides per run.
 instance_url = %q
 
 # Send/receive/notify sound cues. --sounds=on|off overrides per run.
@@ -75,8 +78,8 @@ sounds = %v
 
 # Optional: a default conversation uuid to open directly (skips the
 # picker). The positional CLI argument wins over it.
-# conversation = ""
-`, cfg.InstanceURL, cfg.Sounds)
+%s
+`, cfg.InstanceURL, cfg.Sounds, conversation)
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, []byte(body), 0o600); err != nil {
 		return fmt.Errorf("config: writing %s: %w", path, err)

@@ -1,10 +1,8 @@
-> ping
-pong
+┃ 11:59 ping
 
-? Unlinked.
+┃ 11:59 pong
 
-
-
+┃ 12:00 ? Unlinked.
 
 
 
@@ -20,5 +18,7 @@ pong
 
 
 
-> message or /command
-● connecting · release prep · 127.0.0.1:0 · dev
+
+
+> /help to see available commands
+                            ■ 127.0.0.1:0 · release prep · connecting · dev

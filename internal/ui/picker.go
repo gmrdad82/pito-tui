@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/gmrdad82/pito-tui/internal/api"
+	"github.com/gmrdad82/pito-tui/internal/ui/render"
 )
 
 // pickerRow is one selectable line in the conversation picker: the "new
@@ -32,40 +33,86 @@ func pickerRows(list *api.ResumeList) []pickerRow {
 }
 
 var (
+	pickerBadgeStyle   = lipgloss.NewStyle().Background(render.ColorPrimary).Foreground(lipgloss.Color("231")).Bold(true).Padding(0, 1)
 	pickerTitleStyle   = lipgloss.NewStyle().Bold(true)
-	pickerSectionStyle = lipgloss.NewStyle().Faint(true)
-	pickerCursorStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
-	pickerDimStyle     = lipgloss.NewStyle().Faint(true)
+	pickerSectionStyle = lipgloss.NewStyle().Foreground(render.ColorPrimary).Bold(true)
+	pickerCursorStyle  = lipgloss.NewStyle().Foreground(render.ColorAccent).Bold(true)
+	pickerNewStyle     = lipgloss.NewStyle().Foreground(render.ColorOK)
+	pickerDimStyle     = lipgloss.NewStyle().Foreground(render.ColorDim)
+	pickerKeyStyle     = lipgloss.NewStyle().Foreground(render.ColorDim).Bold(true)
 )
 
-// pickerView renders the conversation picker. now anchors the relative
-// timestamps so golden frames stay deterministic.
-func pickerView(rows []pickerRow, cursor, width int, now time.Time) string {
-	var b strings.Builder
-	b.WriteString(pickerTitleStyle.Render("pito — conversations") + "\n\n")
+// pickerView renders the conversation picker, windowed so long lists keep
+// the cursor on screen (title and help stay fixed). now anchors the
+// relative timestamps so golden frames stay deterministic.
+func pickerView(rows []pickerRow, cursor, width, height int, now time.Time) string {
+	// Build every list line first, remembering which line the cursor is on
+	// (section headers interleave, so row index ≠ line index).
+	var lines []string
+	cursorLine := 0
 	section := ""
 	for i, row := range rows {
 		if row.section != "" && row.section != section {
 			section = row.section
-			b.WriteString(pickerSectionStyle.Render("— "+section) + "\n")
+			lines = append(lines, pickerSectionStyle.Render(strings.ToUpper(section)))
 		}
 		marker := "  "
-		if i == cursor {
-			marker = pickerCursorStyle.Render("> ")
-		}
 		label := row.title
 		if row.isNew {
-			label = "+ " + label
+			label = pickerNewStyle.Render("+ " + label)
 		} else if label == "" {
 			label = "(unnamed)"
+		}
+		if i == cursor {
+			marker = pickerCursorStyle.Render("▌ ")
+			cursorLine = len(lines)
+			if !row.isNew {
+				label = pickerCursorStyle.Render(row.title)
+			}
 		}
 		line := marker + label
 		if !row.last.IsZero() {
 			line += pickerDimStyle.Render("  · " + relativeTime(row.last, now))
 		}
-		b.WriteString(lipgloss.NewStyle().MaxWidth(width).Render(line) + "\n")
+		lines = append(lines, lipgloss.NewStyle().MaxWidth(width).Render(line))
 	}
-	b.WriteString("\n" + pickerDimStyle.Render("j/k move · enter open · ctrl-c quit"))
+
+	// Window the list to the space between the fixed title (2 lines) and
+	// help (2 lines), keeping the cursor visible.
+	visible := height - 4
+	if visible < 3 {
+		visible = 3
+	}
+	start := 0
+	if len(lines) > visible {
+		start = cursorLine - visible/2
+		if start < 0 {
+			start = 0
+		}
+		if start > len(lines)-visible {
+			start = len(lines) - visible
+		}
+	}
+	end := start + visible
+	if end > len(lines) {
+		end = len(lines)
+	}
+
+	var b strings.Builder
+	b.WriteString(pickerBadgeStyle.Render("pito") + " " + pickerTitleStyle.Render("conversations") + "\n\n")
+	if start > 0 {
+		b.WriteString(pickerDimStyle.Render(fmt.Sprintf("  ↑ %d more", start)) + "\n")
+	}
+	for _, line := range lines[start:end] {
+		b.WriteString(line + "\n")
+	}
+	if end < len(lines) {
+		b.WriteString(pickerDimStyle.Render(fmt.Sprintf("  ↓ %d more", len(lines)-end)) + "\n")
+	}
+	help := pickerKeyStyle.Render("j/k") + pickerDimStyle.Render(" move · ") +
+		pickerKeyStyle.Render("enter") + pickerDimStyle.Render(" open · ") +
+		pickerKeyStyle.Render("ctrl-c") + pickerDimStyle.Render(" quit")
+	b.WriteString("\n" + help)
 	return b.String()
 }
 

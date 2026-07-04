@@ -21,8 +21,8 @@ func TestLoadMissingFileUsesDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("missing file must not error, got %v", err)
 	}
-	if cfg.InstanceURL != DefaultInstanceURL {
-		t.Errorf("InstanceURL = %q, want %q", cfg.InstanceURL, DefaultInstanceURL)
+	if cfg.InstanceURL != "" {
+		t.Errorf("InstanceURL = %q — there must be NO default instance", cfg.InstanceURL)
 	}
 	if !cfg.Sounds {
 		t.Error("Sounds default must be true")

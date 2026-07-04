@@ -19,6 +19,8 @@ cover.out
 !.claude/hooks/
 !.claude/settings.json
 
-# Local-only agent/working docs — never checked in from here on.
-# (docs/claude/pito-tui-plan.md predates this rule and stays tracked.)
+# Local-only agent/working docs — never checked in.
 /docs/claude/
+
+# Capture artifacts (scripts/capture.sh)
+/tmp/

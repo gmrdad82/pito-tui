@@ -15,18 +15,20 @@ project follows [Semantic Versioning](https://semver.org/).
   (unknown kinds degrade to a payload dump — never a crash), one prompt
   that sends raw text so the server grammar stays the only grammar, and
   vim-style scrolling that only kicks in while the prompt is empty.
-- **First-run backend setup** — with no config file, the client asks
-  which PITO instance to talk to (enter keeps the default, bare hosts
-  get `https://`) and writes a commented `config.toml` you can edit by
-  hand later. `--instance <url>` switches backends for a single run
-  without touching the file; `--config <path>` swaps the whole file.
-  Cookies and sound caches are keyed per backend, so switching
-  instances never crosses sessions or cues.
-- **TOTP-only login** — `POST /session {otp}`, the same 6-digit code as
-  the web's `/authenticate`. The session cookie persists to
-  `~/.config/pito-tui/cookies.json` (0600, atomic writes) and survives
-  restarts; the 24h idle timeout re-prompts exactly once needed, and a
-  throttled login says so instead of digging deeper.
+- **No default server, by design** — pito is self-hosted, so the
+  client ships pointing at nothing and no install is ever suggested.
+  Unconfigured, it stops gracefully with the way in: `pito-tui config
+  server=<url>` (persists, bare hosts get `https://`) or `--instance
+  <url>` for a single run. `pito-tui config` shows the current server;
+  `pito-tui version` says what you're running. Cookies and sound caches
+  are keyed per backend, so switching instances never crosses sessions
+  or cues.
+- **Login is a chat message** — the server grammar owns authentication:
+  when unauthenticated, the TUI opens with a banner and you send
+  `/login <code>` exactly like the web chatbox. The reply mints the
+  session cookie into `~/.config/pito-tui/cookies.json` (0600, atomic
+  writes), where it survives restarts until the 24h idle timeout — at
+  which point the banner simply comes back.
 - **Live updates over ActionCable** — a minimal in-repo cable client
   (no external cable libraries) subscribing `TuiChannel` on
   `pito:json:conversation:<uuid>`: `event.append` extends its turn,
@@ -47,8 +49,27 @@ project follows [Semantic Versioning](https://semver.org/).
 - **Gated releases** — tag-only (`v*`): a ported verify-ci gate refuses
   to ship unless every workflow on the tagged commit is green (fail
   closed, 30-minute deadline), then goreleaser publishes static
-  linux amd64+arm64 binaries with checksums, a `.deb`, and the
-  `pito-tui-bin` AUR package.
+  linux+darwin amd64+arm64 binaries with checksums, a `.deb`, and a
+  Homebrew formula (`brew install gmrdad82/tap/pito-tui`) that serves
+  macOS and Linux alike. macOS plays sound cues through the built-in
+  `afplay`. The `pito-tui-bin` AUR package follows in a patch release —
+  the AUR had account registration closed upstream at ship time.
 - **Dependabot** — weekly grouped gomod + github-actions PRs, same
   grouping intent as pito; vulnerability alerts and automated security
   fixes enabled.
+- **Structured payload rendering** — lists (`ls vids/games/channels`)
+  as aligned tables with headings, accent `#refs`/`@handles`, and dim
+  usage footers; `/help` as titled key/value sections; detail cards
+  (`show vid/game/channel`) with aligned label/value pairs and icon
+  labels recovered from the web's SVGs. Ported web components: comet
+  post-command spinner, timestamp prefixes, meta lines
+  (`#handle · @channel`), tips, and a `?`-toggled key help. Living
+  trackers: `docs/claude/verbs.md` (verb coverage) and
+  `docs/claude/tiers.md` (component port tiers).
+- **Terminal images (kitty graphics)** — on kitty/ghostty/WezTerm
+  (detected from the environment, dynamic, never required) detail-card
+  thumbnails pin to the top-right of the screen through the session
+  cookie; plain terminals keep the text-only cards.
+- **Capture rig** — `scripts/capture.sh`, the terminal twin of pito's
+  `rake pito:capture` (vhs-driven); scenarios in `captures/*.tape`,
+  artifacts in `tmp/captures/<name>/`.

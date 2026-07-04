@@ -145,7 +145,10 @@ func (t *Transcript) View(width int) string {
 
 func (t *Transcript) renderTurn(turn *Turn) string {
 	var b strings.Builder
-	for _, ev := range turn.Events {
+	for i, ev := range turn.Events {
+		if i > 0 {
+			b.WriteString("\n")
+		}
 		b.WriteString(t.render(ev, t.width))
 	}
 	return b.String()

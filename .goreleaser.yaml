@@ -11,6 +11,7 @@ builds:
       - CGO_ENABLED=0
     goos:
       - linux
+      - darwin
     goarch:
       - amd64
       - arm64
@@ -56,29 +57,54 @@ nfpms:
     recommends:
       - mpv
 
-aurs:
-  - name: pito-tui-bin
+# BENCHED FOR 1.0.0 (2026-07-04): aur.archlinux.org has account registration
+# "temporarily disabled" upstream, so the owner cannot register the SSH key
+# yet. Re-enable this block (uncomment) in the first patch release after the
+# account exists — everything else (key, secret, config) is already in place.
+# aurs:
+#   - name: pito-tui-bin
+#     homepage: https://github.com/gmrdad82/pito-tui
+#     description: "Terminal client for PITO, the self-hosted YouTube channel manager (binary release)"
+#     license: AGPL-3.0-only
+#     maintainers:
+#       - "Catalin Ilinca <gmrdad82 at gmail dot com>"
+#     private_key: "{{ .Env.AUR_SSH_PRIVATE_KEY }}"
+#     git_url: ssh://aur@aur.archlinux.org/pito-tui-bin.git
+#     # Pre-release tags (v1.0.0-rc1) would render an invalid pkgver — skip
+#     # them instead of pushing a broken PKGBUILD.
+#     skip_upload: auto
+#     optdepends:
+#       - "libpulse: sound cues via paplay"
+#       - "mpv: sound cue fallback player"
+#     package: |-
+#       install -Dm755 "./pito-tui" "${pkgdir}/usr/bin/pito-tui"
+#       install -Dm644 "./LICENSE" "${pkgdir}/usr/share/licenses/pito-tui-bin/LICENSE"
+#     commit_author:
+#       name: gmrdad82
+#       email: gmrdad82@gmail.com
+
+# Homebrew tap — one formula serves BOTH macOS and Linux (casks are
+# macOS-only, so the deprecated-but-supported formula path is deliberate).
+# Needs the gmrdad82/homebrew-tap repo and a TAP_GITHUB_TOKEN secret (a
+# fine-grained PAT with contents:write on that one repo — the workflow's
+# own GITHUB_TOKEN cannot push to a sibling repository).
+brews:
+  - name: pito-tui
+    repository:
+      owner: gmrdad82
+      name: homebrew-tap
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    directory: Formula
     homepage: https://github.com/gmrdad82/pito-tui
-    description: "Terminal client for PITO, the self-hosted YouTube channel manager (binary release)"
+    description: "Terminal client for PITO, the self-hosted YouTube channel manager"
     license: AGPL-3.0-only
-    maintainers:
-      - "Catalin Ilinca <gmrdad82 at gmail dot com>"
-    private_key: "{{ .Env.AUR_SSH_PRIVATE_KEY }}"
-    git_url: ssh://aur@aur.archlinux.org/pito-tui-bin.git
-    # Pre-release tags (v1.0.0-rc1) would render an invalid pkgver — skip
-    # them instead of pushing a broken PKGBUILD.
     skip_upload: auto
-    optdepends:
-      - "libpulse: sound cues via paplay"
-      - "mpv: sound cue fallback player"
-    package: |-
-      install -Dm755 "./pito-tui" "${pkgdir}/usr/bin/pito-tui"
-      install -Dm644 "./LICENSE" "${pkgdir}/usr/share/licenses/pito-tui-bin/LICENSE"
-    commit_author:
-      name: gmrdad82
-      email: gmrdad82@gmail.com
+    install: |
+      bin.install "pito-tui"
+    test: |
+      system "#{bin}/pito-tui", "version"
 
 release:
   footer: |
     ---
-    **Install** — Arch/Omarchy: `yay -S pito-tui-bin` · Ubuntu/Debian: download the `.deb` above, then `sudo apt install ./pito-tui_*.deb`
+    **Install** — Arch/Omarchy: `yay -S pito-tui-bin` · macOS/Linux: `brew install gmrdad82/tap/pito-tui` · Ubuntu/Debian: download the `.deb` above, then `sudo apt install ./pito-tui_*.deb`

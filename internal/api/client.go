@@ -85,6 +85,9 @@ func (c *Client) FetchChat(ctx context.Context, uuid string) (*ChatPage, error) 
 	if err := c.checkAuth(resp); err != nil {
 		return nil, err
 	}
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("conversation %s: %w", uuid, ErrNotFound)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("api: GET /chat/%s.json: %s", uuid, resp.Status)
 	}
@@ -169,6 +172,24 @@ func decodeNotice(body []byte) *ServerNotice {
 		return &notice
 	}
 	return nil
+}
+
+// FetchRaw GETs an instance-relative asset (Active Storage proxies and
+// friends) through the session jar and returns the bytes.
+func (c *Client) FetchRaw(ctx context.Context, path string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base.String()+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("api: GET %s: %s", path, resp.Status)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 }
 
 // checkAuth maps 401s and redirects (login pages) to ErrUnauthorized.

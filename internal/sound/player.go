@@ -43,13 +43,15 @@ func (realExec) Run(name string, args ...string) error {
 
 // players in preference order. paplay ships with pulseaudio/pipewire but
 // only decodes mp3 with libsndfile 1.1+ — a nonzero exit demotes to the
-// next candidate at runtime rather than trusting LookPath alone.
+// next candidate at runtime rather than trusting LookPath alone. afplay
+// is macOS's built-in player, so darwin gets sounds with zero installs.
 var players = []struct {
 	bin  string
 	args func(file string) []string
 }{
 	{"paplay", func(f string) []string { return []string{f} }},
 	{"mpv", func(f string) []string { return []string{"--no-video", "--really-quiet", f} }},
+	{"afplay", func(f string) []string { return []string{f} }},
 }
 
 type Player struct {

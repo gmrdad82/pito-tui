@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
@@ -15,6 +16,7 @@ import (
 func TestMain(m *testing.M) {
 	// No ANSI variance across terminals — deterministic output everywhere.
 	lipgloss.SetColorProfile(termenv.Ascii)
+	time.Local = time.UTC
 	os.Exit(m.Run())
 }
 
@@ -26,8 +28,8 @@ func plain() *R { return New(60, WithPlain()) }
 
 func TestEcho(t *testing.T) {
 	out := plain().Event(event("echo", `{"text":"show game 5"}`))
-	if !strings.Contains(out, "> show game 5") {
-		t.Errorf("echo = %q", out)
+	if !strings.Contains(out, "show game 5") || !strings.Contains(out, "┃") {
+		t.Errorf("echo must be a bar block: %q", out)
 	}
 }
 
@@ -116,11 +118,13 @@ func TestMarkdownThroughGlamour(t *testing.T) {
 
 func TestHTMLToText(t *testing.T) {
 	cases := map[string]struct{ in, want string }{
-		"paragraphs":  {"<p>one</p><p>two</p>", "one\ntwo"},
-		"inline join": {"<span>a</span><em>b</em>c", "abc"},
-		"entities":    {"<p>fish &amp; chips</p>", "fish & chips"},
-		"list items":  {"<ul><li>x</li><li>y</li></ul>", "x\ny"},
-		"not html":    {"plain words", "plain words"},
+		"paragraphs": {"<p>one</p><p>two</p>", "one\ntwo"},
+		// Adjacent inline ELEMENTS get a space (kills label/value glue in
+		// detail cards); element→text still joins directly.
+		"inline spacing": {"<span>a</span><em>b</em>c", "a bc"},
+		"entities":       {"<p>fish &amp; chips</p>", "fish & chips"},
+		"list items":     {"<ul><li>x</li><li>y</li></ul>", "x\ny"},
+		"not html":       {"plain words", "plain words"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -135,5 +139,117 @@ func TestFallbackWithInvalidPayloadBytes(t *testing.T) {
 	out := plain().Event(api.Event{ID: 1, TurnID: 1, Kind: "weird", Payload: []byte("not json")})
 	if !strings.Contains(out, "[weird]") || !strings.Contains(out, "not json") {
 		t.Errorf("fallback = %q", out)
+	}
+}
+
+func TestReplyHandleAffordance(t *testing.T) {
+	r := plain()
+	fresh := r.Event(event("system", `{"text":"Linked.","reply_handle":"#a3f","reply_target":"link"}`))
+	if !strings.Contains(fresh, "reply with #a3f") {
+		t.Errorf("reply-capable system event missing the hint: %q", fresh)
+	}
+	consumed := r.Event(event("system", `{"text":"Linked.","reply_handle":"#a3f","reply_consumed":true}`))
+	if strings.Contains(consumed, "#a3f") {
+		t.Errorf("consumed handle must drop the hint: %q", consumed)
+	}
+	enhanced := r.Event(event("enhanced", `{"text":"Views up.","reply_handle":"#b2c"}`))
+	if !strings.Contains(enhanced, "reply with #b2c") {
+		t.Errorf("enhanced event missing the hint: %q", enhanced)
+	}
+}
+
+func TestTableRowsRenderAligned(t *testing.T) {
+	// Real `ls vids` payload shape captured from dev (trimmed).
+	payload := `{
+		"body": "The catalogue holds <span class=\"x\">23</span> vids.",
+		"html": true,
+		"table_rows": [
+			{"cells": [
+				{"text": "#28", "class": "pito-action-shimmer tabular-nums text-right"},
+				{"text": "PITO - Inception : Vlog 006", "class": "text-fg pito-cell-title"}
+			]},
+			{"cells": [
+				{"text": "#9", "class": "pito-action-shimmer tabular-nums text-right"},
+				{"text": "Short one", "class": "text-fg pito-cell-title"}
+			]}
+		]
+	}`
+	out := plain().Event(event("system", payload))
+	if !strings.Contains(out, "The catalogue holds 23 vids.") {
+		t.Errorf("headline missing: %q", out)
+	}
+	if !strings.Contains(out, "#28  PITO - Inception : Vlog 006") {
+		t.Errorf("row missing: %q", out)
+	}
+	// Right-aligned reference column: #9 pads to the width of #28.
+	if !strings.Contains(out, " #9  Short one") {
+		t.Errorf("right alignment broken: %q", out)
+	}
+}
+
+func TestTableHeadingAndFooter(t *testing.T) {
+	// ls channels shape: string-or-object headings, html avatar cell,
+	// dim footer under the table.
+	payload := `{
+		"body": "The channels you keep: 1.", "html": true,
+		"table_heading": ["", "Handle", {"text": "Subs", "class": "text-right"}],
+		"table_rows": [{"cells": [
+			{"html": true, "text": "<img alt=\"x\" src=\"/a.jpg\" />", "class": "pito-cell-avatar"},
+			{"text": "@gmrdad82", "class": "pito-action-shimmer"},
+			{"text": "2.2K", "class": "text-fg-dim text-right tabular-nums"}
+		]}],
+		"list_footer": "sort accepts handle, title, subs."
+	}`
+	out := plain().Event(event("system", payload))
+	for _, want := range []string{"Handle", "Subs", "@gmrdad82", "2.2K", "sort accepts handle"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "<img") {
+		t.Errorf("html cell leaked markup:\n%s", out)
+	}
+}
+
+func TestHelpSections(t *testing.T) {
+	payload := `{
+		"body": "PITO's full command surface.",
+		"sections": [
+			{"title": "COMMANDS", "rows": [
+				{"key": "/help", "value": "Show available commands"},
+				{"key": "/login", "value": "Sign in with a verification code"}
+			]},
+			{"title": "KEYBINDINGS", "rows": [{"key": "d / d d", "value": "Arm / confirm delete"}]}
+		]
+	}`
+	out := plain().Event(event("system", payload))
+	for _, want := range []string{"COMMANDS", "KEYBINDINGS", "/help", "Show available commands", "d / d d"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+	// Keys align: both command rows pad to the same width.
+	if !strings.Contains(out, "/help   Show") {
+		t.Errorf("key column not aligned:\n%s", out)
+	}
+}
+
+func TestHTMLDetailCardStructures(t *testing.T) {
+	// The show-vid card shapes: label/value span grid + aria-labeled icons.
+	grid := `<div class="grid grid-cols-[max-content_1fr] gap-x-2">
+		<span class="text-fg-dim">Title</span><span class="text-fg">Vlog 006</span>
+		<span class="text-fg-dim">ID</span><span class="pito-action-shimmer">#28</span>
+	</div>`
+	out := htmlToText(grid)
+	if !strings.Contains(out, "Title  Vlog 006") || !strings.Contains(out, "ID     #28") {
+		t.Errorf("grid pairs not aligned per line:\n%s", out)
+	}
+
+	icons := `<span><span>2</span><svg aria-label="Likes"><path d="M0"/></svg></span>`
+	if got := htmlToText(icons); !strings.Contains(got, "2 Likes") {
+		t.Errorf("svg aria-label lost: %q", got)
+	}
+	if got := htmlToText(`<img alt="face" src="/x.jpg"/>next`); strings.Contains(got, "face") {
+		t.Errorf("img alt must not leak: %q", got)
 	}
 }

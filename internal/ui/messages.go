@@ -36,3 +36,9 @@ type ResumeFetchedMsg struct {
 	List *api.ResumeList
 	Err  error
 }
+
+// ImageFetchedMsg carries downloaded thumbnail bytes for the pinned
+// image display (kitty graphics; absent on plain terminals).
+type ImageFetchedMsg struct {
+	Data []byte
+}

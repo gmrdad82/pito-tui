@@ -28,15 +28,38 @@ you commit to anything, the showcase lives at
 yay -S pito-tui-bin
 ```
 
-**Ubuntu / Debian** — download `pito-tui_*.deb` from the
-[latest release](https://github.com/gmrdad82/pito-tui/releases/latest), then:
+Updates arrive with your normal `yay -Syu` — the release pipeline
+maintains the AUR package. (Landing in the first patch release: the
+AUR's account registration was closed upstream when 1.0.0 shipped.
+Until then, Arch folks: Homebrew below, the `.deb`, or the tarball.)
+
+**macOS / Linux via Homebrew**
+
+```sh
+brew install gmrdad82/tap/pito-tui
+```
+
+One formula, both platforms (Apple Silicon and Intel included); `brew
+upgrade` keeps it current. On macOS sounds play through the built-in
+`afplay` — nothing extra to install.
+
+**Ubuntu / Debian** — download `pito-tui_*.deb` for your architecture
+from the [latest release](https://github.com/gmrdad82/pito-tui/releases/latest),
+then:
 
 ```sh
 sudo apt install ./pito-tui_*.deb
 ```
 
-**Anything else (linux amd64/arm64)** — grab the static binary from the
-release tarball and put it on your PATH.
+(No apt repository — grab the new `.deb` when a release catches your eye.)
+
+**Anything else** — static binaries for linux and darwin, amd64 and
+arm64, are on every release. Untar and put `pito-tui` on your PATH:
+
+```sh
+tar -xzf pito-tui_*_linux_amd64.tar.gz
+install -Dm755 pito-tui ~/.local/bin/pito-tui
+```
 
 ## Usage
 
@@ -45,33 +68,50 @@ pito-tui                      # conversation picker (recent first)
 pito-tui <conversation-uuid>  # open a conversation directly
 ```
 
-First run asks two things: which PITO instance this client talks to
-(enter keeps the suggested default; a bare host gets `https://` for
-free), and your TOTP code — the same 6-digit code as `/authenticate` on
-the web. The instance answer lands in `~/.config/pito-tui/config.toml`;
-the session cookie lands in `~/.config/pito-tui/cookies.json` and lives
-until it expires.
+pito-tui ships pointing at nothing — it's a client for *your* server,
+and it will never suggest anyone else's. First run tells you exactly
+that and how to fix it:
+
+```
+$ pito-tui
+pito-tui: no PITO instance configured.
+
+Point pito-tui at your install:
+
+  pito-tui config server=https://pito.example.com   (saved to ~/.config/pito-tui/config.toml)
+  pito-tui --instance https://pito.example.com      (this run only)
+```
+
+(A bare host gets `https://` for free.) Logging in then happens where
+everything else does — in the chat: when the banner says so, send
+`/login <code>` with your TOTP, exactly like the web chatbox. The
+server mints the session; the TUI just keeps the cookie
+(`~/.config/pito-tui/cookies.json`) until it expires.
 
 ## Configuration
 
-`~/.config/pito-tui/config.toml` — written on first run, yours to edit:
+`~/.config/pito-tui/config.toml` — created by `pito-tui config
+server=…`, yours to edit, or drive it from the CLI:
 
-```toml
-instance_url = "https://app.pitomd.com"  # your PITO instance
-sounds = true                            # send/receive/notify sounds
+```sh
+pito-tui config                              # show server, sounds, file path
+pito-tui config server=pito.example.com     # set/switch backends (persists)
+pito-tui config sounds=off                   # keys: server, sounds, conversation
+pito-tui version                             # what am I running
 ```
 
-Flags override the file: `--instance <url>`, `--sounds=on|off`,
-`--config <path>` for an alternate config file entirely.
+```toml
+instance_url = "https://pito.example.com"  # your PITO instance
+sounds = true                              # send/receive/notify sounds
+```
 
-Switching backends is a one-liner either way: edit `instance_url`, or
-pass `--instance https://other.example.com` for just this run — a
-one-off `--instance` never rewrites your config. Sessions and sound
-caches are kept per backend, so hopping between a dev and a production
-instance never crosses wires.
+Flags override the file per run: `--instance <url>` (never rewrites the
+config), `--sounds=on|off`, `--config <path>` for an alternate file
+entirely. Sessions and sound caches are kept per backend, so hopping
+between a dev and a production instance never crosses wires.
 
-Sounds play through `paplay` or `mpv` if either is installed, and stay
-silent otherwise.
+Sounds play through `paplay` or `mpv` on Linux and the built-in
+`afplay` on macOS, and stay silent when nothing can play.
 
 ## Keys
 
@@ -95,9 +135,9 @@ go test -race ./...      # full suite
 scripts/coverage.sh      # suite + the 80% coverage floor CI enforces
 ```
 
-Releases are tag-driven (`v*`): CI must be green on the tagged commit, then
-goreleaser publishes static binaries, a `.deb`, and the `pito-tui-bin` AUR
-package.
+Releases are tag-driven (`v*`): CI must be green on the tagged commit,
+then goreleaser publishes static binaries (linux+darwin, amd64+arm64), a
+`.deb`, the `pito-tui-bin` AUR package, and the Homebrew formula.
 
 ## License
 

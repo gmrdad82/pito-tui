@@ -22,10 +22,11 @@ import (
 type R struct {
 	width int
 	plain bool
+	style string
 	glam  *glamour.TermRenderer
 
-	echoStyle    lipgloss.Style
-	systemStyle  lipgloss.Style
+	echoBar      lipgloss.Style
+	systemBar    lipgloss.Style
 	enhancedBar  lipgloss.Style
 	errorStyle   lipgloss.Style
 	dimStyle     lipgloss.Style
@@ -41,28 +42,50 @@ func WithPlain() Option {
 	return func(r *R) { r.plain = true }
 }
 
+// WithStyle picks the glamour style ("dark"/"light"). The caller resolves
+// it ONCE before Bubble Tea takes the terminal — glamour's auto style
+// queries the background over stdin, which deadlocks against tea's input
+// reader (the "loading…" freeze).
+func WithStyle(style string) Option {
+	return func(r *R) { r.style = style }
+}
+
 // New builds a renderer for the given content width.
 func New(width int, opts ...Option) *R {
 	if width < 20 {
 		width = 20
 	}
+	bar := func(color lipgloss.Color) lipgloss.Style {
+		return lipgloss.NewStyle().
+			Border(lipgloss.ThickBorder(), false, false, false, true).
+			BorderForeground(color).
+			PaddingLeft(1).Width(width - 2)
+	}
 	r := &R{
-		width:        width,
-		echoStyle:    lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Width(width),
-		systemStyle:  lipgloss.NewStyle().Width(width),
-		enhancedBar:  lipgloss.NewStyle().Border(lipgloss.ThickBorder(), false, false, false, true).BorderForeground(lipgloss.Color("5")).PaddingLeft(1).Width(width),
-		errorStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Width(width),
-		dimStyle:     lipgloss.NewStyle().Faint(true).Width(width),
-		confirmStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("3")).Width(width),
+		width: width,
+		// Mirrors the web's block language: every message is a left-bar
+		// block — echo in the user accent, replies in their own colors —
+		// with the timestamp inside.
+		echoBar:      bar(ColorAccent),
+		systemBar:    bar(ColorFaint),
+		enhancedBar:  bar(ColorPrimary),
+		errorStyle:   bar(ColorErr).Foreground(ColorErr),
+		dimStyle:     lipgloss.NewStyle().Foreground(ColorDim).Width(width),
+		confirmStyle: bar(ColorWarn),
 	}
 	for _, opt := range opts {
 		opt(r)
 	}
 	if !r.plain {
+		style := r.style
+		if style == "" {
+			style = "dark"
+		}
 		// Best-effort: glamour failure downgrades to plain text forever
-		// rather than erroring per event.
+		// rather than erroring per event. NEVER WithAutoStyle here — it
+		// queries the terminal on stdin and deadlocks under Bubble Tea.
 		if g, err := glamour.NewTermRenderer(
-			glamour.WithAutoStyle(),
+			glamour.WithStandardStyle(style),
 			glamour.WithWordWrap(width),
 		); err == nil {
 			r.glam = g
@@ -77,9 +100,9 @@ func (r *R) Event(ev api.Event) string {
 	case api.KindEcho:
 		return r.echo(ev)
 	case api.KindSystem, api.KindSystemFollowUp:
-		return r.systemStyle.Render(r.bodyText(ev)) + "\n"
+		return r.messageBlock(r.systemBar, ev)
 	case api.KindEnhanced, api.KindEnhancedFollowUp:
-		return r.enhancedBar.Render(r.bodyText(ev)) + "\n"
+		return r.messageBlock(r.enhancedBar, ev)
 	case api.KindError:
 		return r.errorEvent(ev)
 	case api.KindThinking:
@@ -91,6 +114,34 @@ func (r *R) Event(ev api.Event) string {
 	}
 }
 
+// stamp is the dim HH:MM prefix the web shows inside each block.
+func (r *R) stamp(ev api.Event) string {
+	if ev.CreatedAt.IsZero() {
+		return ""
+	}
+	return r.dim(ev.CreatedAt.Local().Format("15:04")) + " "
+}
+
+// dim styles inline fragments without the full-width dimStyle block.
+func (r *R) dim(text string) string {
+	return lipgloss.NewStyle().Foreground(ColorDim).Render(text)
+}
+
+// accent styles inline fragments in the user-accent color.
+func (r *R) accent(text string) string {
+	return lipgloss.NewStyle().Foreground(ColorAccent).Render(text)
+}
+
+// messageBlock renders a system/enhanced-shaped event as one bar block:
+// timestamp + body, with the reply affordance inside the block like the web.
+func (r *R) messageBlock(bar lipgloss.Style, ev api.Event) string {
+	content := r.stamp(ev) + r.bodyText(ev)
+	if hint := r.replyHintFor(ev); hint != "" {
+		content += "\n" + hint
+	}
+	return bar.Render(content) + "\n"
+}
+
 // Notice renders a transient dim line (web-only verb replies, local hints).
 func (r *R) Notice(text string) string {
 	return r.dimStyle.Render("· "+text) + "\n"
@@ -100,6 +151,74 @@ type textPayload struct {
 	Text string `json:"text"`
 	Body string `json:"body"`
 	HTML bool   `json:"html"`
+	// Reply affordance (api.md): reply-capable events are stamped with a
+	// reply_handle (#xyz); once a reply consumes it, drop the hint.
+	ReplyHandle   string `json:"reply_handle"`
+	ReplyConsumed bool   `json:"reply_consumed"`
+	Channel       string `json:"channel"`
+	// Structured list data (ls vids / ls games …): rows of cells with
+	// CSS-class hints the web styles with; the TUI aligns and colors.
+	TableRows []tableRow `json:"table_rows"`
+	// TableHeading entries are strings OR {text, class} objects.
+	TableHeading []tableCell `json:"table_heading"`
+	// ListFooter is the dim usage hint under a list.
+	ListFooter string `json:"list_footer"`
+	// Sections are /help-style titled key/value groups.
+	Sections []section `json:"sections"`
+}
+
+type section struct {
+	Title string `json:"title"`
+	Rows  []struct {
+		Key   string `json:"key"`
+		Value string `json:"value"`
+	} `json:"rows"`
+}
+
+type tableRow struct {
+	Cells []tableCell `json:"cells"`
+}
+
+type tableCell struct {
+	Text  string `json:"text"`
+	Class string `json:"class"`
+	HTML  bool   `json:"html"`
+}
+
+// UnmarshalJSON lets a cell be a bare string (heading shorthand) or the
+// full {text, class} object.
+func (c *tableCell) UnmarshalJSON(raw []byte) error {
+	var plain string
+	if json.Unmarshal(raw, &plain) == nil {
+		c.Text = plain
+		return nil
+	}
+	type alias tableCell
+	var full alias
+	if err := json.Unmarshal(raw, &full); err != nil {
+		return err
+	}
+	*c = tableCell(full)
+	return nil
+}
+
+// replyHintFor renders the meta line (event/meta_line's cousin):
+// "#handle" affordance in accent, "@channel" scope in cyan. Consumed
+// handles drop the reply part.
+func (r *R) replyHintFor(ev api.Event) string {
+	var p textPayload
+	if json.Unmarshal(ev.Payload, &p) != nil {
+		return ""
+	}
+	parts := []string{}
+	if p.ReplyHandle != "" && !p.ReplyConsumed {
+		parts = append(parts, r.dim("reply with ")+r.accent(p.ReplyHandle)+r.dim(" …"))
+	}
+	if p.Channel != "" {
+		cyan := lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Render("@" + strings.TrimPrefix(p.Channel, "@"))
+		parts = append(parts, cyan)
+	}
+	return strings.Join(parts, r.dim(" · "))
 }
 
 // bodyText extracts renderable text from system/enhanced-shaped payloads:
@@ -110,14 +229,117 @@ func (r *R) bodyText(ev api.Event) string {
 	if err := json.Unmarshal(ev.Payload, &p); err != nil {
 		return strings.TrimSpace(string(ev.Payload))
 	}
+	headline := ""
 	switch {
 	case p.Body != "" && p.HTML:
-		return htmlToText(p.Body)
+		headline = htmlToText(p.Body)
 	case p.Body != "":
-		return r.markdown(p.Body)
+		headline = r.markdown(p.Body)
 	default:
-		return r.markdown(p.Text)
+		headline = r.markdown(p.Text)
 	}
+	parts := []string{}
+	if headline != "" {
+		parts = append(parts, headline)
+	}
+	if len(p.Sections) > 0 {
+		parts = append(parts, r.sections(p.Sections))
+	}
+	if len(p.TableRows) > 0 {
+		parts = append(parts, r.table(p.TableHeading, p.TableRows))
+	}
+	if p.ListFooter != "" {
+		parts = append(parts, r.dim(p.ListFooter))
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// sections renders /help-style titled key/value groups: purple section
+// titles, accent keys, aligned values.
+func (r *R) sections(groups []section) string {
+	titleStyle := lipgloss.NewStyle().Foreground(ColorPrimary).Bold(true)
+	var b strings.Builder
+	for gi, group := range groups {
+		if gi > 0 {
+			b.WriteString("\n\n")
+		}
+		if group.Title != "" {
+			b.WriteString(titleStyle.Render(group.Title) + "\n")
+		}
+		keyWidth := 0
+		for _, row := range group.Rows {
+			if w := lipgloss.Width(row.Key); w > keyWidth {
+				keyWidth = w
+			}
+		}
+		for ri, row := range group.Rows {
+			if ri > 0 {
+				b.WriteString("\n")
+			}
+			pad := keyWidth - lipgloss.Width(row.Key)
+			b.WriteString(r.accent(row.Key) + strings.Repeat(" ", pad) + "  " + row.Value)
+		}
+	}
+	return b.String()
+}
+
+// table renders structured rows as aligned columns: dim headings,
+// right-aligned where the web says so (text-right), actionable references
+// (#28 …) in the accent color — the closest thing to the web's clickable
+// shimmer. HTML cells (avatars) flatten to their text content.
+func (r *R) table(heading []tableCell, rows []tableRow) string {
+	all := rows
+	if len(heading) > 0 {
+		all = append([]tableRow{{Cells: heading}}, rows...)
+	}
+	columns := 0
+	for _, row := range all {
+		if len(row.Cells) > columns {
+			columns = len(row.Cells)
+		}
+	}
+	cellText := func(cell tableCell) string {
+		if cell.HTML {
+			return htmlToText(cell.Text)
+		}
+		return cell.Text
+	}
+	widths := make([]int, columns)
+	for _, row := range all {
+		for i, cell := range row.Cells {
+			if w := lipgloss.Width(cellText(cell)); w > widths[i] {
+				widths[i] = w
+			}
+		}
+	}
+	var b strings.Builder
+	for ri, row := range all {
+		if ri > 0 {
+			b.WriteString("\n")
+		}
+		isHeading := len(heading) > 0 && ri == 0
+		for i, cell := range row.Cells {
+			if i > 0 {
+				b.WriteString("  ")
+			}
+			text := cellText(cell)
+			pad := widths[i] - lipgloss.Width(text)
+			switch {
+			case isHeading:
+				text = r.dim(text)
+			case strings.Contains(cell.Class, "action"):
+				text = r.accent(text)
+			}
+			if strings.Contains(cell.Class, "text-right") {
+				b.WriteString(strings.Repeat(" ", pad) + text)
+			} else if i < len(row.Cells)-1 {
+				b.WriteString(text + strings.Repeat(" ", pad))
+			} else {
+				b.WriteString(text) // last column: no trailing padding
+			}
+		}
+	}
+	return b.String()
 }
 
 func (r *R) markdown(text string) string {
@@ -136,7 +358,7 @@ func (r *R) markdown(text string) string {
 func (r *R) echo(ev api.Event) string {
 	var p textPayload
 	_ = json.Unmarshal(ev.Payload, &p)
-	return r.echoStyle.Render("> "+p.Text) + "\n"
+	return r.echoBar.Render(r.stamp(ev)+p.Text) + "\n"
 }
 
 func (r *R) errorEvent(ev api.Event) string {
@@ -148,11 +370,11 @@ func (r *R) errorEvent(ev api.Event) string {
 	if p.Text == "" {
 		return r.fallback(ev)
 	}
-	out := r.errorStyle.Render("✗ " + p.Text)
+	content := r.stamp(ev) + "✗ " + p.Text
 	if p.Detail != "" {
-		out += "\n" + r.dimStyle.Render("  "+p.Detail)
+		content += "\n" + r.dim(p.Detail)
 	}
-	return out + "\n"
+	return r.errorStyle.Render(content) + "\n"
 }
 
 func (r *R) thinking(ev api.Event) string {
@@ -162,10 +384,10 @@ func (r *R) thinking(ev api.Event) string {
 	}
 	_ = json.Unmarshal(ev.Payload, &p)
 	if p.Resolved && p.ElapsedSeconds != nil {
-		return r.dimStyle.Render(fmt.Sprintf("thought for %.1fs", *p.ElapsedSeconds)) + "\n"
+		return r.dimStyle.Render(fmt.Sprintf(">_< thought for %.1fs", *p.ElapsedSeconds)) + "\n"
 	}
 	if p.Resolved {
-		return r.dimStyle.Render("thought about it") + "\n"
+		return r.dimStyle.Render(">_< thought about it") + "\n"
 	}
 	return r.dimStyle.Render("thinking…") + "\n"
 }
@@ -186,11 +408,11 @@ func (r *R) confirmation(ev api.Event) string {
 	if p.Resolved && p.OutcomeText != "" {
 		body = p.OutcomeText
 	}
-	out := r.confirmStyle.Render("? " + body)
+	content := r.stamp(ev) + lipgloss.NewStyle().Foreground(ColorWarn).Bold(true).Render("? ") + body
 	if !p.Resolved && p.ReplyHandle != "" {
-		out += "\n" + r.dimStyle.Render("  reply with "+p.ReplyHandle+" …")
+		content += "\n" + r.dim("reply with ") + r.accent(p.ReplyHandle) + r.dim(" …")
 	}
-	return out + "\n"
+	return r.confirmStyle.Render(content) + "\n"
 }
 
 // fallback renders any unknown kind: the kind label plus its payload,
