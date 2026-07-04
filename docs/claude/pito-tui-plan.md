@@ -24,8 +24,9 @@ POST /chat      (JSON: input, uuid, viewport_width) ->
                  { error: "web-only", verb }  web-only verbs (/themes, /resume,
                                               /new, /connect, bare show game/vid,
                                               /games import) -> TUI dim notice
-Cable: subscribe channel "TuiChannel" with { uuid }; session-authenticated
-  (reject guests). Stream "pito:json:conversation:<uuid>" messages:
+Cable: subscribe channel "Pito::JsonChannel" with { uuid } (bare uuid —
+  access gated by auth, not signed tokens); guests rejected. Stream
+  "pito:json:conversation:<uuid>" messages:
   { "type": "event.append" | "event.replace",
     "event": { "id", "turn_id", "kind", "payload", "created_at" } }
 Event kinds (Event::KINDS): echo system error enhanced thinking confirmation
@@ -47,80 +48,82 @@ not send a Secure cookie over http://).
       SSH key added to it; GitHub secrets: AUR_SSH_PRIVATE_KEY, SLACK_WEBHOOK
 - [x] Repo existed empty on GitHub → `gh repo edit` set description/topics
       pito-style; AGPL LICENSE, README added
-- [ ] Port shared conventions FROM gmrdad82/pito via gh (fetch files, adapt):
+- [x] Port shared conventions FROM gmrdad82/pito via gh (fetch files, adapt):
       `.github/actions/slack-notify` composite action copied verbatim
       (it is language-agnostic: job status + failing-step lookup + Deadpan
       Butler voice, `actions: read` permission required in callers)
-- [ ] Repo scaffold: go.mod (module github.com/gmrdad82/pito-tui),
-      .github/workflows/{ci.yml,release.yml} per Phases 6–7
+- [x] Repo scaffold: go.mod (module github.com/gmrdad82/pito-tui),
+      .github/workflows/{ci.yml,release.yml} per Phases 6–7; Dependabot
+      (gomod + github-actions weekly, pito grouping) + security alerts
+      enabled via gh
 
 ## Phase 1 — Config + auth
-- [ ] Config file ~/.config/pito-tui/config.toml: instance_url (default
+- [x] Config file ~/.config/pito-tui/config.toml: instance_url (default
       https://app.pitomd.com), sounds on/off; flags override file
-- [ ] Login flow: prompt for the TOTP code only (pito is TOTP-only, no
+- [x] Login flow: prompt for the TOTP code only (pito is TOTP-only, no
       email/password) → POST /session (JSON: otp) → persist cookie jar to
       ~/.config/pito-tui/cookies.json (0600); reuse jar on start, re-login
       only on 401; throttled → friendly stop, never retry-loop
-- [ ] Tests: config precedence, jar round-trip, 401→relogin path (httptest)
+- [x] Tests: config precedence, jar round-trip, 401→relogin path (httptest)
 
 ## Phase 2 — HTTP client
-- [ ] GET /chat/:uuid.json → decode conversation + events (initial paint
+- [x] GET /chat/:uuid.json → decode conversation + events (initial paint
       and reconnect re-sync); POST /chat with input text
-- [ ] Typed event model matching the contract; unknown `kind` decodes into
+- [x] Typed event model matching the contract; unknown `kind` decodes into
       a fallback (render as raw payload, never crash)
-- [ ] Tests: golden JSON fixtures for each known kind + unknown-kind fallback
+- [x] Tests: golden JSON fixtures for each known kind + unknown-kind fallback
 
 ## Phase 3 — ActionCable client (minimal, in-repo)
-- [ ] Implement the ActionCable wire protocol over gorilla/websocket:
+- [x] Implement the ActionCable wire protocol over gorilla/websocket:
       welcome, subscribe (identifier for the TUI channel with conversation
       uuid), confirm_subscription, ping tracking, message dispatch. Send
       the session cookie on the ws handshake. No external cable libs.
-- [ ] Reconnect with exponential backoff; on reconnect: refetch scrollback
+- [x] Reconnect with exponential backoff; on reconnect: refetch scrollback
       JSON and diff-append (cable has no replay — HTTP is the re-sync)
-- [ ] Tests: protocol framing against a scripted httptest websocket server;
+- [x] Tests: protocol framing against a scripted httptest websocket server;
       reconnect triggers re-sync
 
 ## Phase 4 — Bubble Tea UI
-- [ ] Model: viewport (scrollback) + textinput (prompt) + status bar
+- [x] Model: viewport (scrollback) + textinput (prompt) + status bar
       (connection state, conversation name, instance host)
-- [ ] Cable messages → tea.Msg; event.append opens/extends its turn block,
+- [x] Cable messages → tea.Msg; event.append opens/extends its turn block,
       event.replace rewrites in place (mirrors the web turn containers)
-- [ ] Per-kind renderers with lipgloss (start: system, enhanced; glamour
+- [x] Per-kind renderers with lipgloss (start: system, enhanced; glamour
       for markdown-ish payload text; fallback renderer for the rest)
-- [ ] Pending turn → bubbles spinner until first event of the turn arrives
-- [ ] Keybindings (keyboard-only user): vim-style scroll (j/k, ctrl-d/u,
+- [x] Pending turn → bubbles spinner until first event of the turn arrives
+- [x] Keybindings (keyboard-only user): vim-style scroll (j/k, ctrl-d/u,
       g/G), enter send, ctrl-c quit; slash commands pass through as text
-- [ ] Tests: update-loop unit tests + teatest golden-frame tests for the
+- [x] Tests: update-loop unit tests + teatest golden-frame tests for the
       main states (empty, streaming, replaced event, disconnected banner)
 
 ## Phase 5 — Sounds (optional, graceful)
-- [ ] On first run fetch /sounds/{send,receive,notify}.mp3 from the
+- [x] On first run fetch /sounds/{send,receive,notify}.mp3 from the
       instance → cache in ~/.cache/pito-tui/; play via first available of
       `paplay`/`mpv --no-video`; silently disable if neither exists
-- [ ] Tests: player selection + cache logic (exec faked)
+- [x] Tests: player selection + cache logic (exec faked)
 
 ## Phase 6 — CI (ci.yml, mirrors pito's structure adapted to Go)
-- [ ] Jobs: `test` (gofmt check, go vet, staticcheck,
+- [x] Jobs: `test` (gofmt check, go vet, staticcheck,
       `go test -race -cover ./...` with 80% floor), `lint-shell`
       (shellcheck for any repo scripts), `vuln` (govulncheck — the Go
       analog of pito's bundler-audit job)
-- [ ] EVERY job ends with the ported slack-notify step, pito-style:
+- [x] EVERY job ends with the ported slack-notify step, pito-style:
       `if: always()`, `continue-on-error: true`, SLACK_WEBHOOK secret,
       `permissions: actions: read` + `contents: read`
-- [ ] Triggers: push, pull_request, and the weekly cron pito uses
+- [x] Triggers: push, pull_request, and the weekly cron pito uses
       (`0 12 * * 1`) as a bit-rot canary
-- [ ] Matrix: linux amd64 + arm64 build check
+- [x] Matrix: linux amd64 + arm64 build check
 
 ## Phase 7 — Release: gated, GitHub + deb + AUR (release.yml, on tag)
-- [ ] Port pito's `verify-ci` gate job: query the Actions API for all
+- [x] Port pito's `verify-ci` gate job: query the Actions API for all
       workflow runs on the tag's head SHA; proceed ONLY if every non-release
       workflow is green (no builds on red CI, verbatim pito behavior)
-- [ ] `release` job `needs: verify-ci`: goreleaser → linux amd64+arm64
+- [x] `release` job `needs: verify-ci`: goreleaser → linux amd64+arm64
       static binaries, checksums, GitHub Release; nfpm → pito-tui_*.deb
       attached (Ubuntu: download → `apt install ./pito-tui_*.deb`)
-- [ ] goreleaser AUR publisher → `pito-tui-bin` pushed to AUR via
+- [x] goreleaser AUR publisher → `pito-tui-bin` pushed to AUR via
       AUR_SSH_PRIVATE_KEY (then `yay -S pito-tui-bin`)
-- [ ] Final slack-notify with pito's headline/extra pattern: version
+- [x] Final slack-notify with pito's headline/extra pattern: version
       published headline + `yay -S pito-tui-bin` snippet as the extra line;
       failure notifications name the broken step
 - [ ] **HANDED TO YOU:** first ssh push initializes the AUR package;

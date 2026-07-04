@@ -261,7 +261,7 @@ func (m Model) onPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.conv.UUID = row.uuid
-		m.conv.Name = row.title
+		m.conv.DisplayName = row.title
 		return m, m.fetchChatCmd(row.uuid, false)
 	}
 	return m, nil
@@ -278,11 +278,11 @@ func (m Model) onChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.sounds.Send()
 		return m, m.sendCmd(m.conv.UUID, text, m.contentWidth())
 	case tea.KeyCtrlD:
-		m.vp.HalfViewDown()
+		m.vp.HalfPageDown()
 		m.follow = m.vp.AtBottom()
 		return m, nil
 	case tea.KeyCtrlU:
-		m.vp.HalfViewUp()
+		m.vp.HalfPageUp()
 		m.follow = m.vp.AtBottom()
 		return m, nil
 	}
@@ -337,6 +337,19 @@ func (m Model) onChatFetched(msg ChatFetchedMsg) (tea.Model, tea.Cmd) {
 	}
 	m.conv = msg.Page.Conversation
 	m.transcript.Merge(msg.Page.Events)
+	// A fetched page can carry the first events of turns still marked
+	// pending (created-conversation paint, reconnect re-sync) — the cable
+	// isn't the only way a turn shows up.
+	cleared := false
+	for turnID := range m.pending {
+		if m.transcript.HasTurn(turnID) {
+			delete(m.pending, turnID)
+			cleared = true
+		}
+	}
+	if cleared {
+		m.sounds.Receive()
+	}
 	m.refreshViewport()
 	if !m.cableStarted && m.conv.UUID != "" && m.connect != nil {
 		m.connect(m.conv.UUID)
@@ -357,19 +370,20 @@ func (m Model) onSendResult(msg SendResultMsg) (tea.Model, tea.Cmd) {
 	}
 	res := msg.Res
 	switch {
-	case res.WebOnly != nil:
-		verb := res.WebOnly.Verb
-		if verb == "" {
-			verb = "that command"
-		}
-		m.pushNotice(verb + " is web-only — open the web app for it")
+	case res.Notice != nil:
+		// The server said no in its own voice — show it verbatim.
+		m.pushNotice(res.Notice.Text())
 		m.refreshViewport()
 		return m, nil
 	case res.CreatedUUID != "":
-		// First send of a fresh conversation: adopt the uuid, then paint
-		// and subscribe exactly like a picked conversation.
+		// First send of a fresh conversation: adopt the uuid, mark its
+		// turn pending, then paint and subscribe exactly like a picked
+		// conversation.
 		m.conv.UUID = res.CreatedUUID
-		return m, m.fetchChatCmd(res.CreatedUUID, false)
+		if res.TurnID != 0 {
+			m.pending[res.TurnID] = true
+		}
+		return m, tea.Batch(m.fetchChatCmd(res.CreatedUUID, false), m.spin.Tick)
 	default:
 		m.pending[res.TurnID] = true
 		m.refreshViewport()
@@ -461,7 +475,7 @@ func (m Model) statusLine() string {
 	if !m.cableStarted {
 		state = "not connected"
 	}
-	name := m.conv.Name
+	name := m.conv.Label()
 	if name == "" {
 		if m.conv.UUID == "" {
 			name = "new conversation"

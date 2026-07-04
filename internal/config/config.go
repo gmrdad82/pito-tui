@@ -4,8 +4,10 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -46,6 +48,63 @@ func DefaultPath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, "config.toml"), nil
+}
+
+// Exists reports whether a config file is present at path (first-run
+// detection — a missing file triggers the interactive instance prompt).
+func Exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// Save writes a commented config file so the owner can edit the backend by
+// hand later — configuring outside the UI is a supported path, not a hack.
+func Save(path string, cfg Config) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("config: creating %s: %w", dir, err)
+	}
+	body := fmt.Sprintf(`# pito-tui configuration.
+
+# The PITO backend this client talks to. Change it here, or per-run with
+# --instance <url>.
+instance_url = %q
+
+# Send/receive/notify sound cues. --sounds=on|off overrides per run.
+sounds = %v
+
+# Optional: a default conversation uuid to open directly (skips the
+# picker). The positional CLI argument wins over it.
+# conversation = ""
+`, cfg.InstanceURL, cfg.Sounds)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(body), 0o600); err != nil {
+		return fmt.Errorf("config: writing %s: %w", path, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("config: writing %s: %w", path, err)
+	}
+	return nil
+}
+
+// NormalizeInstanceURL turns first-run input into a usable base URL: bare
+// hosts get https://, trailing slashes go away, and anything unparseable
+// errors instead of surfacing later as a cryptic dial failure.
+func NormalizeInstanceURL(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", fmt.Errorf("config: empty instance URL")
+	}
+	if !strings.Contains(raw, "://") {
+		raw = "https://" + raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return "", fmt.Errorf("config: %q is not a usable instance URL (want e.g. https://pito.example.com)", raw)
+	}
+	u.Path = strings.TrimRight(u.Path, "/")
+	u.RawQuery, u.Fragment = "", ""
+	return u.String(), nil
 }
 
 // Load reads the TOML file at path over the built-in defaults. A missing

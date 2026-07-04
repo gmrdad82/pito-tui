@@ -1,0 +1,211 @@
+name: CI
+
+# Go CI. Runs the full test suite (race detector + 80% coverage floor),
+# gofmt/vet/staticcheck, a linux amd64+arm64 cross-compile check,
+# shellcheck over the repo's scripts, and govulncheck against the locked
+# module set.
+#
+# Commit-message guard: include the literal token `[skipci]` (lowercase, no
+# space — distinct from GitHub's built-in `[skip ci]`) in the commit message
+# OR pull-request title to skip every job in this workflow. Same convention
+# as gmrdad82/pito.
+#
+# Trigger model: fire ONLY when something the Go suite can break has
+# changed. Files NOT listed (README.md, CHANGELOG.md, LICENSE, docs/**)
+# cannot affect a CI run and are intentionally excluded so CI stays quiet
+# on docs-only commits.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      # --- Application code -------------------------------------------------
+      # `cmd/**` + `internal/**` — every package in the binary. Core suite input.
+      - "cmd/**"
+      - "internal/**"
+      # `scripts/**` — coverage.sh runs inside the `test` job and shellcheck
+      # lints it; a change to either can break the workflow.
+      - "scripts/**"
+      # --- Build / dependency manifests -------------------------------------
+      # `go.mod` + `go.sum` — module set drift can break the build, the
+      # suite, and govulncheck.
+      - "go.mod"
+      - "go.sum"
+      # `mise.toml` — the local Go pin; setup-go reads go.mod but a
+      # divergent bump here should still re-validate the suite.
+      - "mise.toml"
+      # --- Self-reference ---------------------------------------------------
+      # Editing the workflow itself must re-run it so changes are validated
+      # before they go quiet.
+      - ".github/workflows/ci.yml"
+      # Composite actions the workflow invokes (the Slack notifier). Not
+      # under `workflows/`, so it needs its own entry or edits go quiet.
+      - ".github/actions/**"
+  push:
+    branches: [main]
+    paths:
+      - "cmd/**"
+      - "internal/**"
+      - "scripts/**"
+      - "go.mod"
+      - "go.sum"
+      - "mise.toml"
+      - ".github/workflows/ci.yml"
+      - ".github/actions/**"
+  schedule:
+    # Weekly govulncheck run. Mondays 12:00 UTC — same bit-rot canary
+    # cadence as pito's bundler-audit job: a newly-disclosed advisory
+    # raises a red weekly run even when nothing in the tree changes.
+    - cron: "0 12 * * 1"
+
+permissions:
+  contents: read
+  # `actions: read` lets the Slack notifier query this run's job/step
+  # conclusions to name the step that failed.
+  actions: read
+
+jobs:
+  test:
+    if: |
+      github.event_name != 'schedule' &&
+      !contains(github.event.head_commit.message, '[skipci]') &&
+      !contains(github.event.pull_request.title, '[skipci]')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check formatting (gofmt)
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt needed on:" && echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Static analysis (staticcheck)
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          staticcheck ./...
+
+      - name: Run tests with race detector and coverage floor
+        run: scripts/coverage.sh
+
+      # The `test` job is the single green "heartbeat": it pings on success
+      # too (one all-clear per push). Every OTHER notify in this workflow is
+      # failure-only, so green pushes produce exactly ONE Slack message.
+      - name: Notify Slack
+        if: always()
+        continue-on-error: true
+        uses: ./.github/actions/slack-notify
+        with:
+          status: ${{ job.status }}
+          webhook: ${{ secrets.SLACK_WEBHOOK }}
+          github-token: ${{ github.token }}
+
+  build:
+    # Cross-compile check for both release architectures. Static binaries
+    # (CGO off) — if it links here, goreleaser can ship it.
+    if: |
+      github.event_name != 'schedule' &&
+      !contains(github.event.head_commit.message, '[skipci]') &&
+      !contains(github.event.pull_request.title, '[skipci]')
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goarch: [amd64, arm64]
+    env:
+      CGO_ENABLED: "0"
+      GOOS: linux
+      GOARCH: ${{ matrix.goarch }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build (linux/${{ matrix.goarch }})
+        run: go build -trimpath ./...
+
+      - name: Notify Slack
+        if: failure()
+        continue-on-error: true
+        uses: ./.github/actions/slack-notify
+        with:
+          status: ${{ job.status }}
+          webhook: ${{ secrets.SLACK_WEBHOOK }}
+          github-token: ${{ github.token }}
+
+  lint-shell:
+    # shellcheck is preinstalled on ubuntu-latest. Runs on pull_request /
+    # push, not the weekly schedule.
+    if: |
+      github.event_name != 'schedule' &&
+      !contains(github.event.head_commit.message, '[skipci]') &&
+      !contains(github.event.pull_request.title, '[skipci]')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: shellcheck + sh -n
+        run: |
+          for f in scripts/*.sh; do
+            echo "== $f =="
+            bash -n "$f"
+            shellcheck -S warning "$f"
+          done
+
+      - name: Notify Slack
+        if: failure()
+        continue-on-error: true
+        uses: ./.github/actions/slack-notify
+        with:
+          status: ${{ job.status }}
+          webhook: ${{ secrets.SLACK_WEBHOOK }}
+          github-token: ${{ github.token }}
+
+  vuln:
+    # Known-vulnerability scan over the locked module set — the Go analog
+    # of pito's bundler-audit job. Runs on push/PR AND as the weekly
+    # schedule-only canary.
+    if: |
+      !contains(github.event.head_commit.message, '[skipci]') &&
+      !contains(github.event.pull_request.title, '[skipci]')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Scan for known vulnerabilities (govulncheck)
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+      - name: Notify Slack
+        if: failure()
+        continue-on-error: true
+        uses: ./.github/actions/slack-notify
+        with:
+          status: ${{ job.status }}
+          webhook: ${{ secrets.SLACK_WEBHOOK }}
+          github-token: ${{ github.token }}

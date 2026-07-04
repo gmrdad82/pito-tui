@@ -23,10 +23,10 @@ type pickerRow struct {
 func pickerRows(list *api.ResumeList) []pickerRow {
 	rows := []pickerRow{{isNew: true, title: "start a new conversation"}}
 	for _, r := range list.Recent {
-		rows = append(rows, pickerRow{uuid: r.UUID, title: r.Title, last: r.LastActivityAt, section: "recent"})
+		rows = append(rows, pickerRow{uuid: r.UUID, title: r.Label(), last: r.LastActivityAt, section: "recent"})
 	}
 	for _, r := range list.Older {
-		rows = append(rows, pickerRow{uuid: r.UUID, title: r.Title, last: r.LastActivityAt, section: "older"})
+		rows = append(rows, pickerRow{uuid: r.UUID, title: r.Label(), last: r.LastActivityAt, section: "older"})
 	}
 	return rows
 }

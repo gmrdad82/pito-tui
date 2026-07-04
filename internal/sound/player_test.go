@@ -214,3 +214,15 @@ func TestNilPlayerIsSafe(t *testing.T) {
 	var p *Player
 	p.play(CueSend) // must not panic
 }
+
+func TestCacheIsNamespacedPerBackend(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	a := New("https://one.example.com", true, withExec(&fakeExec{}))
+	b := New("https://two.example.com:8443", true, withExec(&fakeExec{}))
+	if a.cacheDir == b.cacheDir {
+		t.Errorf("cache dirs collide across backends: %q", a.cacheDir)
+	}
+	if !strings.HasSuffix(a.cacheDir, filepath.Join("pito-tui", "one.example.com")) {
+		t.Errorf("cacheDir = %q, want host-suffixed", a.cacheDir)
+	}
+}

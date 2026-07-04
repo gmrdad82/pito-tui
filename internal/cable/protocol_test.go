@@ -4,7 +4,7 @@ import "testing"
 
 func TestIdentifierExactShape(t *testing.T) {
 	got := Identifier("3f1c")
-	want := `{"channel":"TuiChannel","uuid":"3f1c"}`
+	want := `{"channel":"Pito::JsonChannel","uuid":"3f1c"}`
 	if got != want {
 		t.Errorf("Identifier = %s, want %s", got, want)
 	}

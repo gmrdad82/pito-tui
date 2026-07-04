@@ -104,8 +104,13 @@ func (c *Client) connectOnce(ctx context.Context) (confirmed bool, err error) {
 	header := http.Header{"Origin": {strings.TrimRight(c.cfg.InstanceURL, "/")}}
 	conn, resp, err := dialer.DialContext(ctx, c.wsURL, header)
 	if err != nil {
-		if resp != nil && resp.StatusCode == http.StatusUnauthorized {
-			return false, api.ErrUnauthorized
+		if resp != nil {
+			if resp.StatusCode == http.StatusUnauthorized {
+				return false, api.ErrUnauthorized
+			}
+			// ActionCable answers 404 to rejected origins and non-upgrade
+			// requests — carry the status so failures are diagnosable.
+			return false, fmt.Errorf("cable: handshake rejected: %s (%w)", resp.Status, err)
 		}
 		return false, err
 	}

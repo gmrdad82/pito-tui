@@ -7,6 +7,7 @@ package sound
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -95,8 +96,12 @@ func New(instanceURL string, enabled bool, opts ...Option) *Player {
 		opt(p)
 	}
 	if p.cacheDir == "" {
-		if base, err := os.UserCacheDir(); err == nil {
-			p.cacheDir = filepath.Join(base, "pito-tui")
+		// Namespace the cache per backend host so switching instances
+		// (--instance / config edit) never plays another backend's cues.
+		base, err := os.UserCacheDir()
+		u, uerr := url.Parse(instanceURL)
+		if err == nil && uerr == nil && u.Host != "" {
+			p.cacheDir = filepath.Join(base, "pito-tui", u.Host)
 		} else {
 			p.enabled = false
 		}

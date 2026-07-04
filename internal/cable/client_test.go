@@ -48,7 +48,7 @@ func expectSubscribe(uuid string) step {
 			t.Errorf("script expect: %v", err)
 			return
 		}
-		want := `{"command":"subscribe","identifier":"{\"channel\":\"TuiChannel\",\"uuid\":\"` + uuid + `\"}"}`
+		want := `{"command":"subscribe","identifier":"{\"channel\":\"Pito::JsonChannel\",\"uuid\":\"` + uuid + `\"}"}`
 		var got, expected any
 		if err := json.Unmarshal(raw, &got); err != nil {
 			t.Fatalf("subscribe frame not JSON: %s", raw)
@@ -154,7 +154,7 @@ func (r *recorder) waitMessage(t *testing.T) StreamMessage {
 const testUUID = "u1"
 
 func broadcast(msgType string, id, turnID int64, kind string) string {
-	return `{"identifier":"{\"channel\":\"TuiChannel\",\"uuid\":\"u1\"}",` +
+	return `{"identifier":"{\"channel\":\"Pito::JsonChannel\",\"uuid\":\"u1\"}",` +
 		`"message":{"type":"` + msgType + `","event":{"id":` + itoa(id) +
 		`,"turn_id":` + itoa(turnID) + `,"kind":"` + kind +
 		`","payload":{"text":"hi"},"created_at":"2026-07-04T12:00:00Z"}}}`
@@ -193,7 +193,7 @@ func TestHappyPathSubscribeAndDispatch(t *testing.T) {
 	srv := newScriptServer(t, []step{
 		send(`{"type":"welcome"}`),
 		expectSubscribe(testUUID),
-		send(`{"type":"confirm_subscription","identifier":"{\"channel\":\"TuiChannel\",\"uuid\":\"u1\"}"}`),
+		send(`{"type":"confirm_subscription","identifier":"{\"channel\":\"Pito::JsonChannel\",\"uuid\":\"u1\"}"}`),
 		send(broadcast(TypeEventAppend, 42, 7, "system")),
 		send(broadcast(TypeEventReplace, 42, 7, "system")),
 	})
@@ -219,7 +219,7 @@ func TestPingsKeepTheConnectionAlive(t *testing.T) {
 	srv := newScriptServer(t, append([]step{
 		send(`{"type":"welcome"}`),
 		expectSubscribe(testUUID),
-		send(`{"type":"confirm_subscription","identifier":"{\"channel\":\"TuiChannel\",\"uuid\":\"u1\"}"}`),
+		send(`{"type":"confirm_subscription","identifier":"{\"channel\":\"Pito::JsonChannel\",\"uuid\":\"u1\"}"}`),
 	}, pings...))
 	rec := newRecorder()
 	runClient(t, rec.config(srv.srv.URL, testUUID, 300*time.Millisecond))
@@ -241,7 +241,7 @@ func TestSilenceTriggersReconnectAndResubscribe(t *testing.T) {
 	handshake := []step{
 		send(`{"type":"welcome"}`),
 		expectSubscribe(testUUID),
-		send(`{"type":"confirm_subscription","identifier":"{\"channel\":\"TuiChannel\",\"uuid\":\"u1\"}"}`),
+		send(`{"type":"confirm_subscription","identifier":"{\"channel\":\"Pito::JsonChannel\",\"uuid\":\"u1\"}"}`),
 	}
 	// First connection goes silent after confirming; the read deadline
 	// must kill it and the client must dial again and re-subscribe.
@@ -264,7 +264,7 @@ func TestRejectSubscriptionReturnsUnauthorized(t *testing.T) {
 	srv := newScriptServer(t, []step{
 		send(`{"type":"welcome"}`),
 		expectSubscribe(testUUID),
-		send(`{"type":"reject_subscription","identifier":"{\"channel\":\"TuiChannel\",\"uuid\":\"u1\"}"}`),
+		send(`{"type":"reject_subscription","identifier":"{\"channel\":\"Pito::JsonChannel\",\"uuid\":\"u1\"}"}`),
 	})
 	rec := newRecorder()
 	_, done := runClient(t, rec.config(srv.srv.URL, testUUID, time.Second))
@@ -333,9 +333,9 @@ func TestUnknownFramesAndForeignBroadcastsIgnored(t *testing.T) {
 	srv := newScriptServer(t, []step{
 		send(`{"type":"welcome"}`),
 		expectSubscribe(testUUID),
-		send(`{"type":"confirm_subscription","identifier":"{\"channel\":\"TuiChannel\",\"uuid\":\"u1\"}"}`),
+		send(`{"type":"confirm_subscription","identifier":"{\"channel\":\"Pito::JsonChannel\",\"uuid\":\"u1\"}"}`),
 		send(`{"type":"hologram","message":42}`),
-		send(`{"identifier":"{\"channel\":\"TuiChannel\",\"uuid\":\"OTHER\"}","message":{"type":"event.append","event":{"id":1}}}`),
+		send(`{"identifier":"{\"channel\":\"Pito::JsonChannel\",\"uuid\":\"OTHER\"}","message":{"type":"event.append","event":{"id":1}}}`),
 		send(broadcast(TypeEventAppend, 99, 1, "system")),
 	})
 	rec := newRecorder()

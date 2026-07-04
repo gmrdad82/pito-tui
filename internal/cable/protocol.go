@@ -14,9 +14,11 @@ import (
 	"github.com/gmrdad82/pito-tui/internal/api"
 )
 
-// ChannelName is THE single constant mirrored by the Rails channel class
-// (class TuiChannel < ApplicationCable::Channel). Change both or neither.
-const ChannelName = "TuiChannel"
+// ChannelName is THE single constant mirroring the Rails channel class
+// (Pito::JsonChannel — app/channels/pito/json_channel.rb, live-verified).
+// It subscribes by bare uuid and rejects unauthenticated connections.
+// Change both sides or neither.
+const ChannelName = "Pito::JsonChannel"
 
 // Subprotocol is ActionCable's JSON wire protocol identifier.
 const Subprotocol = "actioncable-v1-json"

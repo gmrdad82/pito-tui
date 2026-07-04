@@ -1,9 +1,9 @@
 {
   "recent": [
-    { "uuid": "3f1c9a2e-7b4d-4c1a-9e2f-8d5b6a7c9e01", "title": "release prep", "last_activity_at": "2026-07-04T11:58:00.000Z" },
-    { "uuid": "a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d", "title": "Unnamed 7", "last_activity_at": "2026-07-04T09:12:00.000Z" }
+    { "uuid": "3f1c9a2e-7b4d-4c1a-9e2f-8d5b6a7c9e01", "title": "release prep", "display_name": "release prep", "last_activity_at": "2026-07-04T11:58:00.000Z" },
+    { "uuid": "a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d", "title": "Unnamed 7", "display_name": "Unnamed 7", "last_activity_at": "2026-07-04T09:12:00.000Z" }
   ],
   "older": [
-    { "uuid": "99887766-5544-4332-a211-000fedcba987", "title": "thumbnail ideas", "last_activity_at": "2026-06-28T20:30:00.000Z" }
+    { "uuid": "99887766-5544-4332-a211-000fedcba987", "title": "thumbnail ideas", "display_name": "thumbnail ideas", "last_activity_at": "2026-06-28T20:30:00.000Z" }
   ]
 }

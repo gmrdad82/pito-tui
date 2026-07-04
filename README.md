@@ -44,20 +44,30 @@ pito-tui                      # conversation picker (recent first)
 pito-tui <conversation-uuid>  # open a conversation directly
 ```
 
-First run asks for your TOTP code (the same 6-digit code as
-`/authenticate` on the web) and keeps the session cookie in
-`~/.config/pito-tui/cookies.json` until it expires.
+First run asks two things: which PITO instance this client talks to
+(enter keeps the suggested default; a bare host gets `https://` for
+free), and your TOTP code — the same 6-digit code as `/authenticate` on
+the web. The instance answer lands in `~/.config/pito-tui/config.toml`;
+the session cookie lands in `~/.config/pito-tui/cookies.json` and lives
+until it expires.
 
 ## Configuration
 
-`~/.config/pito-tui/config.toml`:
+`~/.config/pito-tui/config.toml` — written on first run, yours to edit:
 
 ```toml
 instance_url = "https://app.pitomd.com"  # your PITO instance
 sounds = true                            # send/receive/notify sounds
 ```
 
-Flags override the file: `--instance <url>`, `--sounds=on|off`.
+Flags override the file: `--instance <url>`, `--sounds=on|off`,
+`--config <path>` for an alternate config file entirely.
+
+Switching backends is a one-liner either way: edit `instance_url`, or
+pass `--instance https://other.example.com` for just this run — a
+one-off `--instance` never rewrites your config. Sessions and sound
+caches are kept per backend, so hopping between a dev and a production
+instance never crosses wires.
 
 Sounds play through `paplay` or `mpv` if either is installed, and stay
 silent otherwise.

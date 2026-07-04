@@ -35,7 +35,18 @@ type Event struct {
 
 type Conversation struct {
 	UUID string `json:"uuid"`
-	Name string `json:"name"`
+	// Title and DisplayName mirror the Rails serializer (live-verified:
+	// there is no "name" key). DisplayName is the human label.
+	Title       string `json:"title"`
+	DisplayName string `json:"display_name"`
+}
+
+// Label is the human-facing conversation name for status bars and pickers.
+func (c Conversation) Label() string {
+	if c.DisplayName != "" {
+		return c.DisplayName
+	}
+	return c.Title
 }
 
 // ChatPage is GET /chat/:uuid.json — the scrollback snapshot used for the
@@ -49,7 +60,16 @@ type ChatPage struct {
 type ResumeRow struct {
 	UUID           string    `json:"uuid"`
 	Title          string    `json:"title"`
+	DisplayName    string    `json:"display_name"`
 	LastActivityAt time.Time `json:"last_activity_at"`
+}
+
+// Label mirrors Conversation.Label for picker rows.
+func (r ResumeRow) Label() string {
+	if r.DisplayName != "" {
+		return r.DisplayName
+	}
+	return r.Title
 }
 
 // ResumeList is GET /resume.json — Conversation.recency_groups serialized:
@@ -59,19 +79,36 @@ type ResumeList struct {
 	Older  []ResumeRow `json:"older"`
 }
 
-// SendResult is the classified POST /chat reply.
+// SendResult is the classified POST /chat reply. Live-verified: the server
+// always answers {uuid, turn_id} 201, so "created" is a REQUEST-side fact —
+// a blank-uuid send that came back with a uuid.
 type SendResult struct {
-	// TurnID is set on the normal {accepted, turn_id} ack.
+	// TurnID identifies the in-flight turn (pending spinner bookkeeping).
 	TurnID int64
-	// CreatedUUID is set when a blank-uuid send created the conversation
-	// ({uuid} 201) — the caller then fetches scrollback and subscribes.
+	// CreatedUUID is set only when a blank-uuid send created the
+	// conversation — the caller then fetches scrollback and subscribes.
 	CreatedUUID string
-	// WebOnly carries the server's web-only-verb notice ({error:
-	// "web-only", verb}) — rendered as a dim notice, not an error.
-	WebOnly *WebOnlyNotice
+	// Notice carries the server's error/message reply (web-only verbs and
+	// friends) — rendered as a dim notice in the product's own voice, not
+	// as an error.
+	Notice *ServerNotice
 }
 
-type WebOnlyNotice struct {
-	Error string `json:"error"`
-	Verb  string `json:"verb"`
+// ServerNotice is the {error, message} reply shape (live-verified:
+// {"error":"web_only","message":"That command wears a mouse cursor…"}).
+type ServerNotice struct {
+	Error   string `json:"error"`
+	Message string `json:"message"`
+	Verb    string `json:"verb"`
+}
+
+// Text is the line the UI shows — the server's prose when it sent some.
+func (n ServerNotice) Text() string {
+	if n.Message != "" {
+		return n.Message
+	}
+	if n.Verb != "" {
+		return n.Verb + " is web-only — open the web app for it"
+	}
+	return "the server declined that one (" + n.Error + ")"
 }

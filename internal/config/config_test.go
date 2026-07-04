@@ -131,3 +131,50 @@ func TestDirAndDefaultPath(t *testing.T) {
 		t.Errorf("DefaultPath = %q, %v", path, err)
 	}
 }
+
+func TestSaveRoundTripsAndStaysEditable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sub", "config.toml")
+	if Exists(path) {
+		t.Fatal("Exists must be false before Save")
+	}
+	saved := Config{InstanceURL: "https://dev.pitomd.com", Sounds: false}
+	if err := Save(path, saved); err != nil {
+		t.Fatal(err)
+	}
+	if !Exists(path) {
+		t.Fatal("Exists must be true after Save")
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.InstanceURL != saved.InstanceURL || loaded.Sounds != saved.Sounds {
+		t.Errorf("round trip = %+v, want %+v", loaded, saved)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "# ") || !strings.Contains(string(raw), "--instance") {
+		t.Error("saved config must keep its editing instructions")
+	}
+}
+
+func TestNormalizeInstanceURL(t *testing.T) {
+	good := map[string]string{
+		"dev.pitomd.com":            "https://dev.pitomd.com",
+		"  https://a.example.com/ ": "https://a.example.com",
+		"http://localhost:3000":     "http://localhost:3000",
+		"https://x.dev/pito/":       "https://x.dev/pito",
+	}
+	for in, want := range good {
+		if got, err := NormalizeInstanceURL(in); err != nil || got != want {
+			t.Errorf("NormalizeInstanceURL(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	for _, bad := range []string{"", "   ", "ftp://nope", "https://"} {
+		if got, err := NormalizeInstanceURL(bad); err == nil {
+			t.Errorf("NormalizeInstanceURL(%q) = %q, want error", bad, got)
+		}
+	}
+}

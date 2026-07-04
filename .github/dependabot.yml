@@ -1,0 +1,33 @@
+# Dependabot configuration — same grouping intent as gmrdad82/pito:
+# bundle related ecosystem updates into single weekly PRs rather than
+# firing one PR per module / action. One consolidated PR per ecosystem
+# per week; major-version updates stay ungrouped so they land as
+# standalone PRs (they typically need attention anyway).
+#
+# Both ecosystems share `schedule.interval: weekly` so updates land on
+# the same weekday (Mondays), keeping the dependency-hygiene cadence
+# predictable.
+
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      gomod-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      github-actions-all:
+        update-types:
+          - minor
+          - patch

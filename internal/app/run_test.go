@@ -16,7 +16,7 @@ func TestPreflightPassesWithValidSession(t *testing.T) {
 	client, _ := newTestClient(t, mux)
 
 	var out strings.Builder
-	if err := Preflight(t.Context(), client, strings.NewReader(""), &out); err != nil {
+	if err := Preflight(t.Context(), client, newBufReader(""), &out); err != nil {
 		t.Fatalf("Preflight = %v", err)
 	}
 	if out.Len() != 0 {
@@ -43,7 +43,7 @@ func TestPreflightLogsInOn401(t *testing.T) {
 	client, _ := newTestClient(t, mux)
 
 	var out strings.Builder
-	err := Preflight(t.Context(), client, strings.NewReader("123456\n"), &out)
+	err := Preflight(t.Context(), client, newBufReader("123456\n"), &out)
 	if err != nil {
 		t.Fatalf("Preflight = %v", err)
 	}
@@ -59,7 +59,7 @@ func TestPreflightUnreachableInstance(t *testing.T) {
 	})
 	client, _ := newTestClient(t, mux)
 
-	err := Preflight(t.Context(), client, strings.NewReader(""), &strings.Builder{})
+	err := Preflight(t.Context(), client, newBufReader(""), &strings.Builder{})
 	if err == nil || !strings.Contains(err.Error(), "cannot reach") {
 		t.Errorf("err = %v, want a reachability error", err)
 	}
@@ -83,4 +83,29 @@ func TestStdinPrompterEOFWithoutInput(t *testing.T) {
 
 func newBufReader(s string) *bufio.Reader {
 	return bufio.NewReader(strings.NewReader(s))
+}
+
+func TestPromptInstanceURL(t *testing.T) {
+	cases := map[string]struct{ input, want string }{
+		"enter keeps default":     {"\n", "https://app.pitomd.com"},
+		"bare host gets https":    {"dev.pitomd.com\n", "https://dev.pitomd.com"},
+		"full url passes through": {"http://localhost:3000\n", "http://localhost:3000"},
+		"trailing slash trimmed":  {"https://pito.example.com/\n", "https://pito.example.com"},
+		"nonsense is re-asked":    {"ftp://nope\ndev.pitomd.com\n", "https://dev.pitomd.com"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			var out strings.Builder
+			got, err := promptInstanceURL(newBufReader(tc.input), &out, "https://app.pitomd.com")
+			if err != nil || got != tc.want {
+				t.Errorf("promptInstanceURL(%q) = %q, %v; want %q", tc.input, got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestPromptInstanceURLEOF(t *testing.T) {
+	if _, err := promptInstanceURL(newBufReader(""), &strings.Builder{}, "x"); err == nil {
+		t.Error("EOF must surface an error, not hang or default silently")
+	}
 }

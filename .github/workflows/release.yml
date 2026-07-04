@@ -1,0 +1,142 @@
+name: Release
+
+# Builds and publishes pito-tui: static linux amd64+arm64 binaries with
+# checksums on a GitHub Release, a .deb via nfpm, and the pito-tui-bin AUR
+# package — all through goreleaser.
+#
+# Trigger model: TAG-ONLY. Fires exclusively on a version-tag push
+# (`v1.0.0`, `v1.1.2`, …) plus a manual `workflow_dispatch` escape hatch —
+# never on branch pushes. Day-to-day commits run ci.yml; artifacts ship
+# only when you cut a release tag. So: finish work →
+# `git tag -a v1.0.0 && git push origin v1.0.0` → this workflow ships.
+#
+# GREEN-CI GATE (ported from pito): a tag on a commit that is not fully
+# green must NOT build a release. The `verify-ci` job waits for every other
+# workflow run on the tagged commit to complete (CI usually runs
+# concurrently — branch and tag are pushed together) and fails unless every
+# conclusion is success/skipped. No CI evidence at all also refuses (fail
+# closed).
+#
+# One-time setup (HANDED TO OWNER): AUR account with the dedicated ed25519
+# public key added; repo secrets AUR_SSH_PRIVATE_KEY (complete key file
+# INCLUDING the trailing newline) and SLACK_WEBHOOK.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  # goreleaser creates the GitHub Release and uploads artifacts.
+  contents: write
+  # Lets the verify-ci gate and the Slack notifier query workflow runs.
+  actions: read
+
+jobs:
+  verify-ci:
+    # THE GATE: block the release until the tagged commit is fully green.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for green CI on the tagged commit
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          echo "Gating release on CI for $SHA"
+          deadline=$((SECONDS + 1800))    # 30 min for in-flight runs to finish
+          evidence_deadline=$((SECONDS + 180)) # 3 min for runs to even appear
+          while :; do
+            runs=$(gh api "repos/$REPO/actions/runs?head_sha=$SHA&per_page=100" \
+                     --jq '[.workflow_runs[] | select(.name != "Release")]')
+            total=$(jq 'length' <<<"$runs")
+            pending=$(jq '[.[] | select(.status != "completed")] | length' <<<"$runs")
+            bad=$(jq -r '[.[] | select(.status == "completed" and .conclusion != "success" and .conclusion != "skipped")]
+                          | map("\(.name): \(.conclusion)") | join(", ")' <<<"$runs")
+
+            if [ -n "$bad" ]; then
+              # CI already posts its OWN failure message — mark the reason so
+              # the refusal notify below stays silent (one message per event).
+              echo "reason=ci-red" >> "$GITHUB_OUTPUT"
+              echo "::error::CI is NOT green on $SHA — $bad. Refusing to release."
+              exit 1
+            fi
+            if [ "$total" -eq 0 ]; then
+              if [ "$SECONDS" -ge "$evidence_deadline" ]; then
+                echo "reason=no-evidence" >> "$GITHUB_OUTPUT"
+                echo "::error::No CI runs found for $SHA — refusing to release without CI evidence (fail closed)."
+                exit 1
+              fi
+              echo "no CI runs registered yet for $SHA — waiting…"
+            elif [ "$pending" -eq 0 ]; then
+              echo "All $total workflow run(s) green on $SHA — proceeding with the release."
+              exit 0
+            else
+              echo "waiting: $pending of $total run(s) still in progress…"
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "reason=timeout" >> "$GITHUB_OUTPUT"
+              echo "::error::Timed out (30m) waiting for CI on $SHA."
+              exit 1
+            fi
+            sleep 30
+          done
+
+      # Failure-only, and ONLY for refusal modes nothing else announces
+      # (timeout / no CI evidence). A ci-red refusal stays silent here — CI
+      # posts its own failure message; one notification per event.
+      - name: Checkout code
+        if: failure() && steps.gate.outputs.reason != 'ci-red'
+        uses: actions/checkout@v7
+
+      - name: Notify Slack (release refused with no CI verdict)
+        if: failure() && steps.gate.outputs.reason != 'ci-red'
+        continue-on-error: true
+        uses: ./.github/actions/slack-notify
+        with:
+          headline: ":no_entry: *Release refused — no green CI verdict for the tagged commit (${{ steps.gate.outputs.reason || 'unknown' }}). Nothing shipped.*"
+          status: ${{ job.status }}
+          webhook: ${{ secrets.SLACK_WEBHOOK }}
+          github-token: ${{ github.token }}
+
+  release:
+    needs: verify-ci
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          # goreleaser derives {{.Version}} and the changelog from tag
+          # history — a shallow clone mis-computes both.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: goreleaser (build, GitHub Release, deb, AUR)
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+
+      - name: Notify Slack
+        if: always()
+        continue-on-error: true
+        uses: ./.github/actions/slack-notify
+        with:
+          # Bold must not wrap the code span — Slack mrkdwn won't close a `*`
+          # that directly follows a backtick (same lesson as pito 1.0.0 G17).
+          headline: ":package: *pito-tui ${{ github.ref_name }} is out* — binaries, deb, and AUR published"
+          extra: "Get it: `yay -S pito-tui-bin`"
+          status: ${{ job.status }}
+          webhook: ${{ secrets.SLACK_WEBHOOK }}
+          github-token: ${{ github.token }}

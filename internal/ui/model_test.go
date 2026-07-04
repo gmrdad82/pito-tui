@@ -90,7 +90,7 @@ func key(s string) tea.KeyMsg {
 }
 
 const chatPageJSON = `{
-  "conversation": {"uuid": "u1", "name": "release prep"},
+  "conversation": {"uuid": "u1", "title": "release prep", "display_name": "release prep"},
   "events": [
     {"id": 1, "turn_id": 7, "kind": "echo", "payload": {"text": "ping"}, "created_at": "2026-07-04T11:59:00Z"},
     {"id": 2, "turn_id": 7, "kind": "system", "payload": {"text": "pong"}, "created_at": "2026-07-04T11:59:01Z"}
@@ -98,8 +98,8 @@ const chatPageJSON = `{
 }`
 
 const resumeJSON = `{
-  "recent": [{"uuid": "u1", "title": "release prep", "last_activity_at": "2026-07-04T11:58:00Z"}],
-  "older":  [{"uuid": "u2", "title": "thumbnail ideas", "last_activity_at": "2026-06-28T20:30:00Z"}]
+  "recent": [{"uuid": "u1", "title": "release prep", "display_name": "release prep", "last_activity_at": "2026-07-04T11:58:00Z"}],
+  "older":  [{"uuid": "u2", "title": "thumbnail ideas", "display_name": "thumbnail ideas", "last_activity_at": "2026-06-28T20:30:00Z"}]
 }`
 
 func chatServer(t *testing.T) http.Handler {
@@ -137,7 +137,7 @@ func TestPickerSelectionOpensConversation(t *testing.T) {
 	}
 	m = drive(m, cmd())
 
-	if m.conv.UUID != "u1" || m.conv.Name != "release prep" {
+	if m.conv.UUID != "u1" || m.conv.Label() != "release prep" {
 		t.Errorf("conversation = %+v", m.conv)
 	}
 	if got := rec.calls(); len(got) != 1 || got[0] != "u1" {
@@ -153,11 +153,11 @@ func TestNewConversationDeferredUUIDFlow(t *testing.T) {
 	mux.HandleFunc("POST /chat", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"uuid":"fresh"}`))
+		_, _ = w.Write([]byte(`{"uuid":"fresh","turn_id":7}`))
 	})
 	mux.HandleFunc("GET /chat/fresh.json", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"conversation":{"uuid":"fresh","name":""},"events":[]}`))
+		_, _ = w.Write([]byte(`{"conversation":{"uuid":"fresh","title":""},"events":[]}`))
 	})
 	m, rec := newTestModel(t, mux, WithNewConversation())
 	m = sized(m)
@@ -167,16 +167,41 @@ func TestNewConversationDeferredUUIDFlow(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("enter with input must send")
 	}
-	m, cmd = driveCmd(m, cmd()) // SendResultMsg{CreatedUUID}
+	m, cmd = driveCmd(m, cmd()) // SendResultMsg{CreatedUUID, TurnID}
 	if m.conv.UUID != "fresh" {
 		t.Fatalf("conv uuid = %q, want fresh", m.conv.UUID)
+	}
+	if !m.pending[7] {
+		t.Error("the creating turn must be pending until its events arrive")
 	}
 	if cmd == nil {
 		t.Fatal("created-uuid reply must trigger a scrollback fetch")
 	}
-	m = drive(m, cmd())
+	m = runCmd(m, cmd) // batch: fetch + spinner tick
 	if got := rec.calls(); len(got) != 1 || got[0] != "fresh" {
 		t.Errorf("connect calls = %v, want [fresh]", got)
+	}
+	if !m.pending[7] {
+		t.Error("an empty fetch must not clear the still-in-flight turn")
+	}
+}
+
+// runCmd executes a command, expanding batches, and drives every produced
+// message into the model (one level — commands returned by Update are not
+// re-executed).
+func runCmd(m Model, cmd tea.Cmd) Model {
+	if cmd == nil {
+		return m
+	}
+	switch msg := cmd().(type) {
+	case tea.BatchMsg:
+		for _, inner := range msg {
+			m = runCmd(m, inner)
+		}
+		return m
+	default:
+		next, _ := m.Update(msg)
+		return next.(Model)
 	}
 }
 
@@ -185,7 +210,7 @@ func TestWebOnlyNoticeRendersDim(t *testing.T) {
 	mux.HandleFunc("POST /chat", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		_, _ = w.Write([]byte(`{"error":"web-only","verb":"/themes"}`))
+		_, _ = w.Write([]byte(`{"error":"web_only","message":"That command wears a mouse cursor. Wrong outfit for here."}`))
 	})
 	m, _ := newTestModel(t, mux, WithConversation("u1"))
 	m = sized(m)
@@ -194,7 +219,7 @@ func TestWebOnlyNoticeRendersDim(t *testing.T) {
 	m, cmd := driveCmd(m, key("enter"))
 	m = drive(m, cmd())
 
-	if view := m.View(); !strings.Contains(view, "/themes is web-only") {
+	if view := m.View(); !strings.Contains(view, "wears a mouse cursor") {
 		t.Errorf("view missing the web-only notice:\n%s", view)
 	}
 }
@@ -275,7 +300,7 @@ func TestReconnectTriggersResyncMerge(t *testing.T) {
 		}
 		// Second fetch: one event replaced, one appended while offline.
 		_, _ = w.Write([]byte(`{
-			"conversation": {"uuid": "u1", "name": "release prep"},
+			"conversation": {"uuid": "u1", "title": "release prep", "display_name": "release prep"},
 			"events": [
 				{"id": 1, "turn_id": 7, "kind": "echo", "payload": {"text": "ping"}, "created_at": "2026-07-04T11:59:00Z"},
 				{"id": 2, "turn_id": 7, "kind": "system", "payload": {"text": "pong EDITED"}, "created_at": "2026-07-04T11:59:01Z"},

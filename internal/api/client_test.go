@@ -95,8 +95,9 @@ func TestSendMessageAck(t *testing.T) {
 			t.Errorf("viewport_width = %v, want 120", body["viewport_width"])
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusAccepted)
-		_, _ = w.Write([]byte(`{"accepted":true,"turn_id":9}`))
+		w.WriteHeader(http.StatusCreated)
+		// Live-verified: the server echoes the uuid on every ack.
+		_, _ = w.Write([]byte(`{"uuid":"abc","turn_id":9}`))
 	})
 	c := newClient(t, mux)
 
@@ -104,8 +105,8 @@ func TestSendMessageAck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.TurnID != 9 || res.CreatedUUID != "" || res.WebOnly != nil {
-		t.Errorf("result = %+v", res)
+	if res.TurnID != 9 || res.CreatedUUID != "" || res.Notice != nil {
+		t.Errorf("result = %+v — an echoed uuid on a normal ack must NOT read as created", res)
 	}
 }
 
@@ -121,7 +122,7 @@ func TestSendMessageBlankUUIDCreatesConversation(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"uuid":"fresh-uuid"}`))
+		_, _ = w.Write([]byte(`{"uuid":"fresh-uuid","turn_id":42}`))
 	})
 	c := newClient(t, mux)
 
@@ -129,8 +130,8 @@ func TestSendMessageBlankUUIDCreatesConversation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.CreatedUUID != "fresh-uuid" {
-		t.Errorf("CreatedUUID = %q", res.CreatedUUID)
+	if res.CreatedUUID != "fresh-uuid" || res.TurnID != 42 {
+		t.Errorf("result = %+v, want created uuid AND its turn id", res)
 	}
 }
 
@@ -141,7 +142,7 @@ func TestSendMessageWebOnlyNotice(t *testing.T) {
 			mux.HandleFunc("POST /chat", func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(status)
-				_, _ = w.Write([]byte(`{"error":"web-only","verb":"/themes"}`))
+				_, _ = w.Write([]byte(`{"error":"web_only","message":"That command wears a mouse cursor. Wrong outfit for here."}`))
 			})
 			c := newClient(t, mux)
 
@@ -149,8 +150,8 @@ func TestSendMessageWebOnlyNotice(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if res.WebOnly == nil || res.WebOnly.Verb != "/themes" {
-				t.Errorf("result = %+v, want a web-only notice", res)
+			if res.Notice == nil || res.Notice.Text() != "That command wears a mouse cursor. Wrong outfit for here." {
+				t.Errorf("result = %+v, want the server's own notice prose", res)
 			}
 		})
 	}
@@ -185,7 +186,7 @@ func TestLoginMintsCookieIntoJar(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"conversation":{"uuid":"abc","name":""},"events":[]}`))
+		_, _ = w.Write([]byte(`{"conversation":{"uuid":"abc","title":""},"events":[]}`))
 	})
 	c := newClient(t, mux)
 

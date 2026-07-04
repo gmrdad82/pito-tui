@@ -134,35 +134,37 @@ func (c *Client) SendMessage(ctx context.Context, uuid, input string, width int)
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		// Web-only verb notices may ride on non-2xx statuses too; classify
-		// by body before giving up.
-		if notice := decodeWebOnly(body); notice != nil {
-			return &SendResult{WebOnly: notice}, nil
+		// Server notices (web-only verbs and friends) ride on 422s;
+		// classify by body before giving up.
+		if notice := decodeNotice(body); notice != nil {
+			return &SendResult{Notice: notice}, nil
 		}
 		return nil, fmt.Errorf("api: POST /chat: %s", resp.Status)
 	}
 
-	if notice := decodeWebOnly(body); notice != nil {
-		return &SendResult{WebOnly: notice}, nil
+	if notice := decodeNotice(body); notice != nil {
+		return &SendResult{Notice: notice}, nil
 	}
+	// Live-verified reply: always {uuid, turn_id} 201. Whether the
+	// conversation was CREATED is a request-side fact — we sent no uuid.
 	var reply struct {
-		Accepted bool   `json:"accepted"`
-		TurnID   int64  `json:"turn_id"`
-		UUID     string `json:"uuid"`
+		TurnID int64  `json:"turn_id"`
+		UUID   string `json:"uuid"`
 	}
 	if len(body) > 0 {
 		if err := json.Unmarshal(body, &reply); err != nil {
 			return nil, fmt.Errorf("api: decoding POST /chat reply: %w", err)
 		}
 	}
-	if reply.UUID != "" && reply.TurnID == 0 {
-		return &SendResult{CreatedUUID: reply.UUID}, nil
+	res := &SendResult{TurnID: reply.TurnID}
+	if uuid == "" && reply.UUID != "" {
+		res.CreatedUUID = reply.UUID
 	}
-	return &SendResult{TurnID: reply.TurnID}, nil
+	return res, nil
 }
 
-func decodeWebOnly(body []byte) *WebOnlyNotice {
-	var notice WebOnlyNotice
+func decodeNotice(body []byte) *ServerNotice {
+	var notice ServerNotice
 	if json.Unmarshal(body, &notice) == nil && notice.Error != "" {
 		return &notice
 	}

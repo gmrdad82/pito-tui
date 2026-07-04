@@ -1,5 +1,5 @@
 {
-  "conversation": { "uuid": "3f1c9a2e-7b4d-4c1a-9e2f-8d5b6a7c9e01", "name": "release prep" },
+  "conversation": { "uuid": "3f1c9a2e-7b4d-4c1a-9e2f-8d5b6a7c9e01", "title": "release prep", "display_name": "release prep", "created_at": "2026-07-01T09:00:00.000Z" },
   "events": [
     { "id": 41, "turn_id": 7, "kind": "echo",
       "payload": { "text": "show game 5" },

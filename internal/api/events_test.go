@@ -25,8 +25,8 @@ func TestChatPageFixtureDecodes(t *testing.T) {
 	if page.Conversation.UUID != "3f1c9a2e-7b4d-4c1a-9e2f-8d5b6a7c9e01" {
 		t.Errorf("uuid = %q", page.Conversation.UUID)
 	}
-	if page.Conversation.Name != "release prep" {
-		t.Errorf("name = %q", page.Conversation.Name)
+	if page.Conversation.Label() != "release prep" {
+		t.Errorf("label = %q", page.Conversation.Label())
 	}
 	if len(page.Events) != 6 {
 		t.Fatalf("events = %d, want 6", len(page.Events))

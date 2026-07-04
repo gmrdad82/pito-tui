@@ -1,0 +1,84 @@
+version: 2
+project_name: pito-tui
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: ./cmd/pito-tui
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags:
+      - -s -w
+      - -X github.com/gmrdad82/pito-tui/internal/version.Version={{.Version}}
+      - -X github.com/gmrdad82/pito-tui/internal/version.Commit={{.ShortCommit}}
+      - -X github.com/gmrdad82/pito-tui/internal/version.Date={{.CommitDate}}
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs"
+      - "\\[skipci\\]"
+
+nfpms:
+  - package_name: pito-tui
+    formats: [deb]
+    maintainer: "Catalin Ilinca <gmrdad82@gmail.com>"
+    homepage: https://github.com/gmrdad82/pito-tui
+    license: AGPL-3.0-only
+    description: |-
+      Terminal client for PITO, the self-hosted YouTube channel manager.
+      One scrollback, one prompt, the server-side grammar, live over
+      ActionCable.
+    section: utils
+    # Sound cues play through whichever is present; neither is required —
+    # the client is silent without them.
+    recommends:
+      - mpv
+
+aurs:
+  - name: pito-tui-bin
+    homepage: https://github.com/gmrdad82/pito-tui
+    description: "Terminal client for PITO, the self-hosted YouTube channel manager (binary release)"
+    license: AGPL-3.0-only
+    maintainers:
+      - "Catalin Ilinca <gmrdad82 at gmail dot com>"
+    private_key: "{{ .Env.AUR_SSH_PRIVATE_KEY }}"
+    git_url: ssh://aur@aur.archlinux.org/pito-tui-bin.git
+    # Pre-release tags (v1.0.0-rc1) would render an invalid pkgver — skip
+    # them instead of pushing a broken PKGBUILD.
+    skip_upload: auto
+    optdepends:
+      - "libpulse: sound cues via paplay"
+      - "mpv: sound cue fallback player"
+    package: |-
+      install -Dm755 "./pito-tui" "${pkgdir}/usr/bin/pito-tui"
+      install -Dm644 "./LICENSE" "${pkgdir}/usr/share/licenses/pito-tui-bin/LICENSE"
+    commit_author:
+      name: gmrdad82
+      email: gmrdad82@gmail.com
+
+release:
+  footer: |
+    ---
+    **Install** — Arch/Omarchy: `yay -S pito-tui-bin` · Ubuntu/Debian: download the `.deb` above, then `sudo apt install ./pito-tui_*.deb`
