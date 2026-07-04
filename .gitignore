@@ -1,0 +1,13 @@
+# Binaries
+/pito-tui
+/dist/
+
+# Test artifacts
+cover.out
+*.test
+
+# Editor / OS noise
+.idea/
+.vscode/
+*.swp
+.DS_Store

@@ -1,0 +1,167 @@
+name: Slack notify (Deadpan Butler)
+description: >-
+  Posts a witty pass/fail CI summary to Slack, naming the branch and — on
+  failure — the actual step that broke (looked up via the Actions API, not
+  hardcoded). One voice ("Deadpan Butler"), shared by every workflow/job.
+
+# Usage (add as the LAST step of a job, after `actions/checkout`):
+#
+#   - name: Notify Slack
+#     if: always()
+#     continue-on-error: true        # a Slack hiccup must never fail the run
+#     uses: ./.github/actions/slack-notify
+#     with:
+#       status: ${{ job.status }}
+#       webhook: ${{ secrets.SLACK_WEBHOOK }}
+#       github-token: ${{ github.token }}
+#
+# Requires the calling workflow to grant `actions: read` (to read the run's
+# step conclusions) alongside its existing `contents: read`.
+
+inputs:
+  headline:
+    description: "Optional success headline override (e.g. an image-published notice)."
+    required: false
+    default: ""
+  extra:
+    description: "Optional extra line under the quip (e.g. a `pito update` snippet)."
+    required: false
+    default: ""
+  status:
+    description: "Job status (success / failure / cancelled). Pass the job.status context."
+    required: true
+  webhook:
+    description: "Slack incoming-webhook URL (the SLACK_WEBHOOK secret). If empty, the step no-ops."
+    required: true
+  github-token:
+    description: "Token with actions:read (the github.token). Used to look up the failing step."
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Post CI result to Slack
+      shell: bash
+      env:
+        HEADLINE: ${{ inputs.headline }}
+        EXTRA: ${{ inputs.extra }}
+        STATUS: ${{ inputs.status }}
+        SLACK_WEBHOOK: ${{ inputs.webhook }}
+        GH_TOKEN: ${{ inputs.github-token }}
+        BRANCH: ${{ github.head_ref || github.ref_name }}
+        REPO: ${{ github.repository }}
+        WORKFLOW: ${{ github.workflow }}
+        JOB: ${{ github.job }}
+        RUN_ID: ${{ github.run_id }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        SHA: ${{ github.sha }}
+      run: |
+        set -uo pipefail
+
+        # No webhook configured (e.g. forks without the secret) → stay quiet.
+        if [ -z "${SLACK_WEBHOOK:-}" ]; then
+          echo "SLACK_WEBHOOK not set; skipping Slack notification."
+          exit 0
+        fi
+
+        repo_name="${REPO##*/}"
+        short_sha="${SHA:0:7}"
+
+        # Pick a random element from the args — keeps the Butler from saying the
+        # exact same thing on every run.
+        pick() { local arr=("$@"); printf '%s' "${arr[RANDOM % ${#arr[@]}]}"; }
+
+        case "$STATUS" in
+          success)
+            if [ -n "${HEADLINE:-}" ]; then
+              # Image-release flavor — its own prose pool, same Butler.
+              line="$(pick \
+                "Fresh off the buildx press. Handle with ceremony." \
+                "Multi-arch and mildly smug. It's on the shelf." \
+                "The registry has accepted your offering." \
+                "Hot image, straight from the oven. Mind the layers." \
+                "Bits shipped. They're your problem again at deploy time." \
+                "Another artifact for the vault. The Butler dusted it first." \
+                "Pushed, tagged, immutable. As all things should be.")"
+            else
+            line="$(pick \
+              "Everything behaved itself. Nothing to see here, as it should be." \
+              "Green across the board. I shall permit myself a small nod." \
+              "All checks passed — suspiciously smooth, but I won't jinx it." \
+              "Spotless. You may frame this one." \
+              "No notes. The pipeline is, dare I say, content." \
+              "Clean run. I've seen worse — much worse." \
+              "Everything's green. Do try to act surprised." \
+              "Flawless. Don't let it go to your head." \
+              "All systems nominal. The Butler approves." \
+              "Passed without complaint. A rare and beautiful thing.")"
+            fi
+            headline="${HEADLINE:-:white_check_mark: *${WORKFLOW} is green on \`${BRANCH}\`* :four_leaf_clover:}"
+            text="$(printf '%s\n%s\n%s' \
+              "${headline}" \
+              "${line}" \
+              "_${repo_name} · <${RUN_URL}|run> · \`${short_sha}\`_")"
+            if [ -n "${EXTRA:-}" ]; then
+              text="$(printf '%s\n%s' "$text" "$EXTRA")"
+            fi
+            ;;
+
+          cancelled)
+            line="$(pick \
+              "Someone pulled the plug mid-run. I shan't ask why." \
+              "Called off before the finish. Cold feet, perhaps." \
+              "Aborted. We'll pretend that didn't happen." \
+              "Stopped mid-stride. Most undignified." \
+              "Cancelled. The Butler retires to his quarters.")"
+            text="$(printf '%s\n%s\n%s' \
+              ":no_entry: *${WORKFLOW} was called off on \`${BRANCH}\`*" \
+              "${line}" \
+              "_${repo_name} · <${RUN_URL}|run> · \`${short_sha}\`_")"
+            ;;
+
+          *)
+            # Failure. Ask the Actions API which step actually fell over —
+            # match the currently-running job by name, take the first step
+            # whose conclusion is "failure".
+            failed_step="$(gh api "repos/${REPO}/actions/runs/${RUN_ID}/jobs" \
+              --jq ".jobs[] | select(.name == \"${JOB}\") | .steps[] | select(.conclusion == \"failure\") | .name" \
+              2>/dev/null | head -n1 || true)"
+            [ -z "$failed_step" ] && failed_step="an unnamed step (it's being coy)"
+
+            # Step-aware quip — same Butler, voice tuned to what broke.
+            quip="Something downstream took offense."
+            shopt -s nocasematch
+            case "$failed_step" in
+              *rspec*)                  quip="A spec objects to your recent life choices." ;;
+              *parallel*)               quip="The test databases refused to line up." ;;
+              *rubocop*|*lint*)         quip="RuboCop finds your style... wanting." ;;
+              *static\ analysis*|*brakeman*) quip="Brakeman smells something, and it isn't the coffee." ;;
+              *gems\ used*|*bundler*)   quip="A gem in your lockfile has a known... reputation." ;;
+              *javascript\ dependencies*|*importmap*) quip="One of your imports brought baggage." ;;
+              *markdown*|*prettier*)    quip="Your prose wrapped the wrong way. The horror." ;;
+              *vitest*)                 quip="JavaScript did a JavaScript. Again." ;;
+              *install*)                quip="The dependencies declined the invitation." ;;
+              *database*)               quip="The database declined to set itself up." ;;
+              *tailwind*)               quip="Tailwind refused to compile your aesthetic." ;;
+              *node*)                   quip="Node.js could not be located. Ironic." ;;
+              *ruby*)                   quip="Ruby got out of bed on the wrong side." ;;
+              *checkout*)               quip="We couldn't even check out the code. Bold start." ;;
+            esac
+            shopt -u nocasematch
+
+            verb="$(pick "fell over" "face-planted" "threw a tantrum" "came apart at the seams" "had a moment" "lost its composure")"
+            text="$(printf '%s\n%s\n%s\n%s' \
+              ":rotating_light: *${WORKFLOW} ${verb} on \`${BRANCH}\`*" \
+              "Tripped at: *${failed_step}*" \
+              "${quip}" \
+              "_${repo_name} · \`${short_sha}\` · <${RUN_URL}|View the carnage>_")"
+            ;;
+        esac
+
+        payload="$(jq -n --arg text "$text" '{text: $text}')"
+        curl -sS -X POST -H 'Content-type: application/json' \
+          --data "$payload" "$SLACK_WEBHOOK" >/dev/null \
+          && echo "Slack notified (${STATUS})." \
+          || echo "Slack POST failed; not failing the run."
+
+        exit 0
