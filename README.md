@@ -15,7 +15,9 @@ your server is the product.
 
 Phone person? The same instance also fits in your pocket:
 [**`pito-android`**](https://github.com/gmrdad82/pito-android), a native
-Android shell around your instance's own UI.
+Android shell around your instance's own UI. And for the full tour before
+you commit to anything, the showcase lives at
+[**pitomd.com**](https://pitomd.com) ([source](https://github.com/gmrdad82/pitomd)).
 
 ## Install
 
