@@ -363,3 +363,153 @@ func TestUnknownStreamTypeIgnored(t *testing.T) {
 		t.Error("unknown stream type must be ignored")
 	}
 }
+
+func TestChatKeyBranches(t *testing.T) {
+	m, _ := newTestModel(t, chatServer(t), WithConversation("u1"))
+	m = sized(m)
+	m = drive(m, m.fetchChatCmd("u1", false)())
+
+	// Empty enter sends nothing.
+	m, cmd := driveCmd(m, key("enter"))
+	if cmd != nil {
+		t.Error("empty prompt must not send")
+	}
+
+	// Half-page scrolls break follow at the top.
+	m = drive(m, tea.KeyMsg{Type: tea.KeyCtrlU})
+	m = drive(m, tea.KeyMsg{Type: tea.KeyCtrlD})
+	m = drive(m, key("j"), key("k"))
+
+	// ctrl-c quits from chat mode.
+	_, cmd = driveCmd(m, tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Fatal("ctrl-c must quit")
+	}
+}
+
+func TestPickerCursorBounds(t *testing.T) {
+	m, _ := newTestModel(t, chatServer(t))
+	m = sized(m)
+	m = drive(m, m.fetchResumeCmd()())
+
+	m = drive(m, key("k")) // at top already: stays
+	if m.cursor != 0 {
+		t.Errorf("cursor = %d, want 0", m.cursor)
+	}
+	m = drive(m, key("j"), key("j"), key("j"), key("j")) // past the end: clamps
+	if m.cursor != len(m.rows)-1 {
+		t.Errorf("cursor = %d, want %d", m.cursor, len(m.rows)-1)
+	}
+
+	// Enter on "new conversation" opens an empty chat without fetching.
+	m = drive(m, key("k"), key("k"))
+	m.cursor = 0
+	m, cmd := driveCmd(m, key("enter"))
+	if m.mode != modeChat || cmd != nil || m.conv.UUID != "" {
+		t.Error("new-conversation entry must open an empty chat, no fetch")
+	}
+
+	// ctrl-c also quits from the picker.
+	_, cmd = driveCmd(m, tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Error("ctrl-c must quit from the picker")
+	}
+}
+
+func TestPickerEnterWithNoRows(t *testing.T) {
+	m, _ := newTestModel(t, chatServer(t))
+	m = sized(m)
+	m, cmd := driveCmd(m, key("enter"))
+	if cmd != nil || m.mode != modePicker {
+		t.Error("enter before the list loads must be a no-op")
+	}
+}
+
+func TestResumeErrorShowsMessage(t *testing.T) {
+	mux := http.NewServeMux() // no /resume.json route → 404
+	m, _ := newTestModel(t, mux)
+	m = sized(m)
+	m = drive(m, m.fetchResumeCmd()())
+	if !strings.Contains(m.View(), "could not load conversations") {
+		t.Errorf("view missing the load error:\n%s", m.View())
+	}
+}
+
+func TestSendFailureBranches(t *testing.T) {
+	t.Run("plain failure becomes a notice", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("POST /chat", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		})
+		m, _ := newTestModel(t, mux, WithConversation("u1"))
+		m = sized(m)
+		m.input.SetValue("hi")
+		m, cmd := driveCmd(m, key("enter"))
+		m = drive(m, cmd())
+		if !strings.Contains(m.View(), "send failed") {
+			t.Errorf("view missing the send-failed notice:\n%s", m.View())
+		}
+	})
+
+	t.Run("401 flips the session-expired banner", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("POST /chat", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusUnauthorized)
+		})
+		m, _ := newTestModel(t, mux, WithConversation("u1"))
+		m = sized(m)
+		m.input.SetValue("hi")
+		m, cmd := driveCmd(m, key("enter"))
+		m = drive(m, cmd())
+		if !strings.Contains(m.View(), "session expired") {
+			t.Errorf("view missing the expiry banner:\n%s", m.View())
+		}
+	})
+}
+
+func TestNoticeCapKeepsLastThree(t *testing.T) {
+	m, _ := newTestModel(t, chatServer(t), WithConversation("u1"))
+	m = sized(m)
+	for i := range 5 {
+		m.pushNotice(strings.Repeat("x", i+1))
+	}
+	if len(m.notices) != maxNotices {
+		t.Errorf("notices = %d, want %d", len(m.notices), maxNotices)
+	}
+	if m.notices[0] != "xxx" {
+		t.Errorf("oldest kept notice = %q, want the third", m.notices[0])
+	}
+}
+
+func TestSpinnerTickAfterPendingDrainedStopsLoop(t *testing.T) {
+	m, _ := newTestModel(t, chatServer(t), WithConversation("u1"))
+	m = sized(m)
+	m.pending[9] = true
+	m, cmd := driveCmd(m, m.spin.Tick())
+	if cmd == nil {
+		t.Fatal("tick with pending must continue the loop")
+	}
+	delete(m.pending, 9)
+	_, cmd = driveCmd(m, m.spin.Tick())
+	if cmd != nil {
+		t.Error("tick with pending drained must not re-arm")
+	}
+}
+
+func TestRelativeTime(t *testing.T) {
+	cases := map[string]string{
+		"30s": "just now",
+		"5m":  "5m ago",
+		"3h":  "3h ago",
+		"72h": "3d ago",
+	}
+	for in, want := range cases {
+		d, err := time.ParseDuration(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := relativeTime(fixedNow.Add(-d), fixedNow); got != want {
+			t.Errorf("relativeTime(-%s) = %q, want %q", in, got, want)
+		}
+	}
+}

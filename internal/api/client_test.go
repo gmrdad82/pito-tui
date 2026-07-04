@@ -221,3 +221,13 @@ func TestLoginErrorMapping(t *testing.T) {
 		})
 	}
 }
+
+func TestJarAndBaseURLAccessors(t *testing.T) {
+	c := newClient(t, http.NewServeMux())
+	if c.Jar() == nil {
+		t.Error("Jar() must expose the shared jar for the cable dialer")
+	}
+	if c.BaseURL() == nil || c.BaseURL().Host == "" {
+		t.Error("BaseURL() must return the instance URL")
+	}
+}

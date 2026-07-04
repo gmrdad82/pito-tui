@@ -130,3 +130,10 @@ func TestHTMLToText(t *testing.T) {
 		})
 	}
 }
+
+func TestFallbackWithInvalidPayloadBytes(t *testing.T) {
+	out := plain().Event(api.Event{ID: 1, TurnID: 1, Kind: "weird", Payload: []byte("not json")})
+	if !strings.Contains(out, "[weird]") || !strings.Contains(out, "not json") {
+		t.Errorf("fallback = %q", out)
+	}
+}

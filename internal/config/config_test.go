@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -117,4 +118,16 @@ func TestWithFlagsPrecedence(t *testing.T) {
 			t.Errorf("InstanceURL = %q", got.InstanceURL)
 		}
 	})
+}
+
+func TestDirAndDefaultPath(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	dir, err := Dir()
+	if err != nil || !strings.HasSuffix(dir, "pito-tui") {
+		t.Errorf("Dir = %q, %v", dir, err)
+	}
+	path, err := DefaultPath()
+	if err != nil || !strings.HasSuffix(path, filepath.Join("pito-tui", "config.toml")) {
+		t.Errorf("DefaultPath = %q, %v", path, err)
+	}
 }
