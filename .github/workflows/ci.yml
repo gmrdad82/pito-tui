@@ -57,6 +57,10 @@ on:
     # cadence as pito's bundler-audit job: a newly-disclosed advisory
     # raises a red weekly run even when nothing in the tree changes.
     - cron: "0 12 * * 1"
+  # Manual escape hatch — also the recovery path when a commit message
+  # accidentally contains the skip token while merely TALKING about it
+  # (which is exactly how the first CI run of this repo got skipped).
+  workflow_dispatch:
 
 permissions:
   contents: read
