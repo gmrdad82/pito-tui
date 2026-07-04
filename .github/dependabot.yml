@@ -20,6 +20,13 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # Dependabot's resolver can't handle charmbracelet/x nested modules
+      # (it looks for the package in the ROOT x module and errors) — every
+      # weekly run would fail on these two test-only deps. Bumped by hand
+      # with `go get -u` when needed.
+      - dependency-name: "github.com/charmbracelet/x/exp/teatest"
+      - dependency-name: "github.com/charmbracelet/x/exp/golden"
 
   - package-ecosystem: github-actions
     directory: "/"
