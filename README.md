@@ -1,12 +1,21 @@
 # pito-tui
 
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+[![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-ff69b4?logo=githubsponsors)](https://github.com/sponsors/gmrdad82)
+
 Terminal client for [PITO](https://github.com/gmrdad82/pito) — the
-self-hosted YouTube tool. One scrollback, one prompt, the same server-side
-command grammar as the web chatbox, live over ActionCable.
+self-hosted, chat-first YouTube channel manager. One scrollback, one prompt,
+the same server-side command grammar as the web chatbox, live over
+ActionCable. PITO in the place you already live.
 
 The TUI is a thin client by design: it sends raw text (slash commands
 included) and renders the JSON events the server emits. All parsing,
-grammar, and behavior live in the Rails app.
+grammar, and behavior live in the Rails app — this binary is the window,
+your server is the product.
+
+Phone person? The same instance also fits in your pocket:
+[**`pito-android`**](https://github.com/gmrdad82/pito-android), a native
+Android shell around your instance's own UI.
 
 ## Install
 
