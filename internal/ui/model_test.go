@@ -757,3 +757,51 @@ func TestNoImageDisplayMeansNoFetch(t *testing.T) {
 		t.Error("plain terminals must not fetch thumbnails")
 	}
 }
+
+func TestShimmerAnimatesWhileFreshThenSettles(t *testing.T) {
+	m, _ := newTestModel(t, chatServer(t), WithConversation("u1"), WithTruecolor(true))
+	m = sized(m)
+	m = drive(m, m.fetchChatCmd("u1", false)())
+
+	body := `{"body":"<span class=\"pito-subject-shimmer\">13</span> games.","html":true}`
+	m, cmd := driveCmd(m, CableEventMsg{M: cable.StreamMessage{
+		Type:  cable.TypeEventAppend,
+		Event: api.Event{ID: 40, TurnID: 15, Kind: "system", Payload: []byte(body)},
+	}})
+	if len(m.shimmer) != 1 {
+		t.Fatal("fresh shimmer event must register for animation")
+	}
+	if cmd == nil {
+		t.Fatal("shimmer must start the animation loop")
+	}
+
+	// Ticks advance the phase and keep the loop alive while fresh.
+	before := m.phase
+	m, cmd = driveCmd(m, AnimTickMsg{})
+	if m.phase == before || cmd == nil {
+		t.Error("tick must advance phase and re-arm")
+	}
+
+	// Expire the shimmer: the loop dies.
+	m.shimmer[15] = time.Now().Add(-shimmerLife - time.Second)
+	m, cmd = driveCmd(m, AnimTickMsg{})
+	if len(m.shimmer) != 0 || m.animating {
+		t.Error("expired shimmer must settle")
+	}
+	if cmd != nil {
+		t.Error("settled shimmer must not re-arm the loop")
+	}
+}
+
+func TestNoShimmerTrackingWithoutTruecolor(t *testing.T) {
+	m, _ := newTestModel(t, chatServer(t), WithConversation("u1"))
+	m = sized(m)
+	body := `{"body":"<span class=\"pito-subject-shimmer\">13</span>","html":true}`
+	m = drive(m, CableEventMsg{M: cable.StreamMessage{
+		Type:  cable.TypeEventAppend,
+		Event: api.Event{ID: 41, TurnID: 16, Kind: "system", Payload: []byte(body)},
+	}})
+	if len(m.shimmer) != 0 {
+		t.Error("256-color terminals must not run the animation loop")
+	}
+}

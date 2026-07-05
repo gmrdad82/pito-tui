@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/muesli/termenv"
@@ -77,6 +78,10 @@ Point pito-tui at your install:
 
 	player := sound.New(cfg.InstanceURL, cfg.Sounds)
 
+	// Truecolor detection is env-only (COLORTERM) — same no-query rule.
+	truecolor := strings.Contains(os.Getenv("COLORTERM"), "truecolor") ||
+		strings.Contains(os.Getenv("COLORTERM"), "24bit")
+
 	// Resolve the markdown style NOW, before Bubble Tea owns the terminal:
 	// termenv's background query talks over stdin, and doing it inside the
 	// program deadlocks against tea's input reader (the "loading…" freeze).
@@ -104,7 +109,7 @@ Point pito-tui at your install:
 		go func() { _ = cab.Run(ctx) }()
 	}
 
-	modelOpts := []ui.Option{ui.WithSounds(player), ui.WithGlamourStyle(glamourStyle)}
+	modelOpts := []ui.Option{ui.WithSounds(player), ui.WithGlamourStyle(glamourStyle), ui.WithTruecolor(truecolor)}
 	// Terminal images: dynamic capability detection (kitty/ghostty/
 	// WezTerm speak the kitty graphics protocol); text-only elsewhere.
 	var shower *img.Shower

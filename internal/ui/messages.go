@@ -42,3 +42,7 @@ type ResumeFetchedMsg struct {
 type ImageFetchedMsg struct {
 	Data []byte
 }
+
+// AnimTickMsg drives the shimmer sweep — emitted only while fresh
+// shimmer-marked turns are on screen (then the loop dies).
+type AnimTickMsg struct{}

@@ -105,6 +105,15 @@ func (t *Transcript) Merge(events []api.Event) int {
 	return changed
 }
 
+// Touch marks one turn dirty (shimmer animation re-renders it per tick
+// without invalidating the rest of the cache).
+func (t *Transcript) Touch(turnID int64) {
+	if turn, ok := t.byTurn[turnID]; ok {
+		turn.dirty = true
+		t.joinedOK = false
+	}
+}
+
 // HasTurn reports whether any event of the turn has arrived (pending
 // spinner bookkeeping).
 func (t *Transcript) HasTurn(turnID int64) bool {

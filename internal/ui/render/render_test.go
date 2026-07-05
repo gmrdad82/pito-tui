@@ -253,3 +253,92 @@ func TestHTMLDetailCardStructures(t *testing.T) {
 		t.Errorf("img alt must not leak: %q", got)
 	}
 }
+
+func TestI18nOnlyErrorRendersHumanely(t *testing.T) {
+	out := plain().Event(event("error", `{"message_key":"pito.chat.unlink.usage","message_args":{}}`))
+	if !strings.Contains(out, "✗ usage") || !strings.Contains(out, "pito.chat.unlink.usage") {
+		t.Errorf("message_key error must render a hint, not a JSON dump: %q", out)
+	}
+	if strings.Contains(out, "{") {
+		t.Errorf("no raw JSON in error blocks: %q", out)
+	}
+}
+
+func TestAnalyzeChartsFromLivePayload(t *testing.T) {
+	raw, err := os.ReadFile("testdata/analyze_channel.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := plain().Event(event("system", string(raw)))
+
+	// Sparklines: one rune per day for each stash metric.
+	if strings.Count(out, "▁") == 0 && strings.Count(out, "▂") == 0 {
+		t.Errorf("no sparkline runes rendered:\n%s", out)
+	}
+	for _, want := range []string{
+		"total -2",          // subs total (negative-friendly)
+		"prev 37",           // views previous window
+		"target 3.22/d",     // pacing
+		"27%",               // avg_viewed_pct via total_pct
+		"♥ 88.8%",           // the heart
+		"14453 likes",       // heart detail
+		"Subs stands at -2", // Butler caption survives html+shimmer stripping
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("analyze block missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestSparklineScaling(t *testing.T) {
+	if got := sparkline([]float64{0, 0, 0}); got != "▁▁▁" {
+		t.Errorf("flat series = %q", got)
+	}
+	got := sparkline([]float64{-1, 0, 5})
+	if []rune(got)[0] != '▁' || []rune(got)[2] != '█' {
+		t.Errorf("range scaling wrong: %q", got)
+	}
+	if sparkline(nil) != "" {
+		t.Error("empty series must render nothing")
+	}
+}
+
+func TestAnalyzeSuppressesTheWebBodyArt(t *testing.T) {
+	raw, _ := os.ReadFile("testdata/analyze_channel.json")
+	out := plain().Event(event("system", string(raw)))
+	if strings.Contains(out, "The stock 7d report on 6 channels") == false {
+		t.Errorf("intro line must survive:\n%s", out)
+	}
+	// The fixture body says "report on 6 channels." inside a div — if the
+	// body were flattened too, the intro would appear twice.
+	if strings.Count(out, "stock 7d report") != 1 {
+		t.Errorf("web body must yield to data-drawn charts:\n%s", out)
+	}
+}
+
+func TestChannelDetailGridWithAvatar(t *testing.T) {
+	// The channel card mixes an <img> cell into the label/value grid —
+	// live-reported as a run-on paragraph (owner screenshot 2026-07-05).
+	grid := `<div class="grid grid-cols-[max-content_1fr] gap-x-2">
+		<span class="text-fg-dim">Avatar</span><img class="pito-channel-tiny-avatar" src="/a.jpg"/>
+		<span class="text-fg-dim">Handle</span><span class="pito-action-shimmer">@gmrdad82</span>
+		<span class="text-fg-dim">Title</span><span class="text-fg">Catalin Ilinca</span>
+	</div>`
+	out := htmlToText(grid)
+	for _, want := range []string{"Avatar  ◉", "Handle  @gmrdad82", "Title   Catalin Ilinca"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("grid line %q missing:\n%s", want, out)
+		}
+	}
+}
+
+func TestListAvatarsGetAMarker(t *testing.T) {
+	payload := `{"body":"x","html":true,"table_rows":[{"cells":[
+		{"html": true, "text": "<img class=\"pito-channel-tiny-avatar\" src=\"/a.jpg\"/>", "class": "pito-cell-avatar"},
+		{"text": "@gmrdad82", "class": "pito-action-shimmer"}
+	]}]}`
+	out := plain().Event(event("system", payload))
+	if !strings.Contains(out, "◉") {
+		t.Errorf("avatar cell must show a marker:\n%s", out)
+	}
+}

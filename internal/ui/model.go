@@ -64,7 +64,11 @@ type Model struct {
 	mode         mode
 	plainRender  bool
 	glamourStyle string
+	truecolor    bool
 	renderer     *render.R
+	shimmer      map[int64]time.Time // turnID → when its shimmer went live
+	phase        float64
+	animating    bool
 
 	// picker state
 	rows   []pickerRow
@@ -150,6 +154,12 @@ func WithSounds(n Notifier) Option {
 	}
 }
 
+// WithTruecolor turns on gradient shimmer (COLORTERM detection happens
+// in the app layer, before Bubble Tea owns the terminal).
+func WithTruecolor(on bool) Option {
+	return func(m *Model) { m.truecolor = on }
+}
+
 func NewModel(client *api.Client, connect ConnectFunc, opts ...Option) Model {
 	input := textinput.New()
 	input.Placeholder = "/help to see available commands"
@@ -181,6 +191,7 @@ func NewModel(client *api.Client, connect ConnectFunc, opts ...Option) Model {
 		input:   input,
 		spin:    spin,
 		pending: map[int64]bool{},
+		shimmer: map[int64]time.Time{},
 		follow:  true,
 		now:     time.Now,
 	}
@@ -246,6 +257,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onCableEvent(msg)
 	case ConnStateMsg:
 		return m.onConnState(msg)
+	case AnimTickMsg:
+		return m.onAnimTick()
 	case ImageFetchedMsg:
 		if m.images != nil && m.width > 46 {
 			// Pin to the top-right corner, clear of the scrollback's left
@@ -274,6 +287,7 @@ func (m Model) onResize(msg tea.WindowSizeMsg) Model {
 	if m.glamourStyle != "" {
 		opts = append(opts, render.WithStyle(m.glamourStyle))
 	}
+	opts = append(opts, render.WithTruecolor(m.truecolor))
 	m.renderer = render.New(m.contentWidth(), opts...)
 	renderer := m.renderer
 	m.transcript.SetRenderer(func(ev api.Event, _ int) string { return renderer.Event(ev) })
@@ -484,6 +498,9 @@ func (m Model) onCableEvent(msg CableEventMsg) (tea.Model, tea.Cmd) {
 			m.sounds.Receive()
 		}
 		m.transcript.Append(ev)
+		if m.truecolor && render.HasShimmer(ev.Payload) {
+			m.shimmer[ev.TurnID] = time.Now()
+		}
 	case cable.TypeEventReplace:
 		// A replace proves the turn is flowing too — the thinking
 		// resolve (event.replace, resolved: true) is THE turn-done
@@ -494,7 +511,47 @@ func (m Model) onCableEvent(msg CableEventMsg) (tea.Model, tea.Cmd) {
 		return m, nil // unknown stream message type: ignore
 	}
 	m.refreshViewport()
-	return m, m.imageCmd(ev)
+	return m, tea.Batch(m.imageCmd(ev), m.animate())
+}
+
+const shimmerLife = 4400 * time.Millisecond // one web sweep cycle, twice
+
+// animate ensures the shimmer tick loop runs while anything is fresh.
+func (m *Model) animate() tea.Cmd {
+	if m.animating || len(m.shimmer) == 0 {
+		return nil
+	}
+	m.animating = true
+	return animTick()
+}
+
+func animTick() tea.Cmd {
+	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return AnimTickMsg{} })
+}
+
+func (m Model) onAnimTick() (tea.Model, tea.Cmd) {
+	now := time.Now()
+	for turnID, born := range m.shimmer {
+		if now.Sub(born) > shimmerLife {
+			delete(m.shimmer, turnID) // settle at the current phase
+			continue
+		}
+		m.transcript.Touch(turnID)
+	}
+	if len(m.shimmer) == 0 {
+		m.animating = false
+		m.refreshViewport()
+		return m, nil
+	}
+	m.phase += 0.045 // full sweep ≈ 2.2s at 10fps
+	if m.phase >= 1 {
+		m.phase -= 1
+	}
+	if m.renderer != nil {
+		m.renderer.SetPhase(m.phase)
+	}
+	m.refreshViewport()
+	return m, animTick()
 }
 
 // imageCmd fetches a message's thumbnail for the pinned display. Only on
@@ -683,7 +740,11 @@ func (m *Model) refreshViewport() {
 		content = badge + tip + statusStyle.Render("— say something; the server knows the grammar. /help lists it.")
 	}
 	if len(m.pending) > 0 {
-		content += noticeSpacer + m.spin.View() + " thinking…"
+		line := m.spin.View() + " thinking…"
+		if m.truecolor {
+			line = m.spin.View() + render.PitoShimmer.Colorize(" thinking…", m.phase)
+		}
+		content += noticeSpacer + line
 	}
 	if m.renderer != nil {
 		for _, n := range m.notices {

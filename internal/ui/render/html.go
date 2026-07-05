@@ -45,12 +45,27 @@ func htmlToText(fragment string) string {
 	return strings.TrimSpace(strings.Join(out, "\n"))
 }
 
+// Shimmer markers: the web tags eye-catching words with
+// pito-subject-shimmer spans; the extractor wraps them in private-use
+// runes so the renderer can gradient-paint exactly the same words.
+const (
+	ShimmerStart = '\uE000'
+	ShimmerEnd   = '\uE001'
+)
+
 func walkText(n *html.Node, b *strings.Builder) {
 	if n.Type == html.TextNode {
 		b.WriteString(strings.ReplaceAll(n.Data, "\n", " "))
 	}
 	if n.Type == html.ElementNode {
 		switch {
+		case strings.Contains(attr(n, "class"), "pito-subject-shimmer"):
+			b.WriteRune(ShimmerStart)
+			for child := n.FirstChild; child != nil; child = child.NextSibling {
+				walkText(child, b)
+			}
+			b.WriteRune(ShimmerEnd)
+			return
 		case n.Data == "svg":
 			// Icon SVGs carry their meaning in aria-label ("Likes",
 			// "Comments") — emit the word, skip the path soup.
@@ -59,7 +74,13 @@ func walkText(n *html.Node, b *strings.Builder) {
 			}
 			return
 		case n.Data == "img":
-			return // thumbnails/avatars: neighboring cells carry the text
+			// Avatars get a visible marker (inline kitty avatars are the
+			// real fix, queued); thumbnails stay silent — the pinned
+			// image display carries them.
+			if strings.Contains(attr(n, "class"), "avatar") {
+				b.WriteString("◉")
+			}
+			return
 		case strings.Contains(attr(n, "class"), "grid"):
 			// Label/value grids (detail cards): the web separates the
 			// span pairs visually; the terminal gets one pair per line.
@@ -94,19 +115,15 @@ func attr(n *html.Node, name string) string {
 	return ""
 }
 
-// gridPairs renders a label/value span grid as aligned lines. Returns ""
-// when the element does not look like one (falls back to normal walking).
+// gridPairs renders a label/value grid as aligned lines. Any element can
+// be a cell (the channel card mixes spans with an avatar <img>). Returns
+// "" when the element does not look like a pair grid.
 func gridPairs(n *html.Node) string {
 	var cells []string
 	for child := n.FirstChild; child != nil; child = child.NextSibling {
 		if child.Type == html.ElementNode {
-			if child.Data != "span" {
-				return ""
-			}
 			var cell strings.Builder
-			for g := child.FirstChild; g != nil; g = g.NextSibling {
-				walkText(g, &cell)
-			}
+			walkText(child, &cell)
 			cells = append(cells, strings.TrimSpace(cell.String()))
 		}
 	}

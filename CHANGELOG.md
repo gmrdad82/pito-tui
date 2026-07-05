@@ -73,3 +73,21 @@ project follows [Semantic Versioning](https://semver.org/).
 - **Capture rig** — `scripts/capture.sh`, the terminal twin of pito's
   `rake pito:capture` (vhs-driven); scenarios in `captures/*.tape`,
   artifacts in `tmp/captures/<name>/`.
+- **Analytics charts (v1)** — `analyze channel` renders real charts
+  from the structured payload: per-metric gradient sparklines with
+  totals, previous-window deltas and target pacing, plus the
+  likes-vs-dislikes heart — the Butler's per-metric captions ride
+  above each, shimmer included. The web's own body drawing yields to
+  the terminal-native one.
+- **Mutation-round fixes** — detail-card label/value grids survive
+  mixed cells (the avatar `<img>` no longer collapses the channel card
+  into a run-on paragraph); avatar cells show a ◉ marker pending true
+  inline images; I18n-only server errors render a humanized hint
+  instead of a JSON dump.
+- **Shimmer and gradients** — on truecolor terminals the exact words the
+  web shimmers (its `pito-subject-shimmer` spans) get a multi-stop
+  gradient sweep while the message is fresh, then settle; the pending
+  comet rides the same ramp. The gradient engine (with the web's
+  green→red meter ramp and a `Bar()` primitive) is the shared base for
+  the upcoming context meter, score bars, and analytics charts.
+  256-color terminals get static accents instead.

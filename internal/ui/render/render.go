@@ -20,10 +20,12 @@ import (
 // R renders events at a fixed width. Rebuild it on terminal resize — the
 // glamour renderer word-wraps at construction time.
 type R struct {
-	width int
-	plain bool
-	style string
-	glam  *glamour.TermRenderer
+	width     int
+	plain     bool
+	truecolor bool
+	phase     float64
+	style     string
+	glam      *glamour.TermRenderer
 
 	echoBar      lipgloss.Style
 	systemBar    lipgloss.Style
@@ -40,6 +42,13 @@ type Option func(*R)
 // golden tests; also the safe path if glamour ever misbehaves).
 func WithPlain() Option {
 	return func(r *R) { r.plain = true }
+}
+
+// WithTruecolor enables gradient/shimmer painting (COLORTERM-detected by
+// the app before Bubble Tea starts; 256-color terminals get static
+// accents instead).
+func WithTruecolor(on bool) Option {
+	return func(r *R) { r.truecolor = on }
 }
 
 // WithStyle picks the glamour style ("dark"/"light"). The caller resolves
@@ -92,6 +101,51 @@ func New(width int, opts ...Option) *R {
 		}
 	}
 	return r
+}
+
+// SetPhase advances the shimmer sweep (one animation tick). The model
+// drives it only while fresh shimmer is on screen.
+func (r *R) SetPhase(phase float64) { r.phase = phase }
+
+// paintShimmer replaces marker-wrapped words with gradient paint (or a
+// static accent when the terminal cannot truecolor).
+func (r *R) paintShimmer(text string) string {
+	if !strings.ContainsRune(text, ShimmerStart) {
+		return text
+	}
+	var b strings.Builder
+	var word *strings.Builder
+	for _, ru := range text {
+		switch ru {
+		case ShimmerStart:
+			word = &strings.Builder{}
+		case ShimmerEnd:
+			if word != nil {
+				if r.truecolor {
+					b.WriteString(PitoShimmer.Colorize(word.String(), r.phase))
+				} else {
+					b.WriteString(lipgloss.NewStyle().Foreground(ColorAccent).Bold(true).Render(word.String()))
+				}
+				word = nil
+			}
+		default:
+			if word != nil {
+				word.WriteRune(ru)
+			} else {
+				b.WriteRune(ru)
+			}
+		}
+	}
+	if word != nil { // unterminated marker: degrade to plain
+		b.WriteString(word.String())
+	}
+	return b.String()
+}
+
+// HasShimmer reports whether a payload carries shimmer-marked words —
+// the model uses it to decide which turns animate while fresh.
+func HasShimmer(payload []byte) bool {
+	return strings.Contains(string(payload), "pito-subject-shimmer")
 }
 
 // Event renders one event to a newline-terminated block.
@@ -230,9 +284,15 @@ func (r *R) bodyText(ev api.Event) string {
 		return strings.TrimSpace(string(ev.Payload))
 	}
 	headline := ""
+	charts := r.analyzeBlock(ev.Payload)
 	switch {
+	case charts != "":
+		// Chart-bearing payloads: the html body is the WEB's drawing of
+		// the same data (ascii hearts and all) — the terminal draws its
+		// own from `analyze`, keeping only the intro line.
+		headline = r.paintShimmer(htmlToText(analyzeIntro(ev.Payload)))
 	case p.Body != "" && p.HTML:
-		headline = htmlToText(p.Body)
+		headline = r.paintShimmer(htmlToText(p.Body))
 	case p.Body != "":
 		headline = r.markdown(p.Body)
 	default:
@@ -244,6 +304,9 @@ func (r *R) bodyText(ev api.Event) string {
 	}
 	if len(p.Sections) > 0 {
 		parts = append(parts, r.sections(p.Sections))
+	}
+	if charts != "" {
+		parts = append(parts, charts)
 	}
 	if len(p.TableRows) > 0 {
 		parts = append(parts, r.table(p.TableHeading, p.TableRows))
@@ -363,10 +426,19 @@ func (r *R) echo(ev api.Event) string {
 
 func (r *R) errorEvent(ev api.Event) string {
 	var p struct {
-		Text   string `json:"text"`
-		Detail string `json:"detail"`
+		Text       string `json:"text"`
+		Detail     string `json:"detail"`
+		MessageKey string `json:"message_key"`
 	}
 	_ = json.Unmarshal(ev.Payload, &p)
+	if p.Text == "" && p.MessageKey != "" {
+		// I18n-only errors (server gap, on the Rails list): the key's
+		// last segment is at least a humane hint — "usage" beats a JSON
+		// dump. `verb --help` is always the way out.
+		parts := strings.Split(p.MessageKey, ".")
+		p.Text = strings.ReplaceAll(parts[len(parts)-1], "_", " ")
+		p.Detail = p.MessageKey + " — try `--help` on the verb"
+	}
 	if p.Text == "" {
 		return r.fallback(ev)
 	}

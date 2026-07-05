@@ -1,0 +1,124 @@
+{
+ "body": "<div>The stock 7d report on 6 channels.</div>",
+ "html": true,
+ "analyze": {
+  "intro": "The stock <span class=\"pito-token\">7d</span> report on <span class=\"pito-subject-shimmer pito-shimmer-d5\">6 channels</span>.",
+  "level": "channel",
+  "likes": {
+   "hearts": [
+    {
+     "color": "purple",
+     "likes": 14453,
+     "score": 88.8,
+     "dislikes": 1828
+    }
+   ],
+   "caption": "<span class=\"pito-subject-shimmer pito-shimmer-d16\">Likes vs Dislikes</span> comes in at <span class=\"pito-token\">88.80%</span> <span class=\"pito-token\">lifetime</span>. The internet nods, vaguely."
+  },
+  "subs": {
+   "dates": [
+    "2026-06-29",
+    "2026-06-30",
+    "2026-07-01",
+    "2026-07-02",
+    "2026-07-03",
+    "2026-07-04",
+    "2026-07-05"
+   ],
+   "total": -2,
+   "series": [
+    -1,
+    0,
+    -1,
+    0,
+    0,
+    0,
+    0
+   ],
+   "caption": "<span class=\"pito-subject-shimmer pito-shimmer-d12\">Subs</span> stands at <span class=\"pito-token\">-2</span>. As numbers go, it&#39;s a number.",
+   "previous": 0,
+   "target_daily": 3.224285714285714
+  },
+  "stash": {
+   "subs": {
+    "data": {
+     "dates": [
+      "2026-06-29",
+      "2026-06-30",
+      "2026-07-01",
+      "2026-07-02",
+      "2026-07-03",
+      "2026-07-04",
+      "2026-07-05"
+     ],
+     "total": -2,
+     "series": [
+      -1,
+      0,
+      -1,
+      0,
+      0,
+      0,
+      0
+     ],
+     "previous": 0,
+     "target_daily": 3.224285714285714
+    },
+    "slot": "charts"
+   },
+   "views": {
+    "data": {
+     "dates": [
+      "2026-06-29",
+      "2026-06-30",
+      "2026-07-01",
+      "2026-07-02",
+      "2026-07-03",
+      "2026-07-04",
+      "2026-07-05"
+     ],
+     "total": 21,
+     "series": [
+      5,
+      12,
+      3,
+      1,
+      0,
+      0,
+      0
+     ],
+     "previous": 37,
+     "target_daily": 322.42857142857144
+    },
+    "slot": "charts"
+   },
+   "avg_viewed_pct": {
+    "data": {
+     "dates": [
+      "2026-06-29",
+      "2026-06-30",
+      "2026-07-01",
+      "2026-07-02",
+      "2026-07-03",
+      "2026-07-04",
+      "2026-07-05"
+     ],
+     "trend": false,
+     "series": [
+      50.8,
+      25.1,
+      1.8,
+      6.0,
+      0.0,
+      0.0,
+      0.0
+     ],
+     "previous": null,
+     "total_pct": 27.0,
+     "target_daily": 50.0
+    },
+    "slot": "charts"
+   }
+  }
+ }
+}
