@@ -3,7 +3,19 @@ package render
 import (
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
+
+// withTrueColor scopes a test to the truecolor profile — gradients now
+// render through lipgloss (the white-charts fix), so Ascii-profile tests
+// see them stripped like every other style.
+func withTrueColor(t *testing.T) {
+	t.Helper()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(termenv.Ascii) })
+}
 
 func TestGradientAtStops(t *testing.T) {
 	g := Gradient{Stops: []RGB{{0, 0, 0}, {100, 200, 50}}}
@@ -24,12 +36,13 @@ func TestGradientAtStops(t *testing.T) {
 }
 
 func TestColorizeEmitsTruecolorPerRune(t *testing.T) {
+	withTrueColor(t)
 	out := PitoShimmer.Colorize("23", 0)
 	if strings.Count(out, "\x1b[38;2;") != 2 {
 		t.Errorf("want one SGR per rune: %q", out)
 	}
-	if !strings.HasSuffix(out, "\x1b[39m") {
-		t.Errorf("must reset foreground: %q", out)
+	if !strings.Contains(out, "\x1b[0m") {
+		t.Errorf("styles must reset: %q", out)
 	}
 	// Phase shifts the ramp: different phase, different bytes.
 	if PitoShimmer.Colorize("shimmer", 0) == PitoShimmer.Colorize("shimmer", 0.5) {
@@ -38,6 +51,7 @@ func TestColorizeEmitsTruecolorPerRune(t *testing.T) {
 }
 
 func TestBarFill(t *testing.T) {
+	withTrueColor(t)
 	out := MeterRamp.Bar(0.5, 10)
 	if strings.Count(out, "█") != 5 || strings.Count(out, "░") != 5 {
 		t.Errorf("half bar wrong: %q", out)
@@ -62,7 +76,8 @@ func TestShimmerMarkersExtractAndPaint(t *testing.T) {
 		t.Errorf("shimmer word lost: %q", out)
 	}
 
-	// Truecolor renderer: the word is gradient-painted.
+	// Truecolor renderer + profile: the word is gradient-painted.
+	withTrueColor(t)
 	tc := New(60, WithStyle("dark"), WithTruecolor(true))
 	out = tc.Event(event("system", body))
 	if !strings.Contains(out, "\x1b[38;2;") {

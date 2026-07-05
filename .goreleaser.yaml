@@ -105,6 +105,9 @@ brews:
       system "#{bin}/pito-tui", "version"
 
 release:
+  # The release title IS the annotated tag's subject — pito tag
+  # convention ("PITO-TUI X.Y.Z — codename") stated once, on the tag.
+  name_template: "{{ .TagSubject }}"
   footer: |
     ---
     **Install** — Arch/Omarchy: `yay -S pito-tui-bin` · macOS/Linux: `brew install gmrdad82/tap/pito-tui` · Ubuntu/Debian: download the `.deb` above, then `sudo apt install ./pito-tui_*.deb`

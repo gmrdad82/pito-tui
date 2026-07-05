@@ -13,6 +13,7 @@ import (
 
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/lipgloss/table"
 
 	"github.com/gmrdad82/pito-tui/internal/api"
 )
@@ -286,11 +287,16 @@ func (r *R) bodyText(ev api.Event) string {
 	headline := ""
 	charts := r.analyzeBlock(ev.Payload)
 	switch {
-	case charts != "":
-		// Chart-bearing payloads: the html body is the WEB's drawing of
-		// the same data (ascii hearts and all) — the terminal draws its
-		// own from `analyze`, keeping only the intro line.
+	case hasAnalyze(ev.Payload):
+		// Analyze payloads: the html body is the WEB's drawing (ascii
+		// hearts, pending dot-grids) — the terminal draws its own from
+		// `analyze`, keeping only the intro. While metrics are still
+		// pending (no series yet), show a quiet note instead of the art;
+		// the event.replace stream fills the charts in as jobs land.
 		headline = r.paintShimmer(htmlToText(analyzeIntro(ev.Payload)))
+		if charts == "" {
+			charts = r.dim("crunching the numbers…")
+		}
 	case p.Body != "" && p.HTML:
 		headline = r.paintShimmer(htmlToText(p.Body))
 	case p.Body != "":
@@ -309,7 +315,9 @@ func (r *R) bodyText(ev api.Event) string {
 		parts = append(parts, charts)
 	}
 	if len(p.TableRows) > 0 {
-		parts = append(parts, r.table(p.TableHeading, p.TableRows))
+		if rendered := r.table(p.TableHeading, p.TableRows); rendered != "" {
+			parts = append(parts, rendered)
+		}
 	}
 	if p.ListFooter != "" {
 		parts = append(parts, r.dim(p.ListFooter))
@@ -346,63 +354,155 @@ func (r *R) sections(groups []section) string {
 	return b.String()
 }
 
-// table renders structured rows as aligned columns: dim headings,
-// right-aligned where the web says so (text-right), actionable references
-// (#28 …) in the accent color — the closest thing to the web's clickable
-// shimmer. HTML cells (avatars) flatten to their text content.
+// table renders structured rows through lipgloss/table — the shared list
+// viewer for ls channels/vids/games (and every reply that re-emits a
+// list). Rounded frame, header rule, zebra rows; alignment follows the
+// server's own class hints (text-right = numbers/dates); columns whose
+// body cells all render empty (images are ignored wholesale) drop.
 func (r *R) table(heading []tableCell, rows []tableRow) string {
-	all := rows
-	if len(heading) > 0 {
-		all = append([]tableRow{{Cells: heading}}, rows...)
-	}
-	columns := 0
-	for _, row := range all {
-		if len(row.Cells) > columns {
-			columns = len(row.Cells)
-		}
-	}
 	cellText := func(cell tableCell) string {
 		if cell.HTML {
 			return htmlToText(cell.Text)
 		}
 		return cell.Text
 	}
-	widths := make([]int, columns)
-	for _, row := range all {
-		for i, cell := range row.Cells {
-			if w := lipgloss.Width(cellText(cell)); w > widths[i] {
-				widths[i] = w
-			}
+
+	// Column census: text, emptiness, alignment, accent.
+	columns := len(heading)
+	for _, row := range rows {
+		if len(row.Cells) > columns {
+			columns = len(row.Cells)
 		}
 	}
-	var b strings.Builder
-	for ri, row := range all {
-		if ri > 0 {
-			b.WriteString("\n")
+	if columns == 0 {
+		return ""
+	}
+	keep := make([]bool, columns)
+	rightAlign := make([]bool, columns)
+	for i, cell := range heading {
+		if strings.Contains(cell.Class, "text-right") {
+			rightAlign[i] = true
 		}
-		isHeading := len(heading) > 0 && ri == 0
-		for i, cell := range row.Cells {
-			if i > 0 {
-				b.WriteString("  ")
+	}
+	texts := make([][]string, len(rows))
+	accents := make([][]bool, len(rows))
+	for ri, row := range rows {
+		texts[ri] = make([]string, columns)
+		accents[ri] = make([]bool, columns)
+		for ci, cell := range row.Cells {
+			if ci >= columns {
+				break
 			}
-			text := cellText(cell)
-			pad := widths[i] - lipgloss.Width(text)
-			switch {
-			case isHeading:
-				text = r.dim(text)
-			case strings.Contains(cell.Class, "action"):
-				text = r.accent(text)
+			text := strings.TrimSpace(cellText(cell))
+			texts[ri][ci] = text
+			accents[ri][ci] = strings.Contains(cell.Class, "action")
+			if text != "" {
+				keep[ci] = true
 			}
 			if strings.Contains(cell.Class, "text-right") {
-				b.WriteString(strings.Repeat(" ", pad) + text)
-			} else if i < len(row.Cells)-1 {
-				b.WriteString(text + strings.Repeat(" ", pad))
-			} else {
-				b.WriteString(text) // last column: no trailing padding
+				rightAlign[ci] = true
 			}
 		}
 	}
-	return b.String()
+
+	// A column survives if it has a heading OR any body content. Only
+	// heading-less all-empty columns drop (the ignored-image residue) —
+	// a headed column with empty cells is DATA (platform nobody set yet)
+	// and hiding it broke `with platform` (owner report 2026-07-05).
+	var cols []int
+	for i := range keep {
+		hasHeading := i < len(heading) && strings.TrimSpace(cellText(heading[i])) != ""
+		if keep[i] || hasHeading {
+			cols = append(cols, i)
+		}
+	}
+	if len(cols) == 0 {
+		return ""
+	}
+	pick := func(src []string) []string {
+		out := make([]string, len(cols))
+		for i, c := range cols {
+			if c < len(src) {
+				out[i] = src[c]
+			}
+		}
+		return out
+	}
+
+	headerTexts := make([]string, columns)
+	hasHeading := false
+	for i, cell := range heading {
+		headerTexts[i] = strings.TrimSpace(cellText(cell))
+		if headerTexts[i] != "" {
+			hasHeading = true
+		}
+	}
+
+	build := func(width int) string {
+		t := table.New().
+			Border(lipgloss.RoundedBorder()).
+			BorderStyle(lipgloss.NewStyle().Foreground(ColorFaint)).
+			BorderColumn(false).
+			BorderRow(false).
+			// Horizontal rules only (owner call): no vertical borders on
+			// either side, the rows breathe against the message bar.
+			BorderLeft(false).
+			BorderRight(false).
+			BorderHeader(hasHeading).
+			// Never wrap: constrained cells truncate with … (the chosen
+			// design). Wrapping spilled continuation lines outside the
+			// frame once `with genre` pushed a table past the viewport.
+			Wrap(false).
+			StyleFunc(func(row, col int) lipgloss.Style {
+				src := cols[col]
+				st := lipgloss.NewStyle().Padding(0, 1)
+				if rightAlign[src] {
+					st = st.Align(lipgloss.Right)
+				}
+				if row == table.HeaderRow {
+					return st.Foreground(ColorDim).Bold(true)
+				}
+				if row >= 0 && row < len(accents) && accents[row][src] {
+					st = st.Foreground(ColorAccent)
+				}
+				if row%2 == 1 {
+					st = st.Background(ColorZebra)
+				}
+				return st
+			})
+		if hasHeading {
+			t = t.Headers(pick(headerTexts)...)
+		}
+		for _, row := range texts {
+			t = t.Row(pick(row)...)
+		}
+		if width > 0 {
+			t = t.Width(width)
+		}
+		return t.Render()
+	}
+
+	// The table lives inside a message bar: Width(r.width-2) including
+	// 1 col of left padding, plus the border col outside that width —
+	// content space is r.width-3. One char over and the bar wraps the
+	// table's last column onto stub lines (zebra paints them visibly).
+	avail := r.width - 3
+	out := build(0)
+	if lipgloss.Width(out) > avail {
+		out = build(avail) // lipgloss/table truncates cells with … (Wrap(false))
+	}
+	// lipgloss/table quirk: heading-less tables drop their bottom rule
+	// (even with BorderBottom(true)) — close the frame by repeating the
+	// top rule. Box-drawing ─ never appears in cell text (em-dashes are
+	// a different rune), so dash counts identify rule lines reliably.
+	if !hasHeading {
+		top := out[:strings.IndexByte(out, '\n')]
+		last := out[strings.LastIndexByte(out, '\n')+1:]
+		if strings.Count(last, "─") != strings.Count(top, "─") {
+			out += "\n" + top
+		}
+	}
+	return out
 }
 
 func (r *R) markdown(text string) string {

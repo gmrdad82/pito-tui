@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -710,55 +711,7 @@ func TestReplaceClearsPendingToo(t *testing.T) {
 	}
 }
 
-type imageRecorder struct {
-	shows  int
-	clears int
-	last   []byte
-}
-
-func (r *imageRecorder) Show(data []byte, row, col, cols, rows int) {
-	r.shows++
-	r.last = data
-}
-func (r *imageRecorder) Clear() { r.clears++ }
-
-func TestDetailCardThumbnailShowsOnKittyTerminals(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /thumb.jpg", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("jpeg-bytes"))
-	})
-	rec := &imageRecorder{}
-	m, _ := newTestModel(t, mux, WithConversation("u1"), WithImages(rec))
-	m = sized(m)
-
-	body := `{"body":"<div><img class=\"pito-channel-tiny-avatar\" src=\"/avatar.jpg\"/><img alt=\"x\" src=\"/thumb.jpg\"/></div>","html":true}`
-	m, cmd := driveCmd(m, CableEventMsg{M: cable.StreamMessage{
-		Type:  cable.TypeEventAppend,
-		Event: api.Event{ID: 9, TurnID: 4, Kind: "system", Payload: []byte(body)},
-	}})
-	if cmd == nil {
-		t.Fatal("card with a thumbnail must fetch it")
-	}
-	_ = drive(m, cmd()) // ImageFetchedMsg → Show
-	if rec.shows != 1 || string(rec.last) != "jpeg-bytes" {
-		t.Errorf("Show calls = %d, data = %q — thumbnail must pin (avatar skipped)", rec.shows, rec.last)
-	}
-}
-
-func TestNoImageDisplayMeansNoFetch(t *testing.T) {
-	m, _ := newTestModel(t, chatServer(t), WithConversation("u1"))
-	m = sized(m)
-	body := `{"body":"<img src=\"/thumb.jpg\"/>","html":true}`
-	_, cmd := driveCmd(m, CableEventMsg{M: cable.StreamMessage{
-		Type:  cable.TypeEventAppend,
-		Event: api.Event{ID: 9, TurnID: 4, Kind: "system", Payload: []byte(body)},
-	}})
-	if cmd != nil {
-		t.Error("plain terminals must not fetch thumbnails")
-	}
-}
-
-func TestShimmerAnimatesWhileFreshThenSettles(t *testing.T) {
+func TestShimmerAnimatesIndefinitely(t *testing.T) {
 	m, _ := newTestModel(t, chatServer(t), WithConversation("u1"), WithTruecolor(true))
 	m = sized(m)
 	m = drive(m, m.fetchChatCmd("u1", false)())
@@ -769,27 +722,27 @@ func TestShimmerAnimatesWhileFreshThenSettles(t *testing.T) {
 		Event: api.Event{ID: 40, TurnID: 15, Kind: "system", Payload: []byte(body)},
 	}})
 	if len(m.shimmer) != 1 {
-		t.Fatal("fresh shimmer event must register for animation")
+		t.Fatal("shimmer event must register for animation")
 	}
 	if cmd == nil {
 		t.Fatal("shimmer must start the animation loop")
 	}
 
-	// Ticks advance the phase and keep the loop alive while fresh.
+	// Ticks advance the phase and re-arm forever (owner call: the web
+	// shimmers indefinitely, so does the terminal).
 	before := m.phase
-	m, cmd = driveCmd(m, AnimTickMsg{})
-	if m.phase == before || cmd == nil {
-		t.Error("tick must advance phase and re-arm")
+	for i := 0; i < 3; i++ {
+		var tick tea.Cmd
+		m, tick = driveCmd(m, AnimTickMsg{})
+		if tick == nil {
+			t.Fatalf("tick %d must re-arm — shimmer never settles", i)
+		}
 	}
-
-	// Expire the shimmer: the loop dies.
-	m.shimmer[15] = time.Now().Add(-shimmerLife - time.Second)
-	m, cmd = driveCmd(m, AnimTickMsg{})
-	if len(m.shimmer) != 0 || m.animating {
-		t.Error("expired shimmer must settle")
+	if m.phase == before {
+		t.Error("phase must advance")
 	}
-	if cmd != nil {
-		t.Error("settled shimmer must not re-arm the loop")
+	if len(m.shimmer) != 1 {
+		t.Error("shimmer set must persist")
 	}
 }
 
@@ -803,5 +756,212 @@ func TestNoShimmerTrackingWithoutTruecolor(t *testing.T) {
 	}})
 	if len(m.shimmer) != 0 {
 		t.Error("256-color terminals must not run the animation loop")
+	}
+}
+
+func suggestionsServer(t *testing.T) http.Handler {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /chat/u1.json", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(chatPageJSON))
+	})
+	mux.HandleFunc("POST /suggestions", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Input  string `json:"input"`
+			Cursor int    `json:"cursor"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.Header().Set("Content-Type", "application/json")
+		if body.Input == "/co" {
+			_, _ = w.Write([]byte(`{"mode":"slash","stage":"verb","ghost":{"complete_current":"","next_hint":""},
+				"menu_items":[{"label":"/config","description":"Read or write credentials","insert":"/config"},
+				              {"label":"/connect","description":"Connect a channel","insert":"/connect"}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"mode":"free","stage":"free","ghost":{"complete_current":"","next_hint":""},"menu_items":[]}`))
+	})
+	return mux
+}
+
+func TestPaletteFetchesPerKeystrokeAndRenders(t *testing.T) {
+	m, _ := newTestModel(t, suggestionsServer(t), WithConversation("u1"))
+	m = sized(m)
+
+	m.input.SetValue("/c")
+	m, cmd := driveCmd(m, key("o")) // typing 'o' → "/co" changed → fetch
+	if cmd == nil {
+		t.Fatal("typing must fetch suggestions")
+	}
+	m = runCmd(m, cmd)
+	if m.suggest == nil || len(m.suggest.MenuItems) != 2 {
+		t.Fatalf("suggestions not set: %+v", m.suggest)
+	}
+	view := m.View()
+	if !strings.Contains(view, "/config") || !strings.Contains(view, "Read or write credentials") {
+		t.Errorf("palette missing from view:\n%s", view)
+	}
+	if !strings.Contains(view, "tab complete") {
+		t.Errorf("palette footer missing:\n%s", view)
+	}
+}
+
+func TestPaletteStaleRepliesLose(t *testing.T) {
+	m, _ := newTestModel(t, suggestionsServer(t), WithConversation("u1"))
+	m = sized(m)
+	m.input.SetValue("/co")
+	m.suggestSeq = 5
+	m = drive(m, SuggestionsMsg{Seq: 3, S: &api.Suggestions{MenuItems: []api.Suggestion{{Label: "stale"}}}})
+	if m.suggest != nil {
+		t.Error("stale seq must be discarded")
+	}
+	m = drive(m, SuggestionsMsg{Seq: 5, S: &api.Suggestions{MenuItems: []api.Suggestion{{Label: "fresh"}}}})
+	if m.suggest == nil || m.suggest.MenuItems[0].Label != "fresh" {
+		t.Error("current seq must land")
+	}
+}
+
+func TestPaletteNavigationAcceptDismiss(t *testing.T) {
+	m, _ := newTestModel(t, suggestionsServer(t), WithConversation("u1"))
+	m = sized(m)
+	m.input.SetValue("/co")
+	m.suggest = &api.Suggestions{MenuItems: []api.Suggestion{
+		{Label: "/config", Insert: "/config"},
+		{Label: "/connect", Insert: "/connect"},
+	}}
+
+	m = drive(m, key("down"))
+	if m.suggestSel != 1 {
+		t.Errorf("sel = %d, want 1", m.suggestSel)
+	}
+	m = drive(m, key("up"))
+	if m.suggestSel != 0 {
+		t.Errorf("sel = %d, want 0", m.suggestSel)
+	}
+
+	m, _ = driveCmd(m, tea.KeyMsg{Type: tea.KeyTab})
+	if got := m.input.Value(); got != "/config " {
+		t.Errorf("tab accept → %q, want %q", got, "/config ")
+	}
+	if m.suggest != nil {
+		t.Error("accept must dismiss the menu")
+	}
+
+	m.suggest = &api.Suggestions{MenuItems: []api.Suggestion{{Label: "x"}}}
+	m = drive(m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.suggest != nil {
+		t.Error("esc must dismiss")
+	}
+}
+
+func TestPaletteTokenReplacement(t *testing.T) {
+	m, _ := newTestModel(t, suggestionsServer(t), WithConversation("u1"))
+	m = sized(m)
+	m.input.SetValue("ls cha")
+	m.suggest = &api.Suggestions{MenuItems: []api.Suggestion{{Label: "channels", Insert: "channels"}}}
+	m, _ = driveCmd(m, tea.KeyMsg{Type: tea.KeyTab})
+	if got := m.input.Value(); got != "ls channels " {
+		t.Errorf("token replace → %q, want %q", got, "ls channels ")
+	}
+}
+
+func TestClearingInputDismissesPalette(t *testing.T) {
+	m, _ := newTestModel(t, suggestionsServer(t), WithConversation("u1"))
+	m = sized(m)
+	m.input.SetValue("x")
+	m.suggest = &api.Suggestions{MenuItems: []api.Suggestion{{Label: "y"}}}
+	m = drive(m, tea.KeyMsg{Type: tea.KeyBackspace})
+	if m.suggest != nil {
+		t.Error("empty input must clear the palette")
+	}
+}
+
+func TestPaletteResizesTheViewport(t *testing.T) {
+	m, _ := newTestModel(t, suggestionsServer(t), WithConversation("u1"))
+	m = sized(m)
+	tall := m.vp.Height
+	m.input.SetValue("/co")
+	m.suggestSeq = 1
+	m = drive(m, SuggestionsMsg{Seq: 1, S: &api.Suggestions{MenuItems: []api.Suggestion{
+		{Label: "/config"}, {Label: "/connect"},
+	}}})
+	if m.vp.Height >= tall {
+		t.Errorf("viewport must shrink for the palette: %d → %d", tall, m.vp.Height)
+	}
+	// The full frame must never exceed the terminal height.
+	if lines := strings.Count(m.View(), "\n") + 1; lines > 24 {
+		t.Errorf("frame overflows the terminal: %d lines", lines)
+	}
+	m = drive(m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.vp.Height != tall {
+		t.Errorf("dismiss must restore the viewport: %d → %d", tall, m.vp.Height)
+	}
+}
+
+func TestAvatarCellsVanishEverywhere(t *testing.T) {
+	// Owner call: no stand-in glyphs, no phantom column — avatar cells
+	// disappear from tables on every terminal.
+	m, _ := newTestModel(t, chatServer(t), WithConversation("u1"))
+	m = sized(m)
+	payload := `{"body":"x","html":true,"table_rows":[{"cells":[
+		{"html": true, "text": "<img class=\"pito-channel-tiny-avatar\" src=\"/a.jpg\"/>", "class": "pito-cell-avatar"},
+		{"text": "@x", "class": ""}]}]}`
+	m = drive(m, CableEventMsg{M: cable.StreamMessage{
+		Type:  cable.TypeEventAppend,
+		Event: api.Event{ID: 62, TurnID: 32, Kind: "system", Payload: []byte(payload)},
+	}})
+	view := m.View()
+	if strings.Contains(view, "◉") {
+		t.Errorf("no stand-in glyphs:\n%s", view)
+	}
+	if !strings.Contains(view, "@x") {
+		t.Errorf("remaining columns must render:\n%s", view)
+	}
+}
+
+func TestMutationReplyEchoesAndResyncs(t *testing.T) {
+	var fetches int
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /chat", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"uuid":"u1","turn_id":null}`))
+	})
+	mux.HandleFunc("GET /chat/u1.json", func(w http.ResponseWriter, r *http.Request) {
+		fetches++
+		w.Header().Set("Content-Type", "application/json")
+		if fetches == 1 {
+			_, _ = w.Write([]byte(`{"conversation":{"uuid":"u1","title":"t"},"events":[
+				{"id": 5, "turn_id": 2, "kind": "system", "payload": {"text": "SORTED OLD"}, "created_at": "2026-07-05T10:00:00Z"}]}`))
+			return
+		}
+		// The mutation edited event 5 in place server-side.
+		_, _ = w.Write([]byte(`{"conversation":{"uuid":"u1","title":"t"},"events":[
+			{"id": 5, "turn_id": 2, "kind": "system", "payload": {"text": "SORTED NEW"}, "created_at": "2026-07-05T10:00:00Z"}]}`))
+	})
+	m, _ := newTestModel(t, mux, WithConversation("u1"))
+	m = sized(m)
+	m = drive(m, m.fetchChatCmd("u1", false)())
+
+	m.input.SetValue("#gamma-5324 sort title desc")
+	m, cmd := driveCmd(m, key("enter"))
+	m, cmd = driveCmd(m, cmd()) // SendResultMsg{turn_id null}
+
+	view := m.View()
+	if !strings.Contains(view, "#gamma-5324 sort title desc") {
+		t.Errorf("mutation reply must echo locally:\n%s", view)
+	}
+	if cmd == nil {
+		t.Fatal("mutation ack must schedule the resync safety net")
+	}
+	// cmd is a tea.Tick — execute it to get the deferred resync, then run it.
+	deferred, ok := cmd().(resyncNowMsg)
+	if !ok {
+		t.Fatalf("expected resyncNowMsg, got %T", cmd())
+	}
+	m, cmd = driveCmd(m, deferred)
+	m = drive(m, cmd())
+	if view := m.View(); !strings.Contains(view, "SORTED NEW") || strings.Contains(view, "SORTED OLD") {
+		t.Errorf("resync must merge the in-place mutation:\n%s", view)
 	}
 }

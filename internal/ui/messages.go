@@ -26,9 +26,12 @@ type ChatFetchedMsg struct {
 }
 
 // SendResultMsg is POST /chat's classified reply (or its failure).
+// Input carries what was typed — mutation replies (turn_id null) create
+// no server echo, so the client echoes them itself.
 type SendResultMsg struct {
-	Res *api.SendResult
-	Err error
+	Res   *api.SendResult
+	Err   error
+	Input string
 }
 
 // ResumeFetchedMsg carries the conversation list for the picker.
@@ -37,12 +40,13 @@ type ResumeFetchedMsg struct {
 	Err  error
 }
 
-// ImageFetchedMsg carries downloaded thumbnail bytes for the pinned
-// image display (kitty graphics; absent on plain terminals).
-type ImageFetchedMsg struct {
-	Data []byte
-}
-
 // AnimTickMsg drives the shimmer sweep — emitted only while fresh
 // shimmer-marked turns are on screen (then the loop dies).
 type AnimTickMsg struct{}
+
+// SuggestionsMsg carries a palette reply; Seq guards against stale
+// responses overtaking fresh keystrokes.
+type SuggestionsMsg struct {
+	Seq int
+	S   *api.Suggestions
+}

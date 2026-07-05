@@ -3,6 +3,8 @@ package render
 import (
 	"fmt"
 	"strings"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 // RGB is one gradient stop.
@@ -48,10 +50,12 @@ func (g Gradient) At(t float64) RGB {
 	return RGB{lerp(a.R, b.R), lerp(a.G, b.G), lerp(a.B, b.B)}
 }
 
-// Colorize paints text with the gradient, one rune at a time. phase shifts
-// the ramp (the shimmer sweep: advance phase per animation tick); phase 0
-// is the resting state. Emits raw truecolor SGR — callers gate on
-// truecolor support and fall back to a plain style otherwise.
+// Colorize paints text with the gradient, one rune at a time. phase
+// shifts the ramp (the shimmer sweep: advance phase per animation tick);
+// phase 0 is the resting state. Colors go through lipgloss — the same
+// profile-managed path as every other style — so they survive block
+// wrapping and downgrade on lesser terminals exactly like the texts do
+// (raw SGR did not: the "white charts" bug).
 func (g Gradient) Colorize(text string, phase float64) string {
 	runes := []rune(text)
 	if len(runes) == 0 {
@@ -61,11 +65,13 @@ func (g Gradient) Colorize(text string, phase float64) string {
 	for i, r := range runes {
 		t := float64(i)/float64(max(len(runes)-1, 1)) + phase
 		t -= float64(int(t)) // wrap into [0,1)
-		c := g.At(t)
-		fmt.Fprintf(&b, "\x1b[38;2;%d;%d;%dm%c", c.R, c.G, c.B, r)
+		b.WriteString(lipgloss.NewStyle().Foreground(hex(g.At(t))).Render(string(r)))
 	}
-	b.WriteString("\x1b[39m")
 	return b.String()
+}
+
+func hex(c RGB) lipgloss.Color {
+	return lipgloss.Color(fmt.Sprintf("#%02x%02x%02x", c.R, c.G, c.B))
 }
 
 // Bar renders a value ∈ [0,1] as a gradient-filled cell bar — the score
@@ -85,11 +91,10 @@ func (g Gradient) Bar(value float64, width int) string {
 	var b strings.Builder
 	for i := 0; i < filled; i++ {
 		c := g.At(float64(i) / float64(max(width-1, 1)))
-		fmt.Fprintf(&b, "\x1b[38;2;%d;%d;%dm█", c.R, c.G, c.B)
+		b.WriteString(lipgloss.NewStyle().Foreground(hex(c)).Render("█"))
 	}
-	b.WriteString("\x1b[39m")
 	if filled < width {
-		b.WriteString("\x1b[2m" + strings.Repeat("░", width-filled) + "\x1b[22m")
+		b.WriteString(lipgloss.NewStyle().Foreground(ColorFaint).Render(strings.Repeat("░", width-filled)))
 	}
 	return b.String()
 }

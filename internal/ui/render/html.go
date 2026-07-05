@@ -74,12 +74,8 @@ func walkText(n *html.Node, b *strings.Builder) {
 			}
 			return
 		case n.Data == "img":
-			// Avatars get a visible marker (inline kitty avatars are the
-			// real fix, queued); thumbnails stay silent — the pinned
-			// image display carries them.
-			if strings.Contains(attr(n, "class"), "avatar") {
-				b.WriteString("◉")
-			}
+			// Images never render as text: the pinned display carries
+			// them (avatars included — owner call: no stand-in glyphs).
 			return
 		case strings.Contains(attr(n, "class"), "grid"):
 			// Label/value grids (detail cards): the web separates the
@@ -130,19 +126,25 @@ func gridPairs(n *html.Node) string {
 	if len(cells) < 4 || len(cells)%2 != 0 {
 		return ""
 	}
+	// Pairs whose value vanished (avatar images) drop entirely.
+	var pairs [][2]string
 	labelWidth := 0
 	for i := 0; i < len(cells); i += 2 {
+		if cells[i+1] == "" {
+			continue
+		}
+		pairs = append(pairs, [2]string{cells[i], cells[i+1]})
 		if w := len([]rune(cells[i])); w > labelWidth {
 			labelWidth = w
 		}
 	}
 	var b strings.Builder
-	for i := 0; i < len(cells); i += 2 {
+	for i, pair := range pairs {
 		if i > 0 {
 			b.WriteString("\n")
 		}
-		pad := labelWidth - len([]rune(cells[i]))
-		b.WriteString(cells[i] + strings.Repeat(" ", pad) + "  " + cells[i+1])
+		pad := labelWidth - len([]rune(pair[0]))
+		b.WriteString(pair[0] + strings.Repeat(" ", pad) + "  " + pair[1])
 	}
 	return b.String()
 }

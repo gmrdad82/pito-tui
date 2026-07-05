@@ -27,8 +27,11 @@ type analyzeData struct {
 }
 
 type analyzeMetric struct {
-	Data analyzeSeries `json:"data"`
-	Slot string        `json:"slot"`
+	// Data stays raw: slots differ per metric (charts carry a series
+	// object, the likes slot carries a bare list) and one alien entry
+	// must not poison the whole stash decode.
+	Data json.RawMessage `json:"data"`
+	Slot string          `json:"slot"`
 }
 
 type analyzeSeries struct {
@@ -122,7 +125,11 @@ func (r *R) analyzeBlock(payload []byte) string {
 	var b strings.Builder
 	for _, name := range names {
 		m := a.Stash[name]
-		if len(m.Data.Series) == 0 {
+		if m.Slot != "charts" {
+			continue // hearts ride the top-level likes key
+		}
+		var data analyzeSeries
+		if json.Unmarshal(m.Data, &data) != nil || len(data.Series) == 0 {
 			continue
 		}
 		if b.Len() > 0 {
@@ -133,7 +140,7 @@ func (r *R) analyzeBlock(payload []byte) string {
 		} else {
 			b.WriteString(strings.ReplaceAll(name, "_", " ") + "\n")
 		}
-		b.WriteString("  " + r.spark(m.Data) + "\n")
+		b.WriteString("  " + r.spark(data) + "\n")
 	}
 
 	if a.Likes != nil && len(a.Likes.Hearts) > 0 {
@@ -146,7 +153,7 @@ func (r *R) analyzeBlock(payload []byte) string {
 		for _, h := range a.Likes.Hearts {
 			heart := fmt.Sprintf("♥ %.1f%%", h.Score)
 			if r.truecolor {
-				heart = MeterRamp.Colorize(heart, 1-h.Score/100) // green hearts for loved channels
+				heart = MeterRamp.Colorize(heart, 1-h.Score/100+r.phase) // loved = green, breathing with the sweep
 			} else {
 				heart = lipgloss.NewStyle().Foreground(ColorAccent).Render(heart)
 			}
@@ -162,7 +169,7 @@ func (r *R) analyzeBlock(payload []byte) string {
 func (r *R) spark(s analyzeSeries) string {
 	line := sparkline(s.Series)
 	if r.truecolor {
-		line = PitoShimmer.Colorize(line, 0)
+		line = PitoShimmer.Colorize(line, r.phase) // rides the shimmer sweep
 	} else {
 		line = lipgloss.NewStyle().Foreground(ColorPrimary).Render(line)
 	}
@@ -187,6 +194,13 @@ func trimFloat(v float64) string {
 		out = "0"
 	}
 	return out
+}
+
+// hasAnalyze reports whether the payload is an analyze message at all —
+// including the pending state before any metric data lands.
+func hasAnalyze(payload []byte) bool {
+	var p analyzePayload
+	return json.Unmarshal(payload, &p) == nil && p.Analyze != nil
 }
 
 // analyzeIntro pulls the intro line out of a chart payload.

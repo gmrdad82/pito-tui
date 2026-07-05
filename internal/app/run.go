@@ -18,7 +18,6 @@ import (
 	"github.com/gmrdad82/pito-tui/internal/api"
 	"github.com/gmrdad82/pito-tui/internal/cable"
 	"github.com/gmrdad82/pito-tui/internal/config"
-	"github.com/gmrdad82/pito-tui/internal/img"
 	"github.com/gmrdad82/pito-tui/internal/sound"
 	"github.com/gmrdad82/pito-tui/internal/ui"
 )
@@ -110,13 +109,6 @@ Point pito-tui at your install:
 	}
 
 	modelOpts := []ui.Option{ui.WithSounds(player), ui.WithGlamourStyle(glamourStyle), ui.WithTruecolor(truecolor)}
-	// Terminal images: dynamic capability detection (kitty/ghostty/
-	// WezTerm speak the kitty graphics protocol); text-only elsewhere.
-	var shower *img.Shower
-	if img.Supported() {
-		shower = img.NewShower(os.Stdout)
-		modelOpts = append(modelOpts, ui.WithImages(shower))
-	}
 	switch {
 	case !authed:
 		// Login is the app's own grammar: the user types /login <code>
@@ -130,7 +122,6 @@ Point pito-tui at your install:
 
 	program = tea.NewProgram(model, tea.WithAltScreen())
 	_, err = program.Run()
-	shower.Clear() // nil-safe: drop any pinned image before handing back the shell
 	return err
 }
 

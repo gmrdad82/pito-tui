@@ -6,9 +6,8 @@ package ui
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,13 +36,6 @@ const maxNotices = 3
 // layer supplies it; tests record it.
 type ConnectFunc func(uuid string)
 
-// ImageDisplay pins one image to the terminal (kitty graphics). nil on
-// terminals without image support — everything degrades to text.
-type ImageDisplay interface {
-	Show(data []byte, row, col, cols, rows int)
-	Clear()
-}
-
 // Notifier plays UI sounds; the zero implementation is silence.
 type Notifier interface {
 	Send()
@@ -59,14 +51,13 @@ type Model struct {
 	client  *api.Client
 	connect ConnectFunc
 	sounds  Notifier
-	images  ImageDisplay
 
 	mode         mode
 	plainRender  bool
 	glamourStyle string
 	truecolor    bool
 	renderer     *render.R
-	shimmer      map[int64]time.Time // turnID → when its shimmer went live
+	shimmer      map[int64]bool // turns with shimmer-marked words (animate forever)
 	phase        float64
 	animating    bool
 
@@ -89,6 +80,10 @@ type Model struct {
 	notices       []string
 	needsLogin    bool
 	showHelp      bool
+	syntheticID   int64 // negative-ID counter for local echo events
+	suggest       *api.Suggestions
+	suggestSeq    int
+	suggestSel    int
 	loadErr       string
 	pickerNotice  string
 
@@ -140,11 +135,6 @@ func WithNow(now func() time.Time) Option {
 	return func(m *Model) { m.now = now }
 }
 
-// WithImages wires the terminal image display (kitty graphics).
-func WithImages(d ImageDisplay) Option {
-	return func(m *Model) { m.images = d }
-}
-
 // WithSounds wires the sound player.
 func WithSounds(n Notifier) Option {
 	return func(m *Model) {
@@ -191,7 +181,7 @@ func NewModel(client *api.Client, connect ConnectFunc, opts ...Option) Model {
 		input:   input,
 		spin:    spin,
 		pending: map[int64]bool{},
-		shimmer: map[int64]time.Time{},
+		shimmer: map[int64]bool{},
 		follow:  true,
 		now:     time.Now,
 	}
@@ -235,7 +225,7 @@ func (m Model) sendCmd(uuid, input string, width int) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
 		res, err := client.SendMessage(context.Background(), uuid, input, width)
-		return SendResultMsg{Res: res, Err: err}
+		return SendResultMsg{Res: res, Err: err, Input: input}
 	}
 }
 
@@ -257,13 +247,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onCableEvent(msg)
 	case ConnStateMsg:
 		return m.onConnState(msg)
+	case resyncNowMsg:
+		return m, msg.cmd
 	case AnimTickMsg:
 		return m.onAnimTick()
-	case ImageFetchedMsg:
-		if m.images != nil && m.width > 46 {
-			// Pin to the top-right corner, clear of the scrollback's left
-			// column; kitty scales into the cell box.
-			m.images.Show(msg.Data, 2, m.width-40, 38, 11)
+	case SuggestionsMsg:
+		if msg.Seq == m.suggestSeq && m.input.Value() != "" {
+			m.suggest = msg.S
+			m.suggestSel = 0
+			m.refreshViewport() // palette height changes the viewport box
 		}
 		return m, nil
 	case spinner.TickMsg:
@@ -342,6 +334,26 @@ func (m Model) onPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) onChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Palette interactions first — they own a few keys while open.
+	if m.suggest != nil && len(m.suggest.MenuItems) > 0 {
+		switch msg.String() {
+		case "down", "ctrl+n":
+			m.suggestSel = (m.suggestSel + 1) % len(m.suggest.MenuItems)
+			return m, nil
+		case "up", "ctrl+p":
+			m.suggestSel = (m.suggestSel - 1 + len(m.suggest.MenuItems)) % len(m.suggest.MenuItems)
+			return m, nil
+		case "tab":
+			m.acceptSuggestion()
+			m.refreshViewport()
+			return m, m.suggestCmd()
+		case "esc":
+			m.suggest = nil
+			m.refreshViewport()
+			return m, nil
+		}
+	}
+
 	switch msg.Type {
 	case tea.KeyEnter:
 		text := strings.TrimSpace(m.input.Value())
@@ -349,8 +361,12 @@ func (m Model) onChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.input.Reset()
+		m.suggest = nil
 		m.sounds.Send()
-		return m, m.sendCmd(m.conv.UUID, text, m.contentWidth())
+		// viewport_width is PIXELS on the wire (the web sends element
+		// widths); approximate the terminal at ~8px per cell so wide
+		// terminals get the same column auto-fill the web enjoys.
+		return m, m.sendCmd(m.conv.UUID, text, m.contentWidth()*8)
 	case tea.KeyCtrlD:
 		m.vp.HalfPageDown()
 		m.follow = m.vp.AtBottom()
@@ -387,9 +403,77 @@ func (m Model) onChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	before := m.input.Value()
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
+	if m.input.Value() != before {
+		if m.input.Value() == "" {
+			m.suggest = nil
+			m.refreshViewport()
+			return m, cmd
+		}
+		return m, tea.Batch(cmd, m.suggestCmd())
+	}
 	return m, cmd
+}
+
+// resyncNowMsg fires a deferred re-sync (mutation safety net).
+type resyncNowMsg struct{ cmd tea.Cmd }
+
+// echoLocally appends a synthetic echo turn for inputs the server
+// accepts without creating a turn (reply mutations). Negative IDs keep
+// synthetic events out of the server-ID space, so merges ignore them.
+func (m *Model) echoLocally(input string) {
+	if input == "" {
+		return
+	}
+	m.syntheticID--
+	m.transcript.Append(api.Event{
+		ID:        m.syntheticID,
+		TurnID:    m.syntheticID,
+		Kind:      api.KindEcho,
+		Payload:   []byte(`{"text":` + strconv.Quote(input) + `}`),
+		CreatedAt: time.Now(),
+	})
+}
+
+// suggestCmd asks the server-side palette about the current input. The
+// seq counter lets stale replies lose to fresh keystrokes.
+func (m *Model) suggestCmd() tea.Cmd {
+	m.suggestSeq++
+	seq := m.suggestSeq
+	client := m.client
+	uuid := m.conv.UUID
+	input := m.input.Value()
+	cursor := m.input.Position()
+	return func() tea.Msg {
+		s, err := client.Suggest(context.Background(), uuid, input, cursor)
+		if err != nil {
+			return SuggestionsMsg{Seq: seq, S: nil}
+		}
+		return SuggestionsMsg{Seq: seq, S: s}
+	}
+}
+
+// acceptSuggestion replaces the trailing token with the selection.
+func (m *Model) acceptSuggestion() {
+	item := m.suggest.MenuItems[m.suggestSel]
+	insert := item.Insert
+	if insert == "" {
+		insert = item.Label
+	}
+	value := m.input.Value()
+	cut := strings.LastIndexByte(strings.TrimRight(value, " "), ' ') + 1
+	if cut < 0 {
+		cut = 0
+	}
+	next := value[:cut] + insert
+	if !strings.HasSuffix(next, " ") {
+		next += " "
+	}
+	m.input.SetValue(next)
+	m.input.CursorEnd()
+	m.suggest = nil
 }
 
 func (m Model) onResume(msg ResumeFetchedMsg) Model {
@@ -425,6 +509,11 @@ func (m Model) onChatFetched(msg ChatFetchedMsg) (tea.Model, tea.Cmd) {
 	m.conv = msg.Page.Conversation
 	m.needsLogin = false // the backfill is auth-gated: fetching it proves the session
 	m.transcript.Merge(msg.Page.Events)
+	for _, ev := range msg.Page.Events {
+		if m.truecolor && render.HasShimmer(ev.Payload) {
+			m.shimmer[ev.TurnID] = true
+		}
+	}
 	// A fetched page can carry the first events of turns still marked
 	// pending (created-conversation paint, reconnect re-sync) — the cable
 	// isn't the only way a turn shows up.
@@ -443,7 +532,7 @@ func (m Model) onChatFetched(msg ChatFetchedMsg) (tea.Model, tea.Cmd) {
 		m.connect(m.conv.UUID)
 		m.cableStarted = true
 	}
-	return m, nil
+	return m, m.animate()
 }
 
 func (m Model) onSendResult(msg SendResultMsg) (tea.Model, tea.Cmd) {
@@ -474,9 +563,18 @@ func (m Model) onSendResult(msg SendResultMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.fetchChatCmd(res.CreatedUUID, false), m.spin.Tick)
 	default:
 		if res.TurnID == 0 {
-			// turn_id is null for reply mutations (confirmation replies):
-			// nothing new is pending, the replace arrives on the cable.
-			return m, nil
+			// turn_id is null for reply MUTATIONS (sort/with/without…):
+			// FollowUpDispatchJob edits the event ASYNC and mirrors a
+			// cable replace. Echo locally (the server won't), and add a
+			// delayed re-sync as the cable's safety net — immediate
+			// fetching would race the job and merge stale bytes.
+			m.echoLocally(msg.Input)
+			m.refreshViewport()
+			uuid := m.conv.UUID
+			resync := m.fetchChatCmd(uuid, true)
+			return m, tea.Tick(1200*time.Millisecond, func(time.Time) tea.Msg {
+				return resyncNowMsg{cmd: resync}
+			})
 		}
 		if m.transcript.HasTurn(res.TurnID) {
 			// The cable beat the HTTP ack — the turn's events already
@@ -499,7 +597,7 @@ func (m Model) onCableEvent(msg CableEventMsg) (tea.Model, tea.Cmd) {
 		}
 		m.transcript.Append(ev)
 		if m.truecolor && render.HasShimmer(ev.Payload) {
-			m.shimmer[ev.TurnID] = time.Now()
+			m.shimmer[ev.TurnID] = true
 		}
 	case cable.TypeEventReplace:
 		// A replace proves the turn is flowing too — the thinking
@@ -511,12 +609,19 @@ func (m Model) onCableEvent(msg CableEventMsg) (tea.Model, tea.Cmd) {
 		return m, nil // unknown stream message type: ignore
 	}
 	m.refreshViewport()
-	return m, tea.Batch(m.imageCmd(ev), m.animate())
+	return m, m.animate()
 }
 
-const shimmerLife = 4400 * time.Millisecond // one web sweep cycle, twice
+// Shimmer runs indefinitely, like the web (owner call, 2026-07-05) — the
+// tick loop lives as long as shimmer-marked turns are in the transcript.
+// Tempo is terminal-tuned rather than the web's 5s CSS sweep: 80ms ticks
+// (12.5fps, smooth in a cell grid) with a ~3.2s full cycle.
+const (
+	shimmerTick = 80 * time.Millisecond
+	shimmerStep = 0.025
+)
 
-// animate ensures the shimmer tick loop runs while anything is fresh.
+// animate ensures the animation tick loop runs while shimmer lives.
 func (m *Model) animate() tea.Cmd {
 	if m.animating || len(m.shimmer) == 0 {
 		return nil
@@ -526,81 +631,28 @@ func (m *Model) animate() tea.Cmd {
 }
 
 func animTick() tea.Cmd {
-	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return AnimTickMsg{} })
+	return tea.Tick(shimmerTick, func(time.Time) tea.Msg { return AnimTickMsg{} })
 }
 
 func (m Model) onAnimTick() (tea.Model, tea.Cmd) {
-	now := time.Now()
-	for turnID, born := range m.shimmer {
-		if now.Sub(born) > shimmerLife {
-			delete(m.shimmer, turnID) // settle at the current phase
-			continue
-		}
-		m.transcript.Touch(turnID)
-	}
 	if len(m.shimmer) == 0 {
 		m.animating = false
-		m.refreshViewport()
 		return m, nil
 	}
-	m.phase += 0.045 // full sweep ≈ 2.2s at 10fps
-	if m.phase >= 1 {
-		m.phase -= 1
+	if len(m.shimmer) > 0 {
+		for turnID := range m.shimmer {
+			m.transcript.Touch(turnID)
+		}
+		m.phase += shimmerStep
+		if m.phase >= 1 {
+			m.phase -= 1
+		}
+		if m.renderer != nil {
+			m.renderer.SetPhase(m.phase)
+		}
+		m.refreshViewport()
 	}
-	if m.renderer != nil {
-		m.renderer.SetPhase(m.phase)
-	}
-	m.refreshViewport()
 	return m, animTick()
-}
-
-// imageCmd fetches a message's thumbnail for the pinned display. Only on
-// image-capable terminals, only for card-bearing kinds, never blocking.
-func (m Model) imageCmd(ev api.Event) tea.Cmd {
-	if m.images == nil {
-		return nil
-	}
-	switch ev.Kind {
-	case api.KindSystem, api.KindEnhanced, api.KindSystemFollowUp, api.KindEnhancedFollowUp:
-	default:
-		return nil
-	}
-	src := extractImageSrc(ev.Payload)
-	if src == "" {
-		return nil
-	}
-	client := m.client
-	return func() tea.Msg {
-		data, err := client.FetchRaw(context.Background(), src)
-		if err != nil {
-			return nil
-		}
-		return ImageFetchedMsg{Data: data}
-	}
-}
-
-// thumbnailRe finds the first non-avatar image in a card body.
-var thumbnailRe = regexp.MustCompile(`<img[^>]+>`)
-
-var srcRe = regexp.MustCompile(`src="([^"]+)"`)
-
-func extractImageSrc(payload []byte) string {
-	var p struct {
-		Body string `json:"body"`
-		HTML bool   `json:"html"`
-	}
-	if json.Unmarshal(payload, &p) != nil || !p.HTML || p.Body == "" {
-		return ""
-	}
-	for _, tag := range thumbnailRe.FindAllString(p.Body, 4) {
-		if strings.Contains(tag, "tiny-avatar") {
-			continue // list avatars: too small to pin
-		}
-		if match := srcRe.FindStringSubmatch(tag); match != nil && strings.HasPrefix(match[1], "/") {
-			return match[1]
-		}
-	}
-	return ""
 }
 
 func (m Model) onConnState(msg ConnStateMsg) (tea.Model, tea.Cmd) {
@@ -654,6 +706,9 @@ func (m Model) View() string {
 	}
 
 	sections := []string{m.vp.View()}
+	if palette := m.paletteView(); palette != "" {
+		sections = append(sections, palette)
+	}
 	if m.showHelp {
 		sections = append(sections, m.helpLine())
 	}
@@ -675,6 +730,51 @@ func (m Model) bannerLine() string {
 	default:
 		return ""
 	}
+}
+
+const paletteMax = 6
+
+// paletteView renders the server-driven suggestion menu above the prompt
+// (the web's ctrl+k palette, inlined). Selected row wears the accent bar.
+func (m Model) paletteView() string {
+	if m.suggest == nil || len(m.suggest.MenuItems) == 0 || m.mode != modeChat {
+		return ""
+	}
+	items := m.suggest.MenuItems
+	start := 0
+	if m.suggestSel >= paletteMax {
+		start = m.suggestSel - paletteMax + 1
+	}
+	end := min(start+paletteMax, len(items))
+
+	labelWidth := 0
+	for _, it := range items[start:end] {
+		if w := lipgloss.Width(it.Label); w > labelWidth {
+			labelWidth = w
+		}
+	}
+	sel := lipgloss.NewStyle().Foreground(render.ColorAccent).Bold(true)
+	var b strings.Builder
+	for i := start; i < end; i++ {
+		it := items[i]
+		marker, label := "  ", it.Label
+		if i == m.suggestSel {
+			marker = sel.Render("▌ ")
+			label = sel.Render(it.Label)
+		}
+		pad := strings.Repeat(" ", labelWidth-lipgloss.Width(it.Label))
+		line := marker + label + pad
+		if it.Description != "" {
+			line += statusStyle.Render("  " + it.Description)
+		}
+		b.WriteString(lipgloss.NewStyle().MaxWidth(m.width).Render(line) + "\n")
+	}
+	footer := statusStyle.Render("tab complete · ↑/↓ move · esc dismiss")
+	if hint := m.suggest.Ghost.NextHint; hint != "" {
+		footer = statusStyle.Render(hint+" · ") + footer
+	}
+	b.WriteString(footer)
+	return b.String()
 }
 
 // helpLine is the '?'-toggled keymap strip (keybinding/hint's cousin).
@@ -771,11 +871,17 @@ func (m Model) contentWidth() int {
 	return m.width
 }
 
-// chatViewportHeight is the terminal height minus prompt + status and the
-// banner when one is showing.
+// chatViewportHeight is the terminal height minus prompt + status, the
+// banner, and the palette when they show.
 func (m Model) chatViewportHeight() int {
 	h := m.height - 2
 	if m.bannerLine() != "" {
+		h--
+	}
+	if palette := m.paletteView(); palette != "" {
+		h -= strings.Count(palette, "\n") + 1
+	}
+	if m.showHelp {
 		h--
 	}
 	if h < 1 {

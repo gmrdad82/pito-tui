@@ -112,3 +112,25 @@ func (n ServerNotice) Text() string {
 	}
 	return "the server declined that one (" + n.Error + ")"
 }
+
+// Suggestions is POST /suggestions — the server-driven palette. The
+// grammar lives in verbs.yml server-side; the TUI never hardcodes verbs,
+// it just renders what the ontology answers per keystroke.
+type Suggestions struct {
+	Mode      string       `json:"mode"`
+	Stage     string       `json:"stage"`
+	Ghost     Ghost        `json:"ghost"`
+	MenuItems []Suggestion `json:"menu_items"`
+}
+
+type Ghost struct {
+	CompleteCurrent string `json:"complete_current"`
+	NextHint        string `json:"next_hint"`
+}
+
+type Suggestion struct {
+	Label       string `json:"label"`
+	Description string `json:"description"`
+	Insert      string `json:"insert"`
+	Masked      bool   `json:"masked"`
+}

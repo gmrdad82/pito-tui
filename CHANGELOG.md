@@ -4,7 +4,9 @@ All notable changes to pito-tui are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); from 1.0.0 onward the
 project follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.0.0] — 2026-07-05
+
+First release — fresh meat.
 
 ### Added
 
@@ -66,24 +68,74 @@ project follows [Semantic Versioning](https://semver.org/).
   (`#handle · @channel`), tips, and a `?`-toggled key help. Living
   trackers: `docs/claude/verbs.md` (verb coverage) and
   `docs/claude/tiers.md` (component port tiers).
-- **Terminal images (kitty graphics)** — on kitty/ghostty/WezTerm
-  (detected from the environment, dynamic, never required) detail-card
-  thumbnails pin to the top-right of the screen through the session
-  cookie; plain terminals keep the text-only cards.
 - **Capture rig** — `scripts/capture.sh`, the terminal twin of pito's
   `rake pito:capture` (vhs-driven); scenarios in `captures/*.tape`,
   artifacts in `tmp/captures/<name>/`.
+- **No images, by decision** — the terminal renders none: payload
+  images are ignored wholesale, avatar cells and their columns vanish
+  from tables and card grids. All kitty graphics code (pinned
+  placements, Ken Burns, unicode placeholders) is gone.
+- **Replies that edit messages in place, visibly** — mutation replies
+  (`#handle sort/with/without …`) now echo locally (the server creates
+  no turn for them) and trigger a re-sync fetch, so the original list
+  re-sorts before your eyes — headline included — whether or not a
+  cable replace also arrives.
+- **Lists, rebuilt on lipgloss/table** — one shared viewer for
+  `ls channels/vids/games` and every reply that re-emits a list:
+  horizontal rules only (top, header, bottom — no vertical borders,
+  the rows breathe against the message bar), zebra rows, alignment
+  driven by the server's own hints (strings left, numbers and dates
+  right), per-cell ellipsis truncation on narrow terminals, headline
+  above, a breath of air, usage copy below, reply handle intact.
+  Zebra rows wear candy plum, not battleship gray.
+- **Charts and shimmer, hardened** — charts/sparklines/hearts render
+  through the same profile-managed styling as text (fixing the
+  white-charts bug raw escape codes caused) and ride the shimmer
+  sweep, which now runs indefinitely like the web at a terminal-tuned
+  tempo (~3.2s, 12.5fps).
+- **Suggestions palette** — the web's ctrl+k, inlined: every
+  keystroke asks the server-side ontology (`POST /suggestions`) and a
+  menu rises above the prompt — labels, descriptions, accent-bar
+  selection, ↑/↓ or ctrl-n/p to move, tab to complete the current
+  token, esc to dismiss. No verb list ships in the binary; the grammar
+  stays server-owned, so the palette can never drift from verbs.yml.
 - **Analytics charts (v1)** — `analyze channel` renders real charts
   from the structured payload: per-metric gradient sparklines with
   totals, previous-window deltas and target pacing, plus the
   likes-vs-dislikes heart — the Butler's per-metric captions ride
   above each, shimmer included. The web's own body drawing yields to
-  the terminal-native one.
+  the terminal-native one. All three levels (channel, vids, games)
+  live-verified; the shimmer sweep now matches the web's 5s tempo.
 - **Mutation-round fixes** — detail-card label/value grids survive
   mixed cells (the avatar `<img>` no longer collapses the channel card
-  into a run-on paragraph); avatar cells show a ◉ marker pending true
-  inline images; I18n-only server errors render a humanized hint
-  instead of a JSON dump.
+  into a run-on paragraph); I18n-only server errors render a humanized
+  hint instead of a JSON dump.
+- **The list reply contract, live-specced** — a live test
+  (`go test -tags live -run TestListReplyContract`) walks every
+  `with`/`without` column kwarg per noun (straight from pito's
+  `list_columns.rb`: likes for channels; platform, genre, developer,
+  publisher, channels, footage, price, views, likes for games; channel,
+  visibility, game, duration, views, likes, category for vids), both
+  directions of every base sort key (handle/title for channels,
+  id/title for games and vids), and the full requires_with sort model:
+  every column that joins the sort vocabulary while visible is sorted
+  descending then ascending and must lead with different values —
+  platform (icons don't order) and category (not sortable) are the
+  deliberate exceptions, and channels' default subs/views/vids counters
+  sort without any `with` first. Found along the way: a headed column
+  whose cells are all empty is data, not image residue — it renders now
+  (`with platform` before any platform is set); the server sizes tables
+  in pixels, so the TUI reports its width in them too, and wide layouts
+  finally arrive. Found on the server: channel sort replies dropped both
+  `selected_columns` and the current column set (counter sorts no-op,
+  `with likes` vanished on sort) — reported for the Rails side and
+  asserted strictly here, so the spec confirms the fix the moment it
+  deploys.
+- **Wide tables truncate, never wrap** — a table pushed past the
+  terminal by extra columns now shrinks cell-by-cell with `…` (the
+  chosen design) instead of wrapping row remainders onto stray
+  zebra-painted stub lines; the width budget accounts for the message
+  bar's own frame, verified at every width from 40 to 220 columns.
 - **Shimmer and gradients** — on truecolor terminals the exact words the
   web shimmers (its `pito-subject-shimmer` spans) get a multi-stop
   gradient sweep while the message is fresh, then settle; the pending

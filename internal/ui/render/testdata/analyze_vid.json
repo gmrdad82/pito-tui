@@ -1,0 +1,123 @@
+{
+ "body": "<div>vid report</div>",
+ "html": true,
+ "analyze": {
+  "intro": "<span class=\"pito-subject-shimmer pito-shimmer-d11\">2 vids</span>&#39;s metrics, plain edition \u2014 <span class=\"pito-token\">7d</span>.",
+  "level": "vid",
+  "likes": {
+   "hearts": [
+    {
+     "color": "red",
+     "likes": 3,
+     "score": 100.0,
+     "dislikes": 0
+    },
+    {
+     "color": "purple",
+     "likes": 14423,
+     "score": 88.8,
+     "dislikes": 1828
+    }
+   ],
+   "caption": "<span class=\"pito-token\">100.00%</span> <span class=\"pito-token\">lifetime</span> <span class=\"pito-subject-shimmer pito-shimmer-d16\">Likes vs Dislikes</span>. A heart&#39;s worth of arithmetic."
+  },
+  "stash": {
+   "likes": {
+    "data": [
+     {
+      "color": "red",
+      "likes": 3,
+      "score": 100.0,
+      "dislikes": 0
+     },
+     {
+      "color": "purple",
+      "likes": 14423,
+      "score": 88.8,
+      "dislikes": 1828
+     }
+    ],
+    "slot": "likes"
+   },
+   "views": {
+    "data": {
+     "dates": [
+      "2026-06-29",
+      "2026-06-30",
+      "2026-07-01",
+      "2026-07-02",
+      "2026-07-03",
+      "2026-07-04",
+      "2026-07-05"
+     ],
+     "total": 3,
+     "series": [
+      1,
+      0,
+      2,
+      0,
+      0,
+      0,
+      0
+     ],
+     "previous": 29,
+     "target_daily": 321.42857142857144
+    },
+    "slot": "charts"
+   },
+   "watched_hours": {
+    "data": {
+     "dates": [
+      "2026-06-29",
+      "2026-06-30",
+      "2026-07-01",
+      "2026-07-02",
+      "2026-07-03",
+      "2026-07-04",
+      "2026-07-05"
+     ],
+     "total": 0.0,
+     "series": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+     ],
+     "previous": 1.0,
+     "target_daily": 16.071428571428573
+    },
+    "slot": "charts"
+   },
+   "avg_viewed_pct": {
+    "data": {
+     "dates": [
+      "2026-06-29",
+      "2026-06-30",
+      "2026-07-01",
+      "2026-07-02",
+      "2026-07-03",
+      "2026-07-04",
+      "2026-07-05"
+     ],
+     "trend": false,
+     "series": [
+      1.5,
+      0.0,
+      0.6,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+     ],
+     "previous": null,
+     "total_pct": 0.9,
+     "target_daily": 50.0
+    },
+    "slot": "charts"
+   }
+  }
+ }
+}

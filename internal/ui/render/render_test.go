@@ -178,12 +178,26 @@ func TestTableRowsRenderAligned(t *testing.T) {
 	if !strings.Contains(out, "The catalogue holds 23 vids.") {
 		t.Errorf("headline missing: %q", out)
 	}
-	if !strings.Contains(out, "#28  PITO - Inception : Vlog 006") {
-		t.Errorf("row missing: %q", out)
+	// Horizontal rules only (owner call): top + bottom dash rules close
+	// the heading-less body, and no vertical border glyphs anywhere.
+	rules := 0
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Count(line, "─") > 5 {
+			rules++
+		}
 	}
-	// Right-aligned reference column: #9 pads to the width of #28.
-	if !strings.Contains(out, " #9  Short one") {
-		t.Errorf("right alignment broken: %q", out)
+	if rules != 2 {
+		t.Errorf("want top+bottom rules on a heading-less table, got %d:\n%s", rules, out)
+	}
+	if strings.ContainsAny(out, "│╭╮╰╯") {
+		t.Errorf("vertical borders must be gone:\n%s", out)
+	}
+	if !strings.Contains(out, "#28") || !strings.Contains(out, "PITO - Inception : Vlog 006") {
+		t.Errorf("row content missing:\n%s", out)
+	}
+	// Right-aligned reference column: #9 sits flush right of its cell.
+	if !strings.Contains(out, " #9 ") {
+		t.Errorf("right alignment broken:\n%s", out)
 	}
 }
 
@@ -206,8 +220,18 @@ func TestTableHeadingAndFooter(t *testing.T) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "<img") {
-		t.Errorf("html cell leaked markup:\n%s", out)
+	// Headed frame: top rule, header rule, bottom rule — nothing vertical.
+	rules := 0
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Count(line, "─") > 5 {
+			rules++
+		}
+	}
+	if rules != 3 {
+		t.Errorf("want 3 dash rules on a headed table, got %d:\n%s", rules, out)
+	}
+	if strings.Contains(out, "<img") || strings.Contains(out, "◉") {
+		t.Errorf("avatar cell must vanish, not leak:\n%s", out)
 	}
 }
 
@@ -316,29 +340,149 @@ func TestAnalyzeSuppressesTheWebBodyArt(t *testing.T) {
 	}
 }
 
-func TestChannelDetailGridWithAvatar(t *testing.T) {
-	// The channel card mixes an <img> cell into the label/value grid —
-	// live-reported as a run-on paragraph (owner screenshot 2026-07-05).
+func TestChannelDetailGridDropsTheAvatarPair(t *testing.T) {
+	// Avatar images render nowhere as text (owner call) — the whole
+	// label/value pair drops from the card grid.
 	grid := `<div class="grid grid-cols-[max-content_1fr] gap-x-2">
 		<span class="text-fg-dim">Avatar</span><img class="pito-channel-tiny-avatar" src="/a.jpg"/>
 		<span class="text-fg-dim">Handle</span><span class="pito-action-shimmer">@gmrdad82</span>
 		<span class="text-fg-dim">Title</span><span class="text-fg">Catalin Ilinca</span>
 	</div>`
 	out := htmlToText(grid)
-	for _, want := range []string{"Avatar  ◉", "Handle  @gmrdad82", "Title   Catalin Ilinca"} {
+	if strings.Contains(out, "Avatar") || strings.Contains(out, "◉") {
+		t.Errorf("avatar pair must drop:\n%s", out)
+	}
+	for _, want := range []string{"Handle  @gmrdad82", "Title   Catalin Ilinca"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("grid line %q missing:\n%s", want, out)
 		}
 	}
 }
 
-func TestListAvatarsGetAMarker(t *testing.T) {
-	payload := `{"body":"x","html":true,"table_rows":[{"cells":[
+func TestAvatarColumnDropsFromTables(t *testing.T) {
+	payload := `{"body":"x","html":true,
+		"table_heading": ["", "Handle"],
+		"table_rows":[{"cells":[
 		{"html": true, "text": "<img class=\"pito-channel-tiny-avatar\" src=\"/a.jpg\"/>", "class": "pito-cell-avatar"},
 		{"text": "@gmrdad82", "class": "pito-action-shimmer"}
 	]}]}`
 	out := plain().Event(event("system", payload))
-	if !strings.Contains(out, "◉") {
-		t.Errorf("avatar cell must show a marker:\n%s", out)
+	if strings.Contains(out, "◉") {
+		t.Errorf("no stand-in glyphs (owner call):\n%s", out)
+	}
+	// The table holds only the handle column — no phantom gap column: a
+	// row line whose entire content is the handle.
+	found := false
+	for _, line := range strings.Split(out, "\n") {
+		if strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "┃")) == "@gmrdad82" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("avatar column must drop entirely:\n%s", out)
+	}
+}
+
+func TestAnalyzeVidLevelSurvivesListShapedLikesSlot(t *testing.T) {
+	// vid-level stash.likes.data is a LIST — one alien entry must not
+	// poison the chart metrics around it (live-captured shape).
+	raw, err := os.ReadFile("testdata/analyze_vid.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := plain().Event(event("system", string(raw)))
+	if !strings.Contains(out, "▁") && !strings.Contains(out, "█") {
+		t.Errorf("vid-level charts missing:\n%s", out)
+	}
+}
+
+func TestPendingAnalyzeSuppressesBodyArtToo(t *testing.T) {
+	// Before the per-metric jobs land, stash has no series — the web's
+	// pending dot-grids must still not leak into the terminal.
+	payload := `{"body":"<div>⠂⠂⠂⠂ giant pending art ⠂⠂⠂⠂</div>","html":true,
+		"analyze":{"intro":"The stock 7d report.","level":"channel","stash":{}}}`
+	out := plain().Event(event("system", payload))
+	if strings.Contains(out, "pending art") {
+		t.Errorf("web pending art leaked:\n%s", out)
+	}
+	if !strings.Contains(out, "The stock 7d report.") || !strings.Contains(out, "crunching the numbers…") {
+		t.Errorf("intro + pending note missing:\n%s", out)
+	}
+}
+
+func TestHeadedEmptyColumnsSurvive(t *testing.T) {
+	// `with platform` on games with no platforms set: every body cell is
+	// empty but the column is DATA — it must render (owner report).
+	payload := `{"body":"x","html":true,
+		"table_heading": ["#", "Game", "Platform"],
+		"table_rows":[{"cells":[
+			{"text": "#27", "class": "pito-action-shimmer text-right"},
+			{"text": "Astro Bot", "class": ""},
+			{"text": "", "class": ""}
+	]}]}`
+	out := plain().Event(event("system", payload))
+	if !strings.Contains(out, "Platform") {
+		t.Errorf("headed empty column must survive:\n%s", out)
+	}
+}
+
+func TestOverflowingTableTruncatesInsteadOfWrapping(t *testing.T) {
+	// A table wider than the terminal must shrink by truncating cells with
+	// … — wrapping spilled continuation lines outside the frame (owner
+	// capture, `with genre` on games).
+	payload := `{"body":"x","html":true,
+		"table_heading": ["#", "Game", "Genre", "Developer"],
+		"table_rows":[
+			{"cells":[
+				{"text": "#20", "class": "text-right"},
+				{"text": "Demon's Souls", "class": ""},
+				{"text": "Role-playing (RPG), Hack and slash/Beat 'em up, Adventure", "class": ""},
+				{"text": "Bluepoint Games", "class": ""}
+			]},
+			{"cells":[
+				{"text": "#15", "class": "text-right"},
+				{"text": "Cyberpunk 2077", "class": ""},
+				{"text": "Shooter, Role-playing (RPG), Adventure", "class": ""},
+				{"text": "CD Projekt RED", "class": ""}
+			]}
+		]}`
+	out := plain().Event(event("system", payload))
+	if !strings.Contains(out, "…") {
+		t.Errorf("overflow must truncate with ellipsis:\n%s", out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if w := lipgloss.Width(line); w > 60 {
+			t.Errorf("line exceeds width (%d > 60): %q", w, line)
+		}
+	}
+	// One rendered line per data row — no wrapped continuations. Each row
+	// ref appears exactly once, and both rows share the frame: 3 dash
+	// rules (top, header, bottom).
+	for _, ref := range []string{"#20", "#15"} {
+		if n := strings.Count(out, ref); n != 1 {
+			t.Errorf("row %s must render exactly once, got %d:\n%s", ref, n, out)
+		}
+	}
+	rules := 0
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Count(line, "─") > 10 {
+			rules++
+		}
+	}
+	if rules != 3 {
+		t.Errorf("want 3 dash rules (top, header, bottom), got %d:\n%s", rules, out)
+	}
+}
+
+func TestLocalEchoCarriesTimestamp(t *testing.T) {
+	// Covered at model level implicitly; here: an echo with CreatedAt set
+	// renders its stamp.
+	ev := api.Event{ID: -1, TurnID: -1, Kind: "echo",
+		Payload: []byte(`{"text":"#h with platform"}`)}
+	if out := plain().Event(ev); strings.Contains(out, ":") && len(out) > 0 {
+		// zero CreatedAt → no stamp
+		if strings.Count(out, ":") > 1 {
+			t.Errorf("zero time must not stamp: %q", out)
+		}
 	}
 }

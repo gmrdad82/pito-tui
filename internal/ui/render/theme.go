@@ -22,4 +22,7 @@ var (
 	ColorFaint = lipgloss.Color("241")
 	// ColorInk is the dark foreground used on colored badge backgrounds.
 	ColorInk = lipgloss.Color("232")
+	// ColorZebra tints alternate table rows — deep candy plum from the
+	// pito family, not battleship gray.
+	ColorZebra = lipgloss.Color("#332052")
 )

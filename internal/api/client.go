@@ -174,22 +174,27 @@ func decodeNotice(body []byte) *ServerNotice {
 	return nil
 }
 
-// FetchRaw GETs an instance-relative asset (Active Storage proxies and
-// friends) through the session jar and returns the bytes.
-func (c *Client) FetchRaw(ctx context.Context, path string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base.String()+path, nil)
+// Suggest asks the server-side palette what fits at input[:cursor].
+func (c *Client) Suggest(ctx context.Context, uuid, input string, cursor int) (*Suggestions, error) {
+	payload := map[string]any{"input": input, "cursor": cursor}
+	if uuid != "" {
+		payload["uuid"] = uuid
+	}
+	resp, body, err := c.do(ctx, http.MethodPost, "/suggestions", payload)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.hc.Do(req)
-	if err != nil {
+	if err := c.checkAuth(resp); err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("api: GET %s: %s", path, resp.Status)
+		return nil, fmt.Errorf("api: POST /suggestions: %s", resp.Status)
 	}
-	return io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+	var s Suggestions
+	if err := json.Unmarshal(body, &s); err != nil {
+		return nil, fmt.Errorf("api: decoding suggestions: %w", err)
+	}
+	return &s, nil
 }
 
 // checkAuth maps 401s and redirects (login pages) to ErrUnauthorized.
