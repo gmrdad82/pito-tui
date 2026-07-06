@@ -139,7 +139,7 @@ func (r *R) platformChip(alt string) string {
 	if !r.truecolor {
 		return lipgloss.NewStyle().Reverse(true).Bold(true).Render(text)
 	}
-	phase := staggered(r.phase, "chip-"+label)
+	phase := staggered20(r.phase, "chip-"+label)
 	runes := []rune(text)
 	var b strings.Builder
 	for i, ru := range runes {
@@ -271,7 +271,7 @@ func (r *R) ShinyBadge(material, face string) string {
 		return lipgloss.NewStyle().Reverse(true).Bold(true).Render(text)
 	}
 	grad := StopGradient{Stops: []GradientStop{{m.lo, 0}, {m.hi, 0.45}, {m.lo, 1}}}
-	phase := staggered(r.phase, "shiny-"+face)
+	phase := staggered20(r.phase, "shiny-"+face)
 	runes := []rune(text)
 	gleamMax := 0.35
 	if m.iridescent {

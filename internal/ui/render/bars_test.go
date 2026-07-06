@@ -1,6 +1,7 @@
 package render
 
 import (
+	"math"
 	"strings"
 	"testing"
 )
@@ -87,5 +88,42 @@ func TestShimmerStagger(t *testing.T) {
 	}
 	if staggered(0.3, "a") == staggered(0.3, "b") {
 		t.Error("different seeds must shift phase differently")
+	}
+}
+
+// Shinies and chips scatter on the web's 20 discrete stagger buckets —
+// offsets land exactly on the k/20 grid and distinct seeds spread out.
+func TestTwentyStepStagger(t *testing.T) {
+	seen := map[float64]bool{}
+	for _, seed := range []string{"shiny-1 Sub", "shiny-2 Subs", "shiny-2K Subs", "chip-PS", "chip-Steam", "chip-Xbox"} {
+		off := staggered20(0, seed)
+		if math.Abs(off*20-math.Round(off*20)) > 1e-9 {
+			t.Errorf("offset %f for %q is off the 20-step grid", off, seed)
+		}
+		seen[off] = true
+	}
+	if len(seen) < 4 { // 6 seeds over 20 buckets: a pile-up means broken hashing
+		t.Errorf("stagger buckets collapsed: %d distinct of 6", len(seen))
+	}
+}
+
+// The global 130° sweep: rows of a multi-line surface lean the band —
+// the same cell lights at different phases on different rows.
+func TestShimmerAngleLeansAcrossRows(t *testing.T) {
+	base := RGB{0x80, 0x80, 0x80}
+	if rowLean == 0 {
+		t.Fatal("130° must produce a nonzero row lean")
+	}
+	phase := 0.5
+	row0 := bandBoostRow(base, 20, 0, 42, phase)
+	row1 := bandBoostRow(base, 20, 1, 42, phase)
+	if row0 == row1 {
+		// The band center differs by rowLean between rows; the same cell
+		// must not be identically lit unless both are outside the band.
+		row0in := bandBoostRow(base, 21, 0, 42, phase)
+		row1in := bandBoostRow(base, 21, 1, 42, phase)
+		if row0in == row1in {
+			t.Errorf("angle lean has no effect across rows (lean=%f)", rowLean)
+		}
 	}
 }

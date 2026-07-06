@@ -98,10 +98,13 @@ Every screen from the revisit, the server's new eyes, and the shine.
 - **Shimmer, staggered and smoothed** — every animated element (marked
   words, bar fills, coverage bars, braille curves) now carries its own
   phase offset from a stable seed, so neighbors never pulse in sync —
-  the terminal cousin of the web's shimmer stagger buckets. The sweep
-  band widened into a soft cosine-falloff gradient instead of a
-  hard-edged stripe, and the animation loop doubled to 25fps with a
-  slightly quicker (~2.7s) cycle — motion, not ticking.
+  the terminal cousin of the web's shimmer stagger buckets. Shinies and
+  platform chips scatter on the web's exact 20 discrete buckets. The
+  sweep band widened into a soft cosine-falloff gradient instead of a
+  hard-edged stripe, the whole TUI sweeps at the web's 130° angle
+  (multi-row charts lean the band across rows), and the animation loop
+  doubled to 25fps with a slightly quicker (~2.7s) cycle — motion, not
+  ticking.
 
 - **The context meter** — the web's thin gradient bar, above the
   prompt: server-computed fill (the server is the source of truth — the

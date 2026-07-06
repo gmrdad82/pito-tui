@@ -148,7 +148,7 @@ func (r *R) paintBraille(rows []string, cellW int, noData bool) []string {
 			case blank || noData:
 				b.WriteString(lipgloss.NewStyle().Foreground(ColorFaint).Render(string(ru)))
 			case r.truecolor:
-				b.WriteString(lipgloss.NewStyle().Foreground(hex(bandBoost(fgDefault, i, cellW, chartPhase))).Render(string(ru)))
+				b.WriteString(lipgloss.NewStyle().Foreground(hex(bandBoostRow(fgDefault, i, ri, cellW, chartPhase))).Render(string(ru)))
 			default:
 				b.WriteString(string(ru))
 			}

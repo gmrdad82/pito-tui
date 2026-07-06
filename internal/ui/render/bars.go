@@ -58,6 +58,16 @@ func (g StopGradient) At(t float64) RGB {
 // band .pito-bar-shimmer sweeps across every fill.
 var bandColor = RGB{0x5f, 0xd7, 0xff}
 
+// ShimmerAngleDeg is the GLOBAL sweep angle for every TUI shimmer
+// (owner call 2026-07-06: 130°, CSS-style). On a cell grid the angle
+// appears as a horizontal lean per row — terminal cells are ~2× taller
+// than wide, so the lean is aspect-corrected.
+const ShimmerAngleDeg = 130.0
+
+// rowLean is the per-row horizontal band offset that produces the
+// global angle across multi-row surfaces.
+var rowLean = 2.0 / math.Tan(ShimmerAngleDeg*math.Pi/180)
+
 // bandBoost lifts a cell's color toward the highlight when the shimmer
 // band (riding r.phase, like the text shimmer) passes over it. The
 // falloff is a cosine bell over a wide window — a soft gradient sweep,
@@ -65,8 +75,15 @@ var bandColor = RGB{0x5f, 0xd7, 0xff}
 const bandHalfWidth = 7.0
 
 func bandBoost(c RGB, i, cells int, phase float64) RGB {
+	return bandBoostRow(c, i, 0, cells, phase)
+}
+
+// bandBoostRow is bandBoost with the row's angle lean applied — rows of
+// a multi-line surface shift the band center so the sweep crosses at
+// the global ShimmerAngleDeg.
+func bandBoostRow(c RGB, i, row, cells int, phase float64) RGB {
 	span := float64(cells) + bandHalfWidth*2 // run past both edges
-	center := phase*span - bandHalfWidth
+	center := phase*span - bandHalfWidth + float64(row)*rowLean
 	d := math.Abs(float64(i) - center)
 	if d > bandHalfWidth {
 		return c
@@ -88,6 +105,15 @@ func phaseOffset(seed string) float64 {
 // staggered wraps a phase with a seed offset back into [0,1).
 func staggered(phase float64, seed string) float64 {
 	p := phase + phaseOffset(seed)
+	return p - math.Floor(p)
+}
+
+// staggered20 quantizes the seed offset onto the web's 20 stagger
+// buckets (pito-shimmer-d0…d19) — shinies and platform chips scatter in
+// discrete steps, never in sync, never in-between (owner call).
+func staggered20(phase float64, seed string) float64 {
+	step := math.Floor(phaseOffset(seed)*20) / 20
+	p := phase + step
 	return p - math.Floor(p)
 }
 
