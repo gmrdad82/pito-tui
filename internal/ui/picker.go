@@ -34,7 +34,6 @@ func pickerRows(list *api.ResumeList) []pickerRow {
 
 var (
 	pickerBadgeStyle   = lipgloss.NewStyle().Background(render.ColorPrimary).Foreground(lipgloss.Color("231")).Bold(true).Padding(0, 1)
-	pickerTitleStyle   = lipgloss.NewStyle().Bold(true)
 	pickerSectionStyle = lipgloss.NewStyle().Foreground(render.ColorPrimary).Bold(true)
 	pickerCursorStyle  = lipgloss.NewStyle().Foreground(render.ColorAccent).Bold(true)
 	pickerNewStyle     = lipgloss.NewStyle().Foreground(render.ColorOK)
@@ -45,7 +44,7 @@ var (
 // pickerView renders the conversation picker, windowed so long lists keep
 // the cursor on screen (title and help stay fixed). now anchors the
 // relative timestamps so golden frames stay deterministic.
-func pickerView(rows []pickerRow, cursor, width, height int, now time.Time) string {
+func pickerView(rows []pickerRow, cursor, width, height int, now time.Time, truecolor bool) string {
 	// Build every list line first, remembering which line the cursor is on
 	// (section headers interleave, so row index ≠ line index).
 	var lines []string
@@ -63,7 +62,8 @@ func pickerView(rows []pickerRow, cursor, width, height int, now time.Time) stri
 		} else if label == "" {
 			label = "(unnamed)"
 		}
-		if i == cursor {
+		selected := i == cursor
+		if selected {
 			marker = pickerCursorStyle.Render("▌ ")
 			cursorLine = len(lines)
 			if !row.isNew {
@@ -74,7 +74,16 @@ func pickerView(rows []pickerRow, cursor, width, height int, now time.Time) stri
 		if !row.last.IsZero() {
 			line += pickerDimStyle.Render("  · " + relativeTime(row.last, now))
 		}
-		lines = append(lines, lipgloss.NewStyle().MaxWidth(width).Render(line))
+		line = lipgloss.NewStyle().MaxWidth(width).Render(line)
+		if selected {
+			// The selection wears the zebra stripe, full width — the
+			// picker's cousin of the lists' candy rows.
+			if pad := width - 1 - lipgloss.Width(line); pad > 0 {
+				line += strings.Repeat(" ", pad)
+			}
+			line = lipgloss.NewStyle().Background(render.ColorZebra).Render(line)
+		}
+		lines = append(lines, line)
 	}
 
 	// Window the list to the space between the fixed title (2 lines) and
@@ -99,7 +108,15 @@ func pickerView(rows []pickerRow, cursor, width, height int, now time.Time) stri
 	}
 
 	var b strings.Builder
-	b.WriteString(pickerBadgeStyle.Render("pito") + " " + pickerTitleStyle.Render("conversations") + "\n\n")
+	rule := width - 2
+	if rule > 44 {
+		rule = 44
+	}
+	if rule < 4 {
+		rule = 4
+	}
+	b.WriteString(pickerBadgeStyle.Render("pito") + " " + render.Brand("conversations", truecolor) + "\n")
+	b.WriteString(pickerDimStyle.Render(strings.Repeat("─", rule)) + "\n")
 	if start > 0 {
 		b.WriteString(pickerDimStyle.Render(fmt.Sprintf("  ↑ %d more", start)) + "\n")
 	}

@@ -965,3 +965,122 @@ func TestMutationReplyEchoesAndResyncs(t *testing.T) {
 		t.Errorf("resync must merge the in-place mutation:\n%s", view)
 	}
 }
+
+func TestFreshChartsRevealThenSettle(t *testing.T) {
+	m, _ := newTestModel(t, http.NotFoundHandler(), WithConversation("u-1"), WithTruecolor(true))
+	m = sized(m)
+
+	payload := `{"body":"<span class=\"pito-bar-shimmer\">x</span>","html":true}`
+	next, _ := m.Update(CableEventMsg{M: cable.StreamMessage{
+		Type:  cable.TypeEventAppend,
+		Event: api.Event{ID: 7, TurnID: 3, Kind: "system", Payload: []byte(payload)},
+	}})
+	m = next.(Model)
+	if len(m.revealing) != 1 {
+		t.Fatalf("fresh chart must start revealing, got %d", len(m.revealing))
+	}
+
+	// Mid-flight: a tick keeps it revealing with a fraction below 1.
+	next, _ = m.Update(AnimTickMsg{})
+	m = next.(Model)
+	if len(m.revealing) != 1 {
+		t.Fatalf("reveal must persist mid-flight")
+	}
+
+	// Age it past the duration: the next tick settles it.
+	info := m.revealing[7]
+	info.born = time.Now().Add(-2 * revealDuration)
+	m.revealing[7] = info
+	next, _ = m.Update(AnimTickMsg{})
+	m = next.(Model)
+	if len(m.revealing) != 0 {
+		t.Fatalf("reveal must settle after its duration")
+	}
+}
+
+func TestContextMeterAndMiniStatusFlow(t *testing.T) {
+	page := `{"conversation":{"uuid":"u-1","title":"t","display_name":"t",
+		"context":{"pct":2.0,"count":2,"threshold":100}},
+		"me":{"handle":"@gmrdad82","name":"gmrdad82"},
+		"notifications":{"unread":28},"events":[]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(page))
+	}))
+	defer srv.Close()
+	m, _ := newTestModel(t, nil, WithConversation("u-1"))
+	client, err := api.New(srv.URL, filepath.Join(t.TempDir(), "cookies.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.client = client
+	m = sized(m)
+
+	fetched := m.fetchChatCmd("u-1", false)()
+	next, _ := m.Update(fetched)
+	m = next.(Model)
+	if m.meterCtx == nil || m.meterCtx.Pct != 2.0 {
+		t.Fatalf("meter not absorbed from fetch: %+v", m.meterCtx)
+	}
+	if m.me == nil || m.me.Handle != "@gmrdad82" || m.unread != 28 {
+		t.Fatalf("me/unread not absorbed: %+v unread=%d", m.me, m.unread)
+	}
+
+	// The meter line renders above the input; status carries me + unread.
+	view := m.View()
+	if !strings.Contains(view, "2%") {
+		t.Errorf("meter counter missing from view:\n%s", view)
+	}
+	if !strings.Contains(view, "@gmrdad82") || !strings.Contains(view, "✉ 28") {
+		t.Errorf("mini status missing me/unread:\n%s", view)
+	}
+
+	// conversation.update patches both live.
+	next, _ = m.Update(CableEventMsg{M: cable.StreamMessage{
+		Type:          cable.TypeConversationUpdate,
+		Context:       &api.ContextMeter{Pct: 43, Count: 43, Threshold: 100},
+		Notifications: &api.NotifCount{Unread: 3},
+	}})
+	m = next.(Model)
+	if m.meterCtx.Pct != 43 || m.unread != 3 {
+		t.Fatalf("conversation.update not applied: %+v unread=%d", m.meterCtx, m.unread)
+	}
+	if view := m.View(); !strings.Contains(view, "43%") || !strings.Contains(view, "✉ 3") {
+		t.Errorf("patched values not rendered:\n%s", view)
+	}
+}
+
+func TestShiftArrowsScrollEvenWhileTyping(t *testing.T) {
+	m, _ := newTestModel(t, http.NotFoundHandler(), WithConversation("u-1"))
+	m = sized(m)
+	// A tall transcript so the viewport can actually scroll.
+	for i := int64(1); i <= 80; i++ {
+		m.transcript.Append(api.Event{ID: i, TurnID: i, Kind: "system",
+			Payload: []byte(`{"text":"row"}`)})
+	}
+	m.refreshViewport()
+	m.vp.GotoBottom()
+	m.follow = true
+
+	// Mid-typing: text in the prompt, shift+up still scrolls.
+	m.input.SetValue("ls games")
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftUp})
+	m = next.(Model)
+	if m.vp.AtBottom() {
+		t.Fatal("shift+up must scroll the viewport even while typing")
+	}
+	if m.follow {
+		t.Fatal("scrolling up must release follow")
+	}
+	if m.input.Value() != "ls games" {
+		t.Fatalf("input must be untouched, got %q", m.input.Value())
+	}
+	// And shift+down heads back toward the bottom.
+	for i := 0; i < 100; i++ {
+		next, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftDown})
+		m = next.(Model)
+	}
+	if !m.vp.AtBottom() || !m.follow {
+		t.Fatal("shift+down to the bottom must restore follow")
+	}
+}

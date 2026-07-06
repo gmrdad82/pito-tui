@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/charmbracelet/glamour"
@@ -21,12 +22,14 @@ import (
 // R renders events at a fixed width. Rebuild it on terminal resize — the
 // glamour renderer word-wraps at construction time.
 type R struct {
-	width     int
-	plain     bool
-	truecolor bool
-	phase     float64
-	style     string
-	glam      *glamour.TermRenderer
+	width      int
+	plain      bool
+	truecolor  bool
+	phase      float64
+	revealFrac float64 // current event's grow-in (1 = settled)
+	reveal     map[int64]float64
+	style      string
+	glam       *glamour.TermRenderer
 
 	echoBar      lipgloss.Style
 	systemBar    lipgloss.Style
@@ -72,7 +75,8 @@ func New(width int, opts ...Option) *R {
 			PaddingLeft(1).Width(width - 2)
 	}
 	r := &R{
-		width: width,
+		width:      width,
+		revealFrac: 1, // fully revealed unless an animation says otherwise
 		// Mirrors the web's block language: every message is a left-bar
 		// block — echo in the user accent, replies in their own colors —
 		// with the timestamp inside.
@@ -143,14 +147,19 @@ func (r *R) paintShimmer(text string) string {
 	return b.String()
 }
 
-// HasShimmer reports whether a payload carries shimmer-marked words —
-// the model uses it to decide which turns animate while fresh.
+// HasShimmer reports whether a payload carries anything that rides the
+// shimmer phase — marked words, bar fills, or sparkline charts — the
+// model uses it to decide which turns re-render on animation ticks.
 func HasShimmer(payload []byte) bool {
-	return strings.Contains(string(payload), "pito-subject-shimmer")
+	s := string(payload)
+	return strings.Contains(s, "pito-subject-shimmer") ||
+		strings.Contains(s, "pito-bar-shimmer") ||
+		strings.Contains(s, "pito-metric--sparkline")
 }
 
 // Event renders one event to a newline-terminated block.
 func (r *R) Event(ev api.Event) string {
+	r.revealFrac = r.revealFor(ev.ID)
 	switch ev.Kind {
 	case api.KindEcho:
 		return r.echo(ev)
@@ -187,6 +196,28 @@ func (r *R) accent(text string) string {
 	return lipgloss.NewStyle().Foreground(ColorAccent).Render(text)
 }
 
+// dimCopy renders product copy dim, with `backtick` command spans in the
+// accent — the terminal cousin of the web's inline-code styling. An
+// unbalanced backtick degrades to plain dim text.
+func (r *R) dimCopy(text string) string {
+	if strings.Count(text, "`")%2 != 0 {
+		return r.dim(text)
+	}
+	var b strings.Builder
+	parts := strings.Split(text, "`")
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+		if i%2 == 1 {
+			b.WriteString(r.accent(part))
+		} else {
+			b.WriteString(r.dim(part))
+		}
+	}
+	return b.String()
+}
+
 // messageBlock renders a system/enhanced-shaped event as one bar block:
 // timestamp + body, with the reply affordance inside the block like the web.
 func (r *R) messageBlock(bar lipgloss.Style, ev api.Event) string {
@@ -220,6 +251,15 @@ type textPayload struct {
 	ListFooter string `json:"list_footer"`
 	// Sections are /help-style titled key/value groups.
 	Sections []section `json:"sections"`
+	// Games is channel_games' structured rows (tui-needs.md item 5):
+	// text clients render from THIS, never the html cover grid.
+	Games []gameRow `json:"games"`
+}
+
+type gameRow struct {
+	ID    int    `json:"id"`
+	Title string `json:"title"`
+	Vids  int    `json:"vids"`
 }
 
 type section struct {
@@ -284,6 +324,21 @@ func (r *R) bodyText(ev api.Event) string {
 	if err := json.Unmarshal(ev.Payload, &p); err != nil {
 		return strings.TrimSpace(string(ev.Payload))
 	}
+	// channel_games: synthesize the standard list table from the
+	// structured rows and keep only the body's intro sentence — the
+	// cover grid behind it is web-only.
+	if len(p.Games) > 0 && len(p.TableRows) == 0 {
+		p.TableHeading, p.TableRows = gamesTable(p.Games)
+		if p.HTML {
+			// First line only — the cover grid behind it is web-only.
+			// Stays on the html path so shimmer markers paint.
+			flat := htmlToText(p.Body)
+			if i := strings.IndexByte(flat, '\n'); i >= 0 {
+				flat = flat[:i]
+			}
+			p.Body = strings.TrimSpace(flat)
+		}
+	}
 	headline := ""
 	charts := r.analyzeBlock(ev.Payload)
 	switch {
@@ -298,7 +353,34 @@ func (r *R) bodyText(ev api.Event) string {
 			charts = r.dim("crunching the numbers…")
 		}
 	case p.Body != "" && p.HTML:
-		headline = r.paintShimmer(htmlToText(p.Body))
+		// Show cards and game segments get the structured treatment:
+		// zebra kv + 1:1 score/TTB bars (detail), scored rows (similar),
+		// coverage bars + recommendations (channels). Anything else
+		// flattens to text.
+		switch {
+		case hasPendingChannels(ev.Payload):
+			// The distribution fills asynchronously — the web shows a
+			// dotted canvas; the terminal waits quietly. The ready body
+			// arrives by event.replace/resync.
+			headline = r.paintShimmer(channelsIntro(ev.Payload)) + "\n\n" + r.dim("mapping the territory…")
+		case hasPendingGlance(ev.Payload):
+			// Same rhythm for the glance panel's AnalyticsFillJob.
+			headline = r.paintShimmer(glanceIntroText(ev.Payload)) + "\n\n" + r.dim("crunching the numbers…")
+		default:
+			if card, ok := parseDetailCard(p.Body); ok {
+				headline = r.detailCard(card)
+			} else if sh, ok := parseShinies(p.Body); ok {
+				headline = r.shiniesMessage(sh)
+			} else if strip, ok := parseSimilarStrip(p.Body); ok {
+				headline = r.similarStrip(strip)
+			} else if gc, ok := parseGameChannels(p.Body); ok {
+				headline = r.gameChannels(gc)
+			} else if glance, ok := parseGlance(p.Body); ok {
+				headline = r.glancePanel(glance)
+			} else {
+				headline = r.paintShimmer(htmlToText(p.Body))
+			}
+		}
 	case p.Body != "":
 		headline = r.markdown(p.Body)
 	default:
@@ -320,7 +402,7 @@ func (r *R) bodyText(ev api.Event) string {
 		}
 	}
 	if p.ListFooter != "" {
-		parts = append(parts, r.dim(p.ListFooter))
+		parts = append(parts, r.dimCopy(p.ListFooter))
 	}
 	return strings.Join(parts, "\n\n")
 }
@@ -362,7 +444,9 @@ func (r *R) sections(groups []section) string {
 func (r *R) table(heading []tableCell, rows []tableRow) string {
 	cellText := func(cell tableCell) string {
 		if cell.HTML {
-			return htmlToText(cell.Text)
+			// Chips/coins stay plain inside lipgloss/table cells — the
+			// table owns cell styling (zebra, truncation).
+			return plainTokens(htmlToText(cell.Text))
 		}
 		return cell.Text
 	}
@@ -584,7 +668,23 @@ func (r *R) confirmation(ev api.Event) string {
 	if !p.Resolved && p.ReplyHandle != "" {
 		content += "\n" + r.dim("reply with ") + r.accent(p.ReplyHandle) + r.dim(" …")
 	}
-	return r.confirmStyle.Render(content) + "\n"
+	bar := r.confirmStyle
+	if !p.Resolved && r.truecolor {
+		// A live confirmation breathes: the warn border pulses with the
+		// shimmer phase until a reply resolves it.
+		bar = bar.BorderForeground(hex(pulseWarn(r.phase)))
+	}
+	return bar.Render(content) + "\n"
+}
+
+// pulseWarn oscillates the warn accent between bright and embered — the
+// live-confirmation heartbeat.
+func pulseWarn(phase float64) RGB {
+	bright := RGB{0xff, 0xd7, 0x5f}
+	ember := RGB{0x9a, 0x7a, 0x3a}
+	f := (math.Sin(phase*2*math.Pi) + 1) / 2
+	lerp := func(a, b uint8) uint8 { return uint8(float64(a) + (float64(b)-float64(a))*f) }
+	return RGB{lerp(bright.R, ember.R), lerp(bright.G, ember.G), lerp(bright.B, ember.B)}
 }
 
 // fallback renders any unknown kind: the kind label plus its payload,
@@ -597,4 +697,38 @@ func (r *R) fallback(ev api.Event) string {
 	}
 	label := r.dimStyle.Render("[" + ev.Kind + "]")
 	return label + "\n" + r.dimStyle.Render(pretty.String()) + "\n"
+}
+
+// SetReveal installs the grow-in fractions for freshly-arrived events
+// (eventID → 0..1); events absent from the map render fully revealed.
+func (r *R) SetReveal(fracs map[int64]float64) { r.reveal = fracs }
+
+// revealFor is the current event's grow-in fraction.
+func (r *R) revealFor(id int64) float64 {
+	if r.reveal == nil {
+		return 1
+	}
+	if f, ok := r.reveal[id]; ok {
+		return f
+	}
+	return 1
+}
+
+// gamesTable shapes channel_games rows into the shared table language:
+// #id and vids right-aligned like every list, title left.
+func gamesTable(games []gameRow) ([]tableCell, []tableRow) {
+	heading := []tableCell{
+		{Text: "#", Class: "text-right"},
+		{Text: "Game"},
+		{Text: "Vids", Class: "text-right"},
+	}
+	rows := make([]tableRow, 0, len(games))
+	for _, g := range games {
+		rows = append(rows, tableRow{Cells: []tableCell{
+			{Text: "#" + itoa(g.ID), Class: "pito-action-shimmer text-right"},
+			{Text: g.Title},
+			{Text: itoa(g.Vids), Class: "text-right"},
+		}})
+	}
+	return heading, rows
 }

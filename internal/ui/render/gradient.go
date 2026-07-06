@@ -98,3 +98,12 @@ func (g Gradient) Bar(value float64, width int) string {
 	}
 	return b.String()
 }
+
+// Brand paints text in the pito brand gradient (static sweep position) —
+// the status bar's glossy signature. Lesser terminals get the primary.
+func Brand(text string, truecolor bool) string {
+	if truecolor {
+		return PitoShimmer.Colorize(text, 0)
+	}
+	return lipgloss.NewStyle().Foreground(ColorPrimary).Render(text)
+}

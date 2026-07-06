@@ -295,9 +295,20 @@ func TestAnalyzeChartsFromLivePayload(t *testing.T) {
 	}
 	out := plain().Event(event("system", string(raw)))
 
-	// Sparklines: one rune per day for each stash metric.
-	if strings.Count(out, "▁") == 0 && strings.Count(out, "▂") == 0 {
-		t.Errorf("no sparkline runes rendered:\n%s", out)
+	// Charts draw in braille (the BrailleAreaChart port) — never the old
+	// solid block runes.
+	braille := false
+	for _, ru := range out {
+		if ru > 0x2800 && ru <= 0x28FF {
+			braille = true
+			break
+		}
+	}
+	if !braille {
+		t.Errorf("no braille chart rendered:\n%s", out)
+	}
+	if strings.ContainsAny(out, "▁▂▃▄▅▆▇█") {
+		t.Errorf("solid block runes leaked into charts:\n%s", out)
 	}
 	for _, want := range []string{
 		"total -2",          // subs total (negative-friendly)
@@ -314,16 +325,23 @@ func TestAnalyzeChartsFromLivePayload(t *testing.T) {
 	}
 }
 
-func TestSparklineScaling(t *testing.T) {
-	if got := sparkline([]float64{0, 0, 0}); got != "▁▁▁" {
-		t.Errorf("flat series = %q", got)
+func TestBrailleAreaMirrorsPito(t *testing.T) {
+	// Flat zero series: the one-dot baseline floor, never a blank gap.
+	rows := BrailleArea([]float64{0, 0, 0}, 3, 2, 0)
+	if rows[1] != "⣀⣀⣀" {
+		t.Errorf("zero series must draw the baseline floor: %q", rows[1])
 	}
-	got := sparkline([]float64{-1, 0, 5})
-	if []rune(got)[0] != '▁' || []rune(got)[2] != '█' {
-		t.Errorf("range scaling wrong: %q", got)
+	if rows[0] != "⠀⠀⠀" {
+		t.Errorf("zero series top row must stay blank: %q", rows[0])
 	}
-	if sparkline(nil) != "" {
-		t.Error("empty series must render nothing")
+	// A peak fills its column to the top; positives always clear the floor.
+	rows = BrailleArea([]float64{0, 10, 0}, 3, 2, 10)
+	if !strings.ContainsRune(rows[0], '⣿') && !strings.Contains(rows[0], "⢠") && rows[0] == "⠀⠀⠀" {
+		t.Errorf("peak must reach the top row: %q", rows[0])
+	}
+	tiny := BrailleArea([]float64{0, 0.01, 0}, 3, 2, 100)
+	if tiny[1] == "⣀⣀⣀" {
+		t.Errorf("a strictly-positive value must clear the baseline: %q", tiny[1])
 	}
 }
 
@@ -391,7 +409,14 @@ func TestAnalyzeVidLevelSurvivesListShapedLikesSlot(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := plain().Event(event("system", string(raw)))
-	if !strings.Contains(out, "▁") && !strings.Contains(out, "█") {
+	brailleVid := false
+	for _, ru := range out {
+		if ru > 0x2800 && ru <= 0x28FF {
+			brailleVid = true
+			break
+		}
+	}
+	if !brailleVid {
 		t.Errorf("vid-level charts missing:\n%s", out)
 	}
 }

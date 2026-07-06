@@ -58,8 +58,11 @@ type Model struct {
 	truecolor    bool
 	renderer     *render.R
 	shimmer      map[int64]bool // turns with shimmer-marked words (animate forever)
-	phase        float64
-	animating    bool
+	// revealing tracks freshly-arrived events whose charts/bars grow in
+	// (the web's pito-bar-reveal): eventID → birth + turn for dirtying.
+	revealing map[int64]revealInfo
+	phase     float64
+	animating bool
 
 	// picker state
 	rows   []pickerRow
@@ -86,6 +89,9 @@ type Model struct {
 	suggestSel    int
 	loadErr       string
 	pickerNotice  string
+	meterCtx      *api.ContextMeter // server-computed context (render only)
+	me            *api.Identity
+	unread        int
 
 	width, height int
 	ready         bool
@@ -174,16 +180,17 @@ func NewModel(client *api.Client, connect ConnectFunc, opts ...Option) Model {
 	)
 
 	m := Model{
-		client:  client,
-		connect: connect,
-		sounds:  noopNotifier{},
-		mode:    modePicker,
-		input:   input,
-		spin:    spin,
-		pending: map[int64]bool{},
-		shimmer: map[int64]bool{},
-		follow:  true,
-		now:     time.Now,
+		client:    client,
+		connect:   connect,
+		sounds:    noopNotifier{},
+		mode:      modePicker,
+		input:     input,
+		spin:      spin,
+		pending:   map[int64]bool{},
+		shimmer:   map[int64]bool{},
+		revealing: map[int64]revealInfo{},
+		follow:    true,
+		now:       time.Now,
 	}
 	m.transcript = NewTranscript(nil)
 	for _, opt := range opts {
@@ -375,6 +382,16 @@ func (m Model) onChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.vp.HalfPageUp()
 		m.follow = m.vp.AtBottom()
 		return m, nil
+	case tea.KeyShiftUp:
+		// Web parity: shift+↑/↓ scroll the conversation — and unlike the
+		// vim keys they work mid-typing (they never collide with input).
+		m.vp.ScrollUp(1)
+		m.follow = m.vp.AtBottom()
+		return m, nil
+	case tea.KeyShiftDown:
+		m.vp.ScrollDown(1)
+		m.follow = m.vp.AtBottom()
+		return m, nil
 	}
 
 	// Vim-style scrolling only while the prompt is empty — otherwise every
@@ -507,10 +524,22 @@ func (m Model) onChatFetched(msg ChatFetchedMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.conv = msg.Page.Conversation
+	if msg.Page.Conversation.Context != nil {
+		m.meterCtx = msg.Page.Conversation.Context
+	}
+	if msg.Page.Me != nil {
+		m.me = msg.Page.Me
+	}
+	if msg.Page.Notifications != nil {
+		m.unread = msg.Page.Notifications.Unread
+	}
 	m.needsLogin = false // the backfill is auth-gated: fetching it proves the session
 	m.transcript.Merge(msg.Page.Events)
 	for _, ev := range msg.Page.Events {
 		if m.truecolor && render.HasShimmer(ev.Payload) {
+			m.shimmer[ev.TurnID] = true
+		}
+		if m.truecolor && (ev.Kind == api.KindConfirmation || ev.Kind == api.KindConfirmationFollowUp) {
 			m.shimmer[ev.TurnID] = true
 		}
 	}
@@ -599,12 +628,24 @@ func (m Model) onCableEvent(msg CableEventMsg) (tea.Model, tea.Cmd) {
 		if m.truecolor && render.HasShimmer(ev.Payload) {
 			m.shimmer[ev.TurnID] = true
 		}
+		m.markReveal(ev)
+		if m.truecolor && (ev.Kind == api.KindConfirmation || ev.Kind == api.KindConfirmationFollowUp) {
+			m.shimmer[ev.TurnID] = true // the warn border pulses while live
+		}
 	case cable.TypeEventReplace:
 		// A replace proves the turn is flowing too — the thinking
 		// resolve (event.replace, resolved: true) is THE turn-done
 		// signal per the contract, so pending must not survive it.
 		delete(m.pending, ev.TurnID)
 		m.transcript.Replace(ev)
+		m.markReveal(ev) // a fill landing via replace grows in too
+	case cable.TypeConversationUpdate:
+		if msg.M.Context != nil {
+			m.meterCtx = msg.M.Context
+		}
+		if msg.M.Notifications != nil {
+			m.unread = msg.M.Notifications.Unread
+		}
 	default:
 		return m, nil // unknown stream message type: ignore
 	}
@@ -612,18 +653,36 @@ func (m Model) onCableEvent(msg CableEventMsg) (tea.Model, tea.Cmd) {
 	return m, m.animate()
 }
 
+// revealInfo tracks one freshly-arrived event growing in.
+type revealInfo struct {
+	turnID int64
+	born   time.Time
+}
+
+// revealDuration is the web's pito-bar-reveal length, terminal-tuned.
+const revealDuration = 600 * time.Millisecond
+
+// markReveal starts the grow-in for charts/bars that just arrived live.
+func (m *Model) markReveal(ev api.Event) {
+	if !m.truecolor || !render.HasShimmer(ev.Payload) {
+		return
+	}
+	m.revealing[ev.ID] = revealInfo{turnID: ev.TurnID, born: time.Now()}
+}
+
 // Shimmer runs indefinitely, like the web (owner call, 2026-07-05) — the
 // tick loop lives as long as shimmer-marked turns are in the transcript.
-// Tempo is terminal-tuned rather than the web's 5s CSS sweep: 80ms ticks
-// (12.5fps, smooth in a cell grid) with a ~3.2s full cycle.
+// 40ms ticks (25fps — owner call 2026-07-06: 12.5fps read as visible
+// ticking) with a ~2.7s cycle; per-element stagger lives in the
+// renderer (phaseOffset), so the shared phase never syncs neighbors.
 const (
-	shimmerTick = 80 * time.Millisecond
-	shimmerStep = 0.025
+	shimmerTick = 40 * time.Millisecond
+	shimmerStep = 0.015
 )
 
 // animate ensures the animation tick loop runs while shimmer lives.
 func (m *Model) animate() tea.Cmd {
-	if m.animating || len(m.shimmer) == 0 {
+	if m.animating || (len(m.shimmer) == 0 && len(m.revealing) == 0) {
 		return nil
 	}
 	m.animating = true
@@ -635,23 +694,41 @@ func animTick() tea.Cmd {
 }
 
 func (m Model) onAnimTick() (tea.Model, tea.Cmd) {
-	if len(m.shimmer) == 0 {
+	if len(m.shimmer) == 0 && len(m.revealing) == 0 {
 		m.animating = false
 		return m, nil
 	}
-	if len(m.shimmer) > 0 {
-		for turnID := range m.shimmer {
-			m.transcript.Touch(turnID)
-		}
-		m.phase += shimmerStep
-		if m.phase >= 1 {
-			m.phase -= 1
+	for turnID := range m.shimmer {
+		m.transcript.Touch(turnID)
+	}
+	// Advance the grow-ins: eased fraction per revealing event; done ones
+	// leave the map (they render full from then on).
+	if len(m.revealing) > 0 {
+		fracs := make(map[int64]float64, len(m.revealing))
+		for id, info := range m.revealing {
+			t := float64(time.Since(info.born)) / float64(revealDuration)
+			if t >= 1 {
+				delete(m.revealing, id)
+				m.transcript.Touch(info.turnID)
+				continue
+			}
+			fracs[id] = 1 - (1-t)*(1-t) // ease-out
+			m.transcript.Touch(info.turnID)
 		}
 		if m.renderer != nil {
-			m.renderer.SetPhase(m.phase)
+			m.renderer.SetReveal(fracs)
 		}
-		m.refreshViewport()
+	} else if m.renderer != nil {
+		m.renderer.SetReveal(nil)
 	}
+	m.phase += shimmerStep
+	if m.phase >= 1 {
+		m.phase -= 1
+	}
+	if m.renderer != nil {
+		m.renderer.SetPhase(m.phase)
+	}
+	m.refreshViewport()
 	return m, animTick()
 }
 
@@ -695,7 +772,7 @@ func (m Model) View() string {
 		return "loading…"
 	}
 	if m.mode == modePicker {
-		body := pickerView(m.rows, m.cursor, m.width, m.height, m.now())
+		body := pickerView(m.rows, m.cursor, m.width, m.height, m.now(), m.truecolor)
 		if m.pickerNotice != "" {
 			body += "\n" + statusStyle.Render("· "+m.pickerNotice)
 		}
@@ -715,8 +792,33 @@ func (m Model) View() string {
 	if banner := m.bannerLine(); banner != "" {
 		sections = append(sections, banner)
 	}
+	if meter := m.meterLine(); meter != "" {
+		sections = append(sections, meter)
+	}
 	sections = append(sections, m.input.View(), m.statusLine())
 	return strings.Join(sections, "\n")
+}
+
+// meterLine draws the context meter on the chatbox's top edge, exactly
+// like the web: conversation name left (only when named), the thin
+// gradient bar, the percent counter right. Server-computed — the TUI
+// only renders what the serializer/cable said.
+func (m Model) meterLine() string {
+	if m.meterCtx == nil {
+		return ""
+	}
+	name := ""
+	if m.conv.DisplayName != "" && !strings.HasPrefix(m.conv.DisplayName, "Unnamed") {
+		name = m.conv.DisplayName + " "
+	}
+	counter := " " + strconv.Itoa(int(m.meterCtx.Pct)) + "%"
+	barWidth := m.width - lipgloss.Width(name) - lipgloss.Width(counter) - 1
+	if barWidth < 10 {
+		barWidth = 10
+	}
+	return statusStyle.Render(name) +
+		m.renderer.ContextMeter(m.meterCtx.Pct, barWidth) +
+		statusStyle.Render(counter)
 }
 
 func (m Model) bannerLine() string {
@@ -782,7 +884,8 @@ func (m Model) helpLine() string {
 	key := lipgloss.NewStyle().Foreground(render.ColorDim).Bold(true)
 	dim := statusStyle
 	pairs := []struct{ k, v string }{
-		{"j/k", "scroll"}, {"ctrl-d/u", "half page"}, {"g/G", "top/bottom"},
+		{"j/k", "scroll"}, {"shift-↑/↓", "scroll (while typing too)"},
+		{"ctrl-d/u", "half page"}, {"g/G", "top/bottom"},
 		{"enter", "send"}, {"?", "help"}, {"ctrl-c", "quit"},
 	}
 	parts := make([]string, 0, len(pairs))
@@ -818,8 +921,14 @@ func (m Model) statusLine() string {
 		host = m.client.BaseURL().Host
 	}
 	sep := statusStyle.Render(" · ")
-	line := dot + " " + host + sep + statusStyle.Render(name) + sep +
+	line := dot + " " + render.Brand(host, m.truecolor) + sep + statusStyle.Render(name) + sep +
 		statusStyle.Render(state) + sep + statusStyle.Render(version.String())
+	if m.me != nil {
+		line = statusStyle.Render(m.me.Handle) + sep + line
+	}
+	if m.unread > 0 {
+		line += sep + lipgloss.NewStyle().Foreground(render.ColorWarn).Render("✉ "+strconv.Itoa(m.unread))
+	}
 	if pad := m.width - lipgloss.Width(line) - 1; pad > 0 {
 		line = strings.Repeat(" ", pad) + line
 	}
@@ -875,6 +984,9 @@ func (m Model) contentWidth() int {
 // banner, and the palette when they show.
 func (m Model) chatViewportHeight() int {
 	h := m.height - 2
+	if m.meterCtx != nil {
+		h--
+	}
 	if m.bannerLine() != "" {
 		h--
 	}

@@ -34,6 +34,10 @@ const (
 type StreamMessage struct {
 	Type  string    `json:"type"`
 	Event api.Event `json:"event"`
+	// conversation.update fields (context meter + notifications; the
+	// message carries no event). Nil on event.* messages.
+	Context       *api.ContextMeter `json:"context"`
+	Notifications *api.NotifCount   `json:"notifications"`
 }
 
 type ConnState int
@@ -77,3 +81,7 @@ type frame struct {
 	Message    json.RawMessage `json:"message"`
 	Reason     string          `json:"reason"`
 }
+
+// TypeConversationUpdate is the per-turn meter/notification patch
+// (tui-needs.md item 1) — no event rides on it.
+const TypeConversationUpdate = "conversation.update"

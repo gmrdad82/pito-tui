@@ -51,6 +51,18 @@ func htmlToText(fragment string) string {
 const (
 	ShimmerStart = '\uE000'
 	ShimmerEnd   = '\uE001'
+	// Token markers — platform chips and price coins survive the html
+	// flattening as private-use runes; paintTokens styles them later.
+	ChipStart = '\uE010'
+	ChipEnd   = '\uE011'
+	CoinMark  = '\uE012'
+	StarMark  = '\uE013'
+	// Shiny badges: E020 material E021 face-text E022; inner spaces ride
+	// E023 so value wrapping never splits a badge.
+	ShinyStart = '\uE020'
+	ShinySep   = '\uE021'
+	ShinyEnd   = '\uE022'
+	ShinySpace = '\uE023'
 )
 
 func walkText(n *html.Node, b *strings.Builder) {
@@ -59,6 +71,28 @@ func walkText(n *html.Node, b *strings.Builder) {
 	}
 	if n.Type == html.ElementNode {
 		switch {
+		case strings.Contains(attr(n, "class"), "pito-shiny") &&
+			!strings.Contains(attr(n, "class"), "shiny-rail"):
+			// Achievement badge (pito G127): keep material + face text as
+			// markers; the date line (extended form) stays web-only.
+			b.WriteRune(ShinyStart)
+			b.WriteString(attr(n, "data-material"))
+			b.WriteRune(ShinySep)
+			var face strings.Builder
+			for child := n.FirstChild; child != nil; child = child.NextSibling {
+				if child.Type == html.ElementNode && strings.Contains(attr(child, "class"), "__date") {
+					continue
+				}
+				walkText(child, &face)
+			}
+			for _, ru := range strings.TrimSpace(face.String()) {
+				if ru == ' ' {
+					ru = ShinySpace
+				}
+				b.WriteRune(ru)
+			}
+			b.WriteRune(ShinyEnd)
+			return
 		case strings.Contains(attr(n, "class"), "pito-subject-shimmer"):
 			b.WriteRune(ShimmerStart)
 			for child := n.FirstChild; child != nil; child = child.NextSibling {
@@ -68,14 +102,32 @@ func walkText(n *html.Node, b *strings.Builder) {
 			return
 		case n.Data == "svg":
 			// Icon SVGs carry their meaning in aria-label ("Likes",
-			// "Comments") — emit the word, skip the path soup.
+			// "Comments") — emit the word, skip the path soup. Detach it
+			// from a preceding count ("81<icon>" → "81 Likes").
 			if label := attr(n, "aria-label"); label != "" {
+				if s := b.String(); s != "" && !strings.HasSuffix(s, " ") && !strings.HasSuffix(s, "\n") {
+					b.WriteString(" ")
+				}
 				b.WriteString(label)
 			}
 			return
 		case n.Data == "img":
-			// Images never render as text: the pinned display carries
-			// them (avatars included — owner call: no stand-in glyphs).
+			// Images never render — no stand-in glyphs (owner lock).
+			// Two DATA exceptions ride marker runes for later styling:
+			// platform icons (alt = the platform) become chips, and the
+			// Mario coins / FREE star become gold glyphs (owner call
+			// 2026-07-06).
+			class := attr(n, "class")
+			switch {
+			case strings.Contains(class, "pito-platform-icon"):
+				b.WriteRune(ChipStart)
+				b.WriteString(attr(n, "alt"))
+				b.WriteRune(ChipEnd)
+			case strings.Contains(class, "pito-coin--free"):
+				b.WriteRune(StarMark)
+			case strings.Contains(class, "pito-coin"):
+				b.WriteRune(CoinMark)
+			}
 			return
 		case strings.Contains(attr(n, "class"), "grid"):
 			// Label/value grids (detail cards): the web separates the

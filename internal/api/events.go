@@ -39,6 +39,28 @@ type Conversation struct {
 	// there is no "name" key). DisplayName is the human label.
 	Title       string `json:"title"`
 	DisplayName string `json:"display_name"`
+	// Context is the server-computed context meter (tui-needs.md item 1).
+	// The server is the source of truth — the TUI never computes this.
+	Context *ContextMeter `json:"context"`
+}
+
+// ContextMeter is the conversation's context fill — served on the chat
+// backfill and patched live by conversation.update cable messages.
+type ContextMeter struct {
+	Pct       float64 `json:"pct"`
+	Count     int     `json:"count"`
+	Threshold int     `json:"threshold"`
+}
+
+// Identity is the signed-in user (the mini status "me").
+type Identity struct {
+	Handle string `json:"handle"`
+	Name   string `json:"name"`
+}
+
+// NotifCount carries the unread notification count.
+type NotifCount struct {
+	Unread int `json:"unread"`
 }
 
 // Label is the human-facing conversation name for status bars and pickers.
@@ -52,8 +74,10 @@ func (c Conversation) Label() string {
 // ChatPage is GET /chat/:uuid.json — the scrollback snapshot used for the
 // initial paint and for every reconnect re-sync (the cable has no replay).
 type ChatPage struct {
-	Conversation Conversation `json:"conversation"`
-	Events       []Event      `json:"events"`
+	Conversation  Conversation `json:"conversation"`
+	Events        []Event      `json:"events"`
+	Me            *Identity    `json:"me"`
+	Notifications *NotifCount  `json:"notifications"`
 }
 
 // ResumeRow is one conversation in the picker.
@@ -75,8 +99,10 @@ func (r ResumeRow) Label() string {
 // ResumeList is GET /resume.json — Conversation.recency_groups serialized:
 // everything within 24h of the most recent activity is "recent".
 type ResumeList struct {
-	Recent []ResumeRow `json:"recent"`
-	Older  []ResumeRow `json:"older"`
+	Recent        []ResumeRow `json:"recent"`
+	Older         []ResumeRow `json:"older"`
+	Me            *Identity   `json:"me"`
+	Notifications *NotifCount `json:"notifications"`
 }
 
 // SendResult is the classified POST /chat reply. Live-verified: the server

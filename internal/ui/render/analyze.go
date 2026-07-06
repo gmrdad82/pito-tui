@@ -57,35 +57,6 @@ type heartMetric struct {
 	} `json:"hearts"`
 }
 
-var sparkRunes = []rune("▁▂▃▄▅▆▇█")
-
-// sparkline renders a series as one rune per point, scaled to the series'
-// own range (negatives included — a dip is a low bar, not a crash).
-func sparkline(series []float64) string {
-	if len(series) == 0 {
-		return ""
-	}
-	lo, hi := series[0], series[0]
-	for _, v := range series {
-		if v < lo {
-			lo = v
-		}
-		if v > hi {
-			hi = v
-		}
-	}
-	span := hi - lo
-	var b strings.Builder
-	for _, v := range series {
-		idx := 0
-		if span > 0 {
-			idx = int((v - lo) / span * float64(len(sparkRunes)-1))
-		}
-		b.WriteRune(sparkRunes[idx])
-	}
-	return b.String()
-}
-
 // analyzeBlock renders the charts for an analyze payload; "" when the
 // payload carries none (callers fall through to plain body rendering).
 func (r *R) analyzeBlock(payload []byte) string {
@@ -140,7 +111,7 @@ func (r *R) analyzeBlock(payload []byte) string {
 		} else {
 			b.WriteString(strings.ReplaceAll(name, "_", " ") + "\n")
 		}
-		b.WriteString("  " + r.spark(data) + "\n")
+		b.WriteString(r.spark(data) + "\n")
 	}
 
 	if a.Likes != nil && len(a.Likes.Hearts) > 0 {
@@ -164,15 +135,23 @@ func (r *R) analyzeBlock(payload []byte) string {
 	return b.String()
 }
 
-// spark renders one metric line: gradient sparkline + total, delta vs the
-// previous window, and target pacing.
+// spark renders one metric: the web's 2-row braille curve (BrailleArea,
+// the BrailleAreaChart port — braille, never solid runes) with the
+// scalar legend below: total, delta vs the previous window, target
+// pacing. The ceiling keeps the daily target on-screen, web-style.
 func (r *R) spark(s analyzeSeries) string {
-	line := sparkline(s.Series)
-	if r.truecolor {
-		line = PitoShimmer.Colorize(line, r.phase) // rides the shimmer sweep
-	} else {
-		line = lipgloss.NewStyle().Foreground(ColorPrimary).Render(line)
+	cellW := 42
+	if w := r.width - 3; w < cellW {
+		cellW = w
 	}
+	ceiling := s.TargetDaily
+	for _, v := range s.Series {
+		if v > ceiling {
+			ceiling = v
+		}
+	}
+	rows := BrailleArea(s.Series, cellW, 2, ceiling)
+	lines := r.paintBraille(rows, cellW, false)
 	total := trimFloat(s.Total)
 	if s.TotalPct != nil {
 		total = trimFloat(*s.TotalPct) + "%"
@@ -184,7 +163,7 @@ func (r *R) spark(s analyzeSeries) string {
 	if s.TargetDaily > 0 {
 		meta += " · target " + trimFloat(s.TargetDaily) + "/d"
 	}
-	return line + "  " + r.dim(meta)
+	return strings.Join(lines, "\n") + "\n" + r.dim(meta)
 }
 
 func trimFloat(v float64) string {

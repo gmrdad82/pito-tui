@@ -4,6 +4,154 @@ All notable changes to pito-tui are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); from 1.0.0 onward the
 project follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] — 2026-07-06
+
+Every screen from the revisit, the server's new eyes, and the shine.
+
+### Added
+
+- **Show cards, rebuilt** — `show game/vid/channel` renders as a real
+  card instead of flattened html soup: the details as a zebra kv table
+  (the left column's Stats and Shinies counters folded in as rows; long
+  values like tags and channel descriptions wrap inside their own
+  column, stripes intact), the description on its own under a hairline,
+  and — for games — the web's Score and Time-to-beat bars, 1:1: the
+  bracketed `=` fill painted by the exact CSS ramp (hard red edges
+  through green), the `|` tick at the score with the value as an
+  invert chip beside it, the TTB heat gradient read from the payload's
+  own per-game stop positions, footage chip, colored main/extras/
+  completionist ticks, hour values under their ticks, and the legend
+  row. Labels keep the server's own padding so the two bars' brackets
+  align, exactly like the web.
+- **A reusable score bar** — the bar engine (positioned-stop gradients,
+  ticks, invert chips) and `ScoreBar` are standalone primitives, ready
+  for any future surface that carries a 0-100 rating.
+- **No images, still** — cover art, banners, and thumbnails are skipped
+  by construction (no placeholders, no ascii stand-ins); platform icons
+  contribute their alt text ("PlayStation Switch Xbox Steam") because
+  that is data, not imagery.
+- **The game's enhanced segments** — `show game … with similar,
+  channels, linked-videos` (and the segment verbs) render terminal-native:
+  *similar* as recommendation rows — `#id Title` beside a label-less
+  score bar, brackets aligned down the strip; *channels* as the coverage
+  block (one solid colored share bar per channel, redrawn from the
+  distribution legend's own data, caption below) plus the fit-score
+  roster (handle from the avatar's alt, score bar per row);
+  *linked-videos* was already a `Video::List` payload and rides the
+  shared list viewer — table, zebra, and the full mutate reply surface
+  (with/without/sort) included. The async channels fill waits quietly
+  ("mapping the territory…") instead of leaking the web's braille
+  canvas, and fills in on replace/resync.
+- **At-a-glance, everywhere** — `show channel/vid/game … with
+  at-a-glance` (and the glance verb) renders the web's panel
+  terminal-native: five metric cells, each a 2-row braille sparkline —
+  the web's own BrailleAreaChart rows lifted verbatim from the payload,
+  42 columns, identical curve by construction — over a legend that
+  gives the curve its scalar meaning ("Views 7.7K", "Subs +11 / -28",
+  "Likes 81 Likes / 11 Dislikes"). Cells sit two-up on wide terminals
+  and stack on narrow ones; the async fill waits with "crunching the
+  numbers…" and the nudge line rides below. The dotted-paper background
+  grid stays on the web.
+- **The vid's linked game** — `show vid … with linked-game` renders the
+  game card as the same zebra kv the show cards wear (no cover art, no
+  placeholders), reply handle carrying the full game_detail surface.
+- **The glance contract, live-specced** — `TestGlanceContract` waits
+  out the AnalyticsFillJob for all three nouns, asserts the ready body
+  carries every fragment the renderer lifts, checks the linked-game
+  card, and fires the `#handle analyze` reply.
+- **The segments reply contract, live-specced** — `TestGameSegmentsContract`
+  drives the linked-videos list's with/sort/without cycle, the similar
+  strip's `#handle show #id` reply, the channels fill reaching ready,
+  and pito's handle-sweep rule (an appending reply retires every prior
+  live hashtag — mutate replies retire nothing), all against a real
+  instance.
+- **The show reply contract, live-specced** — `TestShowReplyContract`
+  verifies each card arrives with every fragment the renderer parses,
+  that append replies (`#handle analyze`, `#handle shinies`) land new
+  messages below the card, and that an invalid action answers with the
+  error path — against a real instance.
+
+- **The glossy pass** — the web's charm, terminal-native: the pito-blue
+  shimmer band now sweeps every chart fill (score bars, TTB, coverage
+  bars, glance sparklines — the same `pito-bar-shimmer` motion the web
+  runs, riding the existing animation loop); sparklines sit on the
+  dotted graph paper (⠂ dots, ⣀ baseline) exactly like the web's
+  canvas; product copy renders its `backtick` command spans in the
+  accent so footers and nudges read like the web's inline code; and the
+  status bar wears the host in the pito brand gradient.
+
+- **Braille, everywhere charts live** — the analyze deep-dive now draws
+  its curves with a dot-exact Go port of pito's own BrailleAreaChart
+  (2-row braille on the dotted graph paper, target-aware ceiling, the
+  scalar legend below) — the old solid block runes are gone. Everything
+  chart-like in the terminal is braille now; the score and TTB bars keep
+  their `=` fills because that is literally what the web renders.
+- **Charts and bars grow in** — the web's pito-bar-reveal, ported:
+  freshly-arrived fills (score bars, TTB, coverage, braille curves)
+  ease in over ~600ms — bars left-to-right, curves bottom-up — then
+  settle; backfilled scrollback renders instantly.
+- **Live confirmations breathe** — an unresolved confirmation's warn
+  border pulses gently until a reply resolves it.
+- **The picker, dressed up** — brand-gradient title, a hairline under
+  the header, and the selection riding a full-width candy-plum stripe.
+
+- **Shimmer, staggered and smoothed** — every animated element (marked
+  words, bar fills, coverage bars, braille curves) now carries its own
+  phase offset from a stable seed, so neighbors never pulse in sync —
+  the terminal cousin of the web's shimmer stagger buckets. The sweep
+  band widened into a soft cosine-falloff gradient instead of a
+  hard-edged stripe, and the animation loop doubled to 25fps with a
+  slightly quicker (~2.7s) cycle — motion, not ticking.
+
+- **The context meter** — the web's thin gradient bar, above the
+  prompt: server-computed fill (the server is the source of truth — the
+  TUI never counts), drawn as a braille hairline wearing the green→red
+  meter ramp with the shimmer sweep, conversation name at the left when
+  named, the percent counter at the right. Updates live every turn via
+  the new `conversation.update` cable message.
+- **The mini status, completed** — the status line now leads with who
+  you are (`@handle`, from the server) and trails with the unread
+  notification count when there is one — both patched live by the same
+  per-turn cable message.
+
+- **Shift+↑/↓ scroll the conversation** — web parity, and stronger:
+  they work even while you're mid-sentence in the prompt (arrow keys
+  with shift never collide with typing). The vim keys (j/k, ctrl-d/u,
+  g/G) keep working on an empty prompt as before.
+
+- **Gold coins and platform chips** — two web details the flattener
+  used to drop, now data again (owner call): a game's price wears its
+  Mario-style coins (gold ● per coin from the payload's own count, the
+  gold ★ for FREE, an honest — when unpriced), and platforms render as
+  brand chips — white text on PlayStation blue, Switch red, Xbox green,
+  Steam navy — with a glassy highlight sweeping each chip on its own
+  stagger. Inside lipgloss tables the chips stay plain short labels
+  (PS/Switch/Xbox/Steam), which also fixes the silently-empty Platform
+  column in lists.
+
+- **Shinies, the loot log** — pito's achievement redesign (G127),
+  terminal-native: badges are material pills — each of the eleven
+  materials (wood through opal, the silver/gold/diamond awards) wears
+  its exact web palette as a gradient body with ink text, edge caps,
+  and a gleam sweeping on its own stagger; iridescent materials throw
+  more light. `shinies channel|vid|game` and the `#handle shinies`
+  reply render the full lanes: one rail per metric — reached ticks lit
+  in their step's material, the NEXT threshold breathing, the rest dim,
+  awards squared — with the "at X · next: Y (Material)" legend and the
+  obtained badges flowing beneath. Compact faces trim with an ellipsis,
+  unlock dates stay web-only, unknown materials degrade to a neutral
+  pill. `ShinyBadge` is reusable anywhere badge-shaped content appears.
+- **Stats and Shinies, their own table** — the show cards' Stats and
+  Shinies rows moved out of the details zebra into a dedicated block
+  above it, a blank row between the two tables (owner call).
+- **The channel's games, structured** — `games channel @handle` (and
+  the games segment) renders from the payload's new `games` rows
+  (tui-needs.md item 5): the standard list table — #id, title, vids —
+  intro kept, the web's cover grid ignored. Gated on field presence.
+- **Segment renames tracked** — pito renamed game `linked-videos` →
+  `videos` and vid `linked-game` → `game`; live specs and docs updated
+  (payload shapes unchanged).
+
 ## [1.0.0] — 2026-07-05
 
 First release — fresh meat.
