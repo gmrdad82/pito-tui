@@ -54,10 +54,6 @@ func (g StopGradient) At(t float64) RGB {
 	return g.Stops[len(g.Stops)-1].Color
 }
 
-// bandColor is the web's pito-blue chart-viz highlight — the moving
-// band .pito-bar-shimmer sweeps across every fill.
-var bandColor = RGB{0x5f, 0xd7, 0xff}
-
 // ShimmerAngleDeg is the GLOBAL sweep angle for every TUI shimmer
 // (owner call 2026-07-06: 130°, CSS-style). On a cell grid the angle
 // appears as a horizontal lean per row — terminal cells are ~2× taller
@@ -68,29 +64,31 @@ const ShimmerAngleDeg = 130.0
 // global angle across multi-row surfaces.
 var rowLean = 2.0 / math.Tan(ShimmerAngleDeg*math.Pi/180)
 
-// bandBoost lifts a cell's color toward the highlight when the shimmer
-// band (riding r.phase, like the text shimmer) passes over it. The
-// falloff is a cosine bell over a wide window — a soft gradient sweep,
-// not a hard-edged stripe.
-const bandHalfWidth = 7.0
+// glossBoost is the shared surface glint — a GAUSSIAN highlight, the
+// blur-soft cousin of the text shimmer's continuous gradient (owner
+// call 2026-07-06: no hard-edged bands). There is no cutoff: every cell
+// carries some light, falling off smoothly around the traveling peak;
+// the row lean keeps the global 130° angle.
+func glossBoost(c, tint RGB, i, row, cells int, phase, strength, sigma float64) RGB {
+	span := float64(cells) + sigma*4 // run the peak past both edges
+	center := phase*span - sigma*2 + float64(row)*rowLean
+	d := (float64(i) - center) / sigma
+	f := strength * math.Exp(-d*d)
+	lerp := func(x, y uint8) uint8 { return uint8(float64(x) + (float64(y)-float64(x))*f) }
+	return RGB{lerp(c.R, tint.R), lerp(c.G, tint.G), lerp(c.B, tint.B)}
+}
+
+// chartTint is the chart glint: pito-blue lifted toward white so the
+// peak reads as light, not as a color stamp.
+var chartTint = RGB{0xb7, 0xeb, 0xff}
 
 func bandBoost(c RGB, i, cells int, phase float64) RGB {
 	return bandBoostRow(c, i, 0, cells, phase)
 }
 
-// bandBoostRow is bandBoost with the row's angle lean applied — rows of
-// a multi-line surface shift the band center so the sweep crosses at
-// the global ShimmerAngleDeg.
+// bandBoostRow sweeps the chart glint with the row's angle lean.
 func bandBoostRow(c RGB, i, row, cells int, phase float64) RGB {
-	span := float64(cells) + bandHalfWidth*2 // run past both edges
-	center := phase*span - bandHalfWidth + float64(row)*rowLean
-	d := math.Abs(float64(i) - center)
-	if d > bandHalfWidth {
-		return c
-	}
-	f := 0.55 * (math.Cos(d/bandHalfWidth*math.Pi) + 1) / 2
-	lerp := func(x, y uint8) uint8 { return uint8(float64(x) + (float64(y)-float64(x))*f) }
-	return RGB{lerp(c.R, bandColor.R), lerp(c.G, bandColor.G), lerp(c.B, bandColor.B)}
+	return glossBoost(c, chartTint, i, row, cells, phase, 0.5, 5.5)
 }
 
 // phaseOffset scatters animations by a stable per-element seed so

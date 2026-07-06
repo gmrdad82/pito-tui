@@ -4,6 +4,23 @@ All notable changes to pito-tui are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); from 1.0.0 onward the
 project follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.1] — 2026-07-06
+
+The gloss, buffed until nothing catches.
+
+### Changed
+
+- **The surface gloss, de-harshed** — every surface glint (charts,
+  platform chips, shiny badges) moved from a hard-edged additive band
+  to a Gaussian sheen: no cutoff, blur-soft falloff, every cell always
+  carrying some light around a traveling peak — the same smoothness the
+  text shimmer has. Glints are tinted, not white-stamped: charts lift
+  toward an airy pito-blue, chips toward warm glass, and every shiny
+  badge gleams in its own material's tone (amber warm, jade green) —
+  while pearl, opal, and diamond iridesce, their gleam cycling through
+  the brand ramp as it travels. Coins catch the light in turn along
+  their run, Mario-style, and the FREE star twinkles with them.
+
 ## [1.1.0] — 2026-07-06
 
 Every screen from the revisit, the server's new eyes, and the shine.

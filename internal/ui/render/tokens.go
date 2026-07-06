@@ -52,21 +52,29 @@ func (r *R) paintTokens(text string, base lipgloss.Style) string {
 			plain.Reset()
 		}
 	}
-	goldStyle := lipgloss.NewStyle().Bold(true).Background(base.GetBackground())
-	if r.truecolor {
-		goldStyle = goldStyle.Foreground(hex(coinGold))
-	} else {
-		goldStyle = goldStyle.Foreground(ColorWarn)
+	goldStyle := func(runIdx int) lipgloss.Style {
+		st := lipgloss.NewStyle().Bold(true).Background(base.GetBackground())
+		if !r.truecolor {
+			return st.Foreground(ColorWarn)
+		}
+		// A glint travels the coin run — each coin catches the light in
+		// turn, Mario-style; a lone coin (or the star) twinkles gently.
+		c := glossBoost(coinGold, RGB{0xff, 0xfa, 0xdc}, runIdx, 0, 4, staggered20(r.phase, "coins"), 0.6, 1.1)
+		return st.Foreground(hex(c))
 	}
 	// lastGlyph survives buffered spaces so a coin RUN stacks tight
 	// (●●●) while exactly one space separates the run from the number.
 	lastGlyph := false
+	coinRun := 0
 	coin := func(glyph string) {
 		if lastGlyph && strings.TrimSpace(plain.String()) == "" {
 			plain.Reset() // swallow inter-glyph spaces
+		} else {
+			coinRun = 0
 		}
 		flush()
-		out.WriteString(goldStyle.Render(glyph))
+		out.WriteString(goldStyle(coinRun).Render(glyph))
+		coinRun++
 		lastGlyph = true
 	}
 	var shiny *strings.Builder
@@ -154,20 +162,12 @@ func (r *R) platformChip(alt string) string {
 }
 
 // glassBoost lightens the chip surface where the glint passes — a
-// narrow, soft highlight that reads as gloss.
+// Gaussian sheen (blur-soft, never hard-edged) toward a warm white.
+var glassTint = RGB{0xff, 0xf6, 0xe8}
+
 func glassBoost(c RGB, i, cells int, phase float64) RGB {
-	span := float64(cells) + 6
-	center := phase*span - 3
-	d := float64(i) - center
-	if d < 0 {
-		d = -d
-	}
-	if d > 2 {
-		return c
-	}
-	f := 0.45 * (2 - d) / 2
-	lerp := func(x uint8) uint8 { return uint8(float64(x) + (255-float64(x))*f) }
-	return RGB{lerp(c.R), lerp(c.G), lerp(c.B)}
+	sigma := float64(cells)/2.4 + 1.4
+	return glossBoost(c, glassTint, i, 0, cells, phase, 0.38, sigma)
 }
 
 // plainTokens strips marker runes for surfaces that must stay unstyled
@@ -270,40 +270,46 @@ func (r *R) ShinyBadge(material, face string) string {
 	if !r.truecolor {
 		return lipgloss.NewStyle().Reverse(true).Bold(true).Render(text)
 	}
-	grad := StopGradient{Stops: []GradientStop{{m.lo, 0}, {m.hi, 0.45}, {m.lo, 1}}}
+	grad := StopGradient{Stops: []GradientStop{{m.lo, 0}, {m.hi, 0.5}, {m.lo, 1}}}
 	phase := staggered20(r.phase, "shiny-"+face)
 	runes := []rune(text)
-	gleamMax := 0.35
+	// The gleam is TINTED like the web's per-material --gleam: the edge
+	// color lifted toward white — amber gleams warm, jade gleams green.
+	tint := RGB{
+		uint8(float64(m.edge.R) + (255-float64(m.edge.R))*0.6),
+		uint8(float64(m.edge.G) + (255-float64(m.edge.G))*0.6),
+		uint8(float64(m.edge.B) + (255-float64(m.edge.B))*0.6),
+	}
+	gleamMax := 0.34
 	if m.iridescent {
-		gleamMax = 0.6 // pearl/opal/diamond throw more light
+		// Pearl/opal/diamond IRIDESCE: the gleam's own hue cycles
+		// through the brand ramp as it travels.
+		tint = PitoShimmer.At(staggered(r.phase, "sheen-"+face))
+		tint = RGB{
+			uint8(float64(tint.R) + (255-float64(tint.R))*0.55),
+			uint8(float64(tint.G) + (255-float64(tint.G))*0.55),
+			uint8(float64(tint.B) + (255-float64(tint.B))*0.55),
+		}
+		gleamMax = 0.5
+	}
+	// Wider, gentler wave: the pill spans caps + text as ONE surface so
+	// the glint enters and exits with the same softness on both sides.
+	total := len(runes) + 2
+	sigma := float64(total)/2.4 + 1.4
+	cell := func(pos int) RGB {
+		t := float64(pos) / float64(max(total-1, 1))
+		bg := grad.At(t)
+		return glossBoost(bg, tint, pos, 0, total, phase, gleamMax, sigma)
 	}
 	var b strings.Builder
-	b.WriteString(lipgloss.NewStyle().Foreground(hex(m.edge)).Background(hex(m.lo)).Render("▎"))
+	b.WriteString(lipgloss.NewStyle().Foreground(hex(m.edge)).Background(hex(cell(0))).Render("▎"))
 	for i, ru := range runes {
-		bg := grad.At(float64(i) / float64(max(len(runes)-1, 1)))
-		bg = gleamBoost(bg, i, len(runes), phase, gleamMax)
 		b.WriteString(lipgloss.NewStyle().
-			Background(hex(bg)).
+			Background(hex(cell(i + 1))).
 			Foreground(hex(m.ink)).
 			Bold(true).
 			Render(string(ru)))
 	}
-	b.WriteString(lipgloss.NewStyle().Foreground(hex(m.edge)).Background(hex(m.lo)).Render("▕"))
+	b.WriteString(lipgloss.NewStyle().Foreground(hex(m.edge)).Background(hex(cell(total - 1))).Render("▕"))
 	return b.String()
-}
-
-// gleamBoost is glassBoost with a tunable strength — the badge gleam.
-func gleamBoost(c RGB, i, cells int, phase, strength float64) RGB {
-	span := float64(cells) + 6
-	center := phase*span - 3
-	d := float64(i) - center
-	if d < 0 {
-		d = -d
-	}
-	if d > 2 {
-		return c
-	}
-	f := strength * (2 - d) / 2
-	lerp := func(x uint8) uint8 { return uint8(float64(x) + (255-float64(x))*f) }
-	return RGB{lerp(c.R), lerp(c.G), lerp(c.B)}
 }
