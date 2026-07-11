@@ -121,13 +121,38 @@ func (c *Client) Resume(ctx context.Context) (*ResumeList, error) {
 // creates the conversation and the result carries its new uuid. width is
 // the terminal column count (viewport_width), like the web client sends.
 // The input is NEVER parsed here: slash commands are the server's grammar.
-func (c *Client) SendMessage(ctx context.Context, uuid, input string, width int) (*SendResult, error) {
+// SendOpt adds optional scope params to a send — the web's hidden
+// channel/period fields, included ONLY while their hint is active.
+type SendOpt func(map[string]any)
+
+// WithChannelScope rides the channel param (list vids/games sends).
+func WithChannelScope(channel string) SendOpt {
+	return func(p map[string]any) {
+		if channel != "" {
+			p["channel"] = channel
+		}
+	}
+}
+
+// WithPeriodScope rides the period param (analyze sends).
+func WithPeriodScope(period string) SendOpt {
+	return func(p map[string]any) {
+		if period != "" {
+			p["period"] = period
+		}
+	}
+}
+
+func (c *Client) SendMessage(ctx context.Context, uuid, input string, width int, opts ...SendOpt) (*SendResult, error) {
 	payload := map[string]any{"input": input}
 	if uuid != "" {
 		payload["uuid"] = uuid
 	}
 	if width > 0 {
 		payload["viewport_width"] = width
+	}
+	for _, opt := range opts {
+		opt(payload)
 	}
 	resp, body, err := c.do(ctx, http.MethodPost, "/chat", payload)
 	if err != nil {
@@ -175,6 +200,21 @@ func decodeNotice(body []byte) *ServerNotice {
 }
 
 // Suggest asks the server-side palette what fits at input[:cursor].
+// PatchScope persists the cycled channel/period onto the conversation
+// (the web's fire-and-forget PATCH /chat/:uuid) so the server's own
+// fallbacks resolve the same scope on later verbs.
+func (c *Client) PatchScope(ctx context.Context, uuid, channel, period string) error {
+	payload := map[string]any{"scope_channel": channel, "stats_period": period}
+	resp, _, err := c.do(ctx, http.MethodPatch, "/chat/"+uuid, payload)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("api: PATCH /chat/%s: %s", uuid, resp.Status)
+	}
+	return nil
+}
+
 func (c *Client) Suggest(ctx context.Context, uuid, input string, cursor int) (*Suggestions, error) {
 	payload := map[string]any{"input": input, "cursor": cursor}
 	if uuid != "" {

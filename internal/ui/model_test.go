@@ -1084,3 +1084,267 @@ func TestShiftArrowsScrollEvenWhileTyping(t *testing.T) {
 		t.Fatal("shift+down to the bottom must restore follow")
 	}
 }
+
+func TestEnterWithPaletteOpenSendsRaw(t *testing.T) {
+	sent := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/chat" {
+			var body struct {
+				Input string `json:"input"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			sent <- body.Input
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"uuid":"u-1","turn_id":9}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	m, _ := newTestModel(t, nil, WithConversation("u-1"))
+	client, err := api.New(srv.URL, filepath.Join(t.TempDir(), "cookies.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.client = client
+	m = sized(m)
+
+	m.input.SetValue("ls cha")
+	next, _ := m.Update(SuggestionsMsg{Seq: m.suggestSeq, S: &api.Suggestions{
+		MenuItems: []api.Suggestion{{Label: "channels", Insert: "channels"}},
+	}})
+	m = next.(Model)
+	if m.suggest == nil {
+		t.Fatal("palette should be open")
+	}
+	// Enter with the palette open: the RAW text goes out, the suggestion
+	// is never inserted (web parity, owner 2026-07-09).
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(Model)
+	if cmd == nil {
+		t.Fatal("enter must produce the send command")
+	}
+	cmd()
+	select {
+	case got := <-sent:
+		if got != "ls cha" {
+			t.Fatalf("enter must send the raw input, sent %q", got)
+		}
+	default:
+		t.Fatal("nothing was sent")
+	}
+	if m.suggest != nil {
+		t.Fatal("send must clear the palette")
+	}
+}
+
+func TestSpaceDismissesPaletteAndTypesThrough(t *testing.T) {
+	m, _ := newTestModel(t, http.NotFoundHandler(), WithConversation("u-1"))
+	m = sized(m)
+	m.input.SetValue("ls")
+	m.input.CursorEnd()
+	next, _ := m.Update(SuggestionsMsg{Seq: m.suggestSeq, S: &api.Suggestions{
+		MenuItems: []api.Suggestion{{Label: "channels", Insert: "channels"}},
+	}})
+	m = next.(Model)
+	if m.suggest == nil {
+		t.Fatal("palette should be open")
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	m = next.(Model)
+	if m.suggest != nil {
+		t.Fatal("space must dismiss the palette")
+	}
+	if m.input.Value() != "ls " {
+		t.Fatalf("the space must still type into the input, got %q", m.input.Value())
+	}
+}
+
+func TestShiftRPrefillsTheLiveHandle(t *testing.T) {
+	m, _ := newTestModel(t, http.NotFoundHandler(), WithConversation("u-1"))
+	m = sized(m)
+
+	// Zero live handles: R types through like any rune.
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
+	m = next.(Model)
+	if m.input.Value() != "R" {
+		t.Fatalf("with no handles R must type through, got %q", m.input.Value())
+	}
+	m.input.Reset()
+
+	// One live handle on the newest turn → instant prefill.
+	m.transcript.Append(api.Event{ID: 1, TurnID: 1, Kind: "system",
+		Payload: []byte(`{"text":"x","reply_handle":"iota-1111"}`)})
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
+	m = next.(Model)
+	if m.input.Value() != "#iota-1111 " {
+		t.Fatalf("shift+R must prefill the handle, got %q", m.input.Value())
+	}
+	m.input.Reset()
+
+	// A newer turn with several live handles → the palette picker opens;
+	// tab completes the selected one.
+	m.transcript.Append(api.Event{ID: 2, TurnID: 2, Kind: "system",
+		Payload: []byte(`{"text":"a","reply_handle":"mu-2222"}`)})
+	m.transcript.Append(api.Event{ID: 3, TurnID: 2, Kind: "enhanced",
+		Payload: []byte(`{"text":"b","reply_handle":"nu-3333"}`)})
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
+	m = next.(Model)
+	if m.suggest == nil || len(m.suggest.MenuItems) != 2 {
+		t.Fatalf("several handles must open the picker, got %+v", m.suggest)
+	}
+	if m.input.Value() != "" {
+		t.Fatalf("picker path must not prefill, got %q", m.input.Value())
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = next.(Model)
+	if m.input.Value() != "#mu-2222 " {
+		t.Fatalf("tab must complete the picked handle, got %q", m.input.Value())
+	}
+
+	// Consumed handles never count as live: with turn 2 swept, the scan
+	// falls back to turn 1's still-live handle (mirrors the server: the
+	// sweep replaces older events with reply_consumed=true, so whatever
+	// the payload flags say IS the truth).
+	m.input.Reset()
+	m.transcript.Replace(api.Event{ID: 2, TurnID: 2, Kind: "system",
+		Payload: []byte(`{"text":"a","reply_handle":"mu-2222","reply_consumed":true}`)})
+	m.transcript.Replace(api.Event{ID: 3, TurnID: 2, Kind: "enhanced",
+		Payload: []byte(`{"text":"b","reply_handle":"nu-3333","reply_consumed":true}`)})
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
+	m = next.(Model)
+	if m.input.Value() != "#iota-1111 " {
+		t.Fatalf("scan must fall back to the older live handle, got %q", m.input.Value())
+	}
+
+	// Everything consumed → R types through.
+	m.input.Reset()
+	m.transcript.Replace(api.Event{ID: 1, TurnID: 1, Kind: "system",
+		Payload: []byte(`{"text":"x","reply_handle":"iota-1111","reply_consumed":true}`)})
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
+	m = next.(Model)
+	if m.input.Value() != "R" {
+		t.Fatalf("all-consumed must type through, got %q", m.input.Value())
+	}
+}
+
+func TestScopeCyclersFollowTheWebRules(t *testing.T) {
+	m, _ := newTestModel(t, http.NotFoundHandler(), WithConversation("u-1"))
+	m = sized(m)
+	m.channels = []string{"@all", "@alpha", "@beta"}
+
+	// Hint modes: exact port of the web's #mode().
+	for input, want := range map[string]string{
+		"":                 "",
+		"analyze":          "period",
+		"stats vids":       "period",
+		"list vids":        "channel",
+		"ls games sort id": "channel",
+		"list channels":    "",
+		"show game #1":     "",
+	} {
+		if got := hintMode(input); got != want {
+			t.Errorf("hintMode(%q) = %q, want %q", input, got, want)
+		}
+	}
+
+	// Shift+Tab cycles channels only while the channel hint is live.
+	m.input.SetValue("list vids")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = next.(Model)
+	if m.scopeChannel != "@alpha" { // "@all" is index 0 → next
+		t.Fatalf("cycle from @all should land @alpha, got %q", m.scopeChannel)
+	}
+	if cmd == nil {
+		t.Fatal("cycling must fire the persist PATCH")
+	}
+	// Wraps.
+	m.scopeChannel = "@beta"
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = next.(Model)
+	if m.scopeChannel != "@all" {
+		t.Fatalf("cycle must wrap to @all, got %q", m.scopeChannel)
+	}
+	// Inert outside the hint.
+	m.input.SetValue("show game #1")
+	before := m.scopeChannel
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = next.(Model)
+	if m.scopeChannel != before {
+		t.Fatal("shift+tab must be inert without the channel hint")
+	}
+
+	// Ctrl+Space cycles periods during analyze.
+	m.input.SetValue("analyze")
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlAt})
+	m = next.(Model)
+	if m.scopePeriod != "28d" {
+		t.Fatalf("period cycle from 7d should land 28d, got %q", m.scopePeriod)
+	}
+
+	// The unknown-current rule: indexOf misses → treated as 0 → list[1].
+	if got := cycleNext([]string{"@all", "@x", "@y"}, "none"); got != "@x" {
+		t.Fatalf("unknown current must land list[1], got %q", got)
+	}
+}
+
+func TestScopeParamsRideOnlyWithLiveHints(t *testing.T) {
+	got := make(chan map[string]any, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/chat" && r.Method == http.MethodPost {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			got <- body
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"uuid":"u-1","turn_id":5}`))
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	m, _ := newTestModel(t, nil, WithConversation("u-1"))
+	client, err := api.New(srv.URL, filepath.Join(t.TempDir(), "cookies.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.client = client
+	m = sized(m)
+	m.channels = []string{"@all", "@alpha"}
+	m.scopeChannel = "@alpha"
+	m.scopePeriod = "28d"
+
+	send := func(text string) map[string]any {
+		m.input.SetValue(text)
+		next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m = next.(Model)
+		if cmd == nil {
+			t.Fatalf("send %q produced no command", text)
+		}
+		cmd()
+		return <-got
+	}
+
+	body := send("list vids")
+	if body["channel"] != "@alpha" {
+		t.Fatalf("list vids must carry the channel scope, got %v", body["channel"])
+	}
+	if _, has := body["period"]; has {
+		t.Fatal("list vids must not carry a period")
+	}
+
+	body = send("analyze")
+	if body["period"] != "28d" {
+		t.Fatalf("analyze must carry the period scope, got %v", body["period"])
+	}
+	if _, has := body["channel"]; has {
+		t.Fatal("analyze must not carry a channel")
+	}
+
+	body = send("show game #1")
+	if _, has := body["channel"]; has {
+		t.Fatal("unscoped verbs must not carry channel")
+	}
+	if _, has := body["period"]; has {
+		t.Fatal("unscoped verbs must not carry period")
+	}
+}

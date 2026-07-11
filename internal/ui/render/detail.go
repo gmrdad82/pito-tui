@@ -47,6 +47,10 @@ type detailCard struct {
 	ttb        *ttbData
 	descLabel  string
 	descText   string
+	// Tags moved out of the kv grid into their own hairline section
+	// (pito db74203f) — video cards only today.
+	tagsLabel string
+	tagsText  string
 }
 
 // tickColor maps the web's data-accent keys onto the shared heat palette
@@ -124,11 +128,23 @@ func (c *detailCard) walk(n *html.Node) {
 				c.descLabel = "Description"
 			}
 			return
+		case strings.Contains(class, "__tags"):
+			c.tagsText = descriptionText(n)
+			if c.tagsLabel == "" {
+				c.tagsLabel = "Tags"
+			}
+			return
 		case strings.Contains(class, "text-fg-dim") && n.Data == "div":
-			// The description label is an anonymous dim div right before
-			// the description body (game/video cards).
-			if sib := nextElement(n.NextSibling); sib != nil && strings.Contains(attr(sib, "class"), "__description") {
-				c.descLabel = nodeText(n)
+			// Section labels are anonymous dim divs right before their
+			// bodies (description / tags sections).
+			if sib := nextElement(n.NextSibling); sib != nil {
+				sibClass := attr(sib, "class")
+				switch {
+				case strings.Contains(sibClass, "__description"):
+					c.descLabel = nodeText(n)
+				case strings.Contains(sibClass, "__tags"):
+					c.tagsLabel = nodeText(n)
+				}
 			}
 		}
 	}
@@ -434,6 +450,9 @@ func (r *R) detailCard(c *detailCard) string {
 
 	if c.descText != "" {
 		parts = append(parts, r.hairline(width), r.dim(c.descLabel)+"\n"+c.descText)
+	}
+	if c.tagsText != "" {
+		parts = append(parts, r.hairline(width), r.dim(c.tagsLabel)+"\n"+c.tagsText)
 	}
 	return strings.Join(parts, "\n\n")
 }

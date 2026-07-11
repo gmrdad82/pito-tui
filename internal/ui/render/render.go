@@ -650,11 +650,12 @@ func (r *R) thinking(ev api.Event) string {
 
 func (r *R) confirmation(ev api.Event) string {
 	var p struct {
-		Body        string `json:"body"`
-		HTML        bool   `json:"html"`
-		ReplyHandle string `json:"reply_handle"`
-		Resolved    bool   `json:"resolved"`
-		OutcomeText string `json:"outcome_text"`
+		Body         string            `json:"body"`
+		HTML         bool              `json:"html"`
+		ReplyHandle  string            `json:"reply_handle"`
+		Resolved     bool              `json:"resolved"`
+		OutcomeText  string            `json:"outcome_text"`
+		ExpandDetail []json.RawMessage `json:"expand_detail"`
 	}
 	_ = json.Unmarshal(ev.Payload, &p)
 	body := p.Body
@@ -665,6 +666,13 @@ func (r *R) confirmation(ev api.Event) string {
 		body = p.OutcomeText
 	}
 	content := r.stamp(ev) + lipgloss.NewStyle().Foreground(ColorWarn).Bold(true).Render("? ") + body
+	// Stats detail beneath the body, shown only while pending — the web's
+	// BodyComponent detail block (hairline, kv rows, "" = blank spacer).
+	if !p.Resolved && len(p.ExpandDetail) > 0 {
+		if detail := r.expandDetail(p.ExpandDetail); detail != "" {
+			content += "\n" + r.hairline(lipgloss.Width(body)) + "\n" + detail
+		}
+	}
 	if !p.Resolved && p.ReplyHandle != "" {
 		content += "\n" + r.dim("reply with ") + r.accent(p.ReplyHandle) + r.dim(" …")
 	}
@@ -675,6 +683,57 @@ func (r *R) confirmation(ev api.Event) string {
 		bar = bar.BorderForeground(hex(pulseWarn(r.phase)))
 	}
 	return bar.Render(content) + "\n"
+}
+
+// expandDetail renders a confirmation card's stats block — the web
+// BodyComponent's detail rows: {key,value} hashes as aligned kv rows
+// (keys cyan, values right-aligned), plain strings as fg lines, "" as a
+// blank spacer. key_class/value_class beyond the defaults are web CSS
+// concerns and are not mapped.
+func (r *R) expandDetail(raw []json.RawMessage) string {
+	type kv struct {
+		Key   string `json:"key"`
+		Value string `json:"value"`
+	}
+	type row struct {
+		kv   *kv
+		text string
+	}
+	var rows []row
+	keyWidth, valWidth := 0, 0
+	for _, m := range raw {
+		var s string
+		if err := json.Unmarshal(m, &s); err == nil {
+			rows = append(rows, row{text: s})
+			continue
+		}
+		var pair kv
+		if err := json.Unmarshal(m, &pair); err != nil || pair.Key == "" {
+			continue
+		}
+		if w := lipgloss.Width(pair.Key); w > keyWidth {
+			keyWidth = w
+		}
+		if w := lipgloss.Width(pair.Value); w > valWidth {
+			valWidth = w
+		}
+		rows = append(rows, row{kv: &pair})
+	}
+	keyStyle := lipgloss.NewStyle().Foreground(ColorCyan)
+	var out []string
+	for _, rw := range rows {
+		switch {
+		case rw.kv != nil:
+			keyPad := strings.Repeat(" ", keyWidth-lipgloss.Width(rw.kv.Key))
+			valPad := strings.Repeat(" ", valWidth-lipgloss.Width(rw.kv.Value))
+			out = append(out, keyStyle.Render(rw.kv.Key)+keyPad+"  "+valPad+rw.kv.Value)
+		case rw.text != "":
+			out = append(out, rw.text)
+		default:
+			out = append(out, "")
+		}
+	}
+	return strings.Join(out, "\n")
 }
 
 // pulseWarn oscillates the warn accent between bright and embered — the

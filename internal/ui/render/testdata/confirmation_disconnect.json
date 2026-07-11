@@ -1,0 +1,40 @@
+{
+ "body": "Confirm removal of <span class=\"pito-token\">@gmrdad82survivor</span> and its local vid data?",
+ "html": true,
+ "command": "disconnect",
+ "channel_id": 6,
+ "origin_verb": "disconnect",
+ "reply_handle": "xi-2364",
+ "reply_target": "confirmation",
+ "expand_detail": [
+  {
+   "key": "Subs",
+   "value": "0"
+  },
+  {
+   "key": "Views",
+   "value": "0"
+  },
+  "",
+  {
+   "key": "Vids",
+   "value": "0"
+  },
+  {
+   "key": "Published",
+   "value": "0"
+  },
+  {
+   "key": "Scheduled",
+   "value": "0"
+  },
+  {
+   "key": "Unlisted",
+   "value": "0"
+  },
+  {
+   "key": "Private",
+   "value": "0"
+  }
+ ]
+}

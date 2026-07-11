@@ -93,6 +93,11 @@ func walkText(n *html.Node, b *strings.Builder) {
 			}
 			b.WriteRune(ShinyEnd)
 			return
+		case strings.Contains(attr(n, "class"), "pito-help-block"):
+			// Help blocks are pre-formatted (white-space: pre on the web):
+			// their newlines ARE the layout — keep them verbatim.
+			preText(n, b)
+			return
 		case strings.Contains(attr(n, "class"), "pito-subject-shimmer"):
 			b.WriteRune(ShimmerStart)
 			for child := n.FirstChild; child != nil; child = child.NextSibling {
@@ -151,6 +156,17 @@ func walkText(n *html.Node, b *strings.Builder) {
 	}
 	if n.Type == html.ElementNode && (n.Data == "td" || n.Data == "th") {
 		b.WriteString("  ")
+	}
+}
+
+// preText extracts text preserving newlines (pre-formatted blocks).
+func preText(n *html.Node, b *strings.Builder) {
+	if n.Type == html.TextNode {
+		b.WriteString(n.Data)
+		return
+	}
+	for child := n.FirstChild; child != nil; child = child.NextSibling {
+		preText(child, b)
 	}
 }
 

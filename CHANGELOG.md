@@ -4,6 +4,62 @@ All notable changes to pito-tui are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); from 1.0.0 onward the
 project follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] — 2026-07-11
+
+The grammar comes home, the chatbox learns the web's hands, and every
+YouTube-safe mutation ran the gauntlet on dev.
+
+### Added
+
+- **The grammar importer (verbsgen)** — `tools/verbsgen` reads pito's
+  `config/pito/verbs.yml` straight from git (pinned to the paired pito
+  release, `PITO_REF=v1.6.0`; a dirty pito checkout can never leak WIP
+  grammar) and emits a typed, deterministic snapshot
+  (`internal/grammar/grammar.json`, go:embed loader). Live contract
+  specs now assert list columns, aliases, sortability, and the new
+  v1.6.0 **filters** (genres/platforms vocabularies, `list games rpg`,
+  `list vids scheduled`) from the generated tables instead of
+  hand-copied ones — when pito's grammar moves, one ref bump moves the
+  specs. The runtime binary stays grammar-free (enforced by test).
+- **Chatbox hands, web parity** — `Shift+R` at an empty prompt prefills
+  the newest live reply handle (several → picker, none → types
+  through); `Shift+Tab` cycles the channel scope while a `list
+  vids/games` hint is live; `Ctrl+Space` cycles the analytics period
+  while an `analyze` hint is live (the web's Shift+Space is invisible
+  to terminals). Scope rides the send only while its hint shows, and
+  persists via the conversation PATCH — exactly the web's rules.
+- **Space dismisses the palette** and the space still types, Enter
+  always sends the raw input (both pinned by regression tests) — the
+  web's suggestion semantics, key for key.
+- **Video tags** render as their own section on `show vid` cards
+  (v1.6.0 moved them out of the kv grid), and channel descriptions
+  keep their standalone block.
+- **No-data charts wear the server's copy** — "No data yet." centered
+  over the paper grid, straight from the payload's nodata label.
+- **Confirmation cards show the stats detail** — the web's
+  `expand_detail` block (e.g. a disconnect's Subs/Views/Vids tally)
+  renders 1:1 under a hairline with cyan keys while the confirmation
+  is pending, and drops once resolved.
+- **Help blocks keep their layout** — `--help` output is pre-formatted
+  text and now renders line for line instead of collapsing into a
+  paragraph.
+
+### Changed
+
+- **Zebra, retuned** — table stripes settled on a subtler plum
+  (`#1B142B`): still reads purple, no longer shouts.
+
+### Verified
+
+- The full YouTube-safe mutation round ran live against dev with a
+  disposable IGDB import: link/unlink, `update game
+  price/platform/footage`, card replies, delete + reindex confirmation
+  flows (confirm AND cancel), `/rename`, `/config` getters + reversible
+  setters, `/disconnect` (cancel), `/logout` → `/login`. Game imports
+  are web-only for JSON clients by server design — the TUI renders the
+  server's notice. `publish`/`unlist`/`schedule`/`sync` stay untouched
+  by policy: `delete vid` hard-deletes on YouTube and is never fired.
+
 ## [1.1.1] — 2026-07-06
 
 The gloss, buffed until nothing catches.

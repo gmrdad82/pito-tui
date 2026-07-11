@@ -20,9 +20,13 @@ var (
 	// ColorDim and ColorFaint are the two grays: metadata and hints.
 	ColorDim   = lipgloss.Color("245")
 	ColorFaint = lipgloss.Color("241")
+	// ColorCyan mirrors the web's text-cyan (#22d3ee): detail-block keys
+	// on confirmation cards.
+	ColorCyan = lipgloss.Color("44")
 	// ColorInk is the dark foreground used on colored badge backgrounds.
 	ColorInk = lipgloss.Color("232")
-	// ColorZebra tints alternate table rows — deep candy plum from the
+	// ColorZebra tints alternate table rows — a whisper of plum (owner
+	// 2026-07-11: the old #332052 read too contrasting; this stays
 	// pito family, not battleship gray.
-	ColorZebra = lipgloss.Color("#332052")
+	ColorZebra = lipgloss.Color("#1B142B")
 )

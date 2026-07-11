@@ -92,6 +92,12 @@ type Model struct {
 	meterCtx      *api.ContextMeter // server-computed context (render only)
 	me            *api.Identity
 	unread        int
+	// Scope cyclers (web parity): shift+tab cycles the channel while a
+	// `list vids/games` is typed; ctrl+space cycles the period during
+	// `analyze` (terminals cannot see shift+space — documented stand-in).
+	scopeChannel string
+	scopePeriod  string
+	channels     []string // ["@all", …] — served by chat.json when the ask lands
 
 	width, height int
 	ready         bool
@@ -180,17 +186,19 @@ func NewModel(client *api.Client, connect ConnectFunc, opts ...Option) Model {
 	)
 
 	m := Model{
-		client:    client,
-		connect:   connect,
-		sounds:    noopNotifier{},
-		mode:      modePicker,
-		input:     input,
-		spin:      spin,
-		pending:   map[int64]bool{},
-		shimmer:   map[int64]bool{},
-		revealing: map[int64]revealInfo{},
-		follow:    true,
-		now:       time.Now,
+		client:       client,
+		connect:      connect,
+		sounds:       noopNotifier{},
+		mode:         modePicker,
+		input:        input,
+		spin:         spin,
+		pending:      map[int64]bool{},
+		shimmer:      map[int64]bool{},
+		revealing:    map[int64]revealInfo{},
+		follow:       true,
+		now:          time.Now,
+		scopeChannel: "@all",
+		scopePeriod:  "7d",
 	}
 	m.transcript = NewTranscript(nil)
 	for _, opt := range opts {
@@ -228,10 +236,10 @@ func (m Model) fetchResumeCmd() tea.Cmd {
 	}
 }
 
-func (m Model) sendCmd(uuid, input string, width int) tea.Cmd {
+func (m Model) sendCmd(uuid, input string, width int, opts ...api.SendOpt) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
-		res, err := client.SendMessage(context.Background(), uuid, input, width)
+		res, err := client.SendMessage(context.Background(), uuid, input, width, opts...)
 		return SendResultMsg{Res: res, Err: err, Input: input}
 	}
 }
@@ -354,6 +362,13 @@ func (m Model) onChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.acceptSuggestion()
 			m.refreshViewport()
 			return m, m.suggestCmd()
+		case " ":
+			// Web parity (v1.6.0 suggestions_controller.js): Space
+			// dismisses the palette WITHOUT swallowing the keystroke —
+			// the space still types into the input below.
+			m.suggest = nil
+			m.refreshViewport()
+			// fall through to the input by NOT returning here
 		case "esc":
 			m.suggest = nil
 			m.refreshViewport()
@@ -362,10 +377,29 @@ func (m Model) onChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg.Type {
+	case tea.KeyShiftTab:
+		// Channel cycler — only while its hint is live (web parity).
+		if hintMode(m.input.Value()) == "channel" && len(m.channels) > 0 {
+			m.scopeChannel = cycleNext(m.channels, m.scopeChannel)
+			return m, m.patchScopeCmd()
+		}
+		return m, nil
 	case tea.KeyEnter:
 		text := strings.TrimSpace(m.input.Value())
 		if text == "" {
 			return m, nil
+		}
+		// The web's #syncHidden: scope params ride ONLY when their hint
+		// is live at send time; the server falls back to the persisted
+		// conversation scope otherwise.
+		var opts []api.SendOpt
+		switch hintMode(text) {
+		case "channel":
+			if len(m.channels) > 0 {
+				opts = append(opts, api.WithChannelScope(m.scopeChannel))
+			}
+		case "period":
+			opts = append(opts, api.WithPeriodScope(m.scopePeriod))
 		}
 		m.input.Reset()
 		m.suggest = nil
@@ -373,7 +407,7 @@ func (m Model) onChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// viewport_width is PIXELS on the wire (the web sends element
 		// widths); approximate the terminal at ~8px per cell so wide
 		// terminals get the same column auto-fill the web enjoys.
-		return m, m.sendCmd(m.conv.UUID, text, m.contentWidth()*8)
+		return m, m.sendCmd(m.conv.UUID, text, m.contentWidth()*8, opts...)
 	case tea.KeyCtrlD:
 		m.vp.HalfPageDown()
 		m.follow = m.vp.AtBottom()
@@ -396,11 +430,42 @@ func (m Model) onChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Vim-style scrolling only while the prompt is empty — otherwise every
 	// key belongs to the text input (no focus toggle to learn).
+	if msg.String() == "ctrl+@" {
+		// Ctrl+Space stands in for the web's shift+space (terminals
+		// cannot report shift+space): period cycler while analyzing.
+		if hintMode(m.input.Value()) == "period" {
+			m.scopePeriod = cycleNext(periods, m.scopePeriod)
+			return m, m.patchScopeCmd()
+		}
+		return m, nil
+	}
+
 	if m.input.Value() == "" {
 		switch msg.String() {
 		case "?":
 			m.showHelp = !m.showHelp
 			return m, nil
+		case "R":
+			// Shift+R at an empty prompt (web parity, caret-0 rule):
+			// prefill the newest live reply handle; several → the palette
+			// becomes the picker; none → the R types through below.
+			handles := m.transcript.LiveHandles()
+			switch {
+			case len(handles) == 1:
+				m.input.SetValue("#" + handles[0] + " ")
+				m.input.CursorEnd()
+				m.suggest = nil
+				return m, m.suggestCmd()
+			case len(handles) > 1:
+				items := make([]api.Suggestion, 0, len(handles))
+				for _, h := range handles {
+					items = append(items, api.Suggestion{Label: "#" + h, Insert: "#" + h})
+				}
+				m.suggest = &api.Suggestions{MenuItems: items}
+				m.suggestSel = 0
+				m.refreshViewport()
+				return m, nil
+			}
 		case "j":
 			m.vp.ScrollDown(1)
 			m.follow = m.vp.AtBottom()
@@ -532,6 +597,17 @@ func (m Model) onChatFetched(msg ChatFetchedMsg) (tea.Model, tea.Cmd) {
 	}
 	if msg.Page.Notifications != nil {
 		m.unread = msg.Page.Notifications.Unread
+	}
+	if msg.Page.Conversation.Scope != nil {
+		if msg.Page.Conversation.Scope.Channel != "" {
+			m.scopeChannel = msg.Page.Conversation.Scope.Channel
+		}
+		if msg.Page.Conversation.Scope.Period != "" {
+			m.scopePeriod = msg.Page.Conversation.Scope.Period
+		}
+	}
+	if len(msg.Page.Channels) > 0 {
+		m.channels = msg.Page.Channels
 	}
 	m.needsLogin = false // the backfill is auth-gated: fetching it proves the session
 	m.transcript.Merge(msg.Page.Events)
@@ -795,6 +871,9 @@ func (m Model) View() string {
 	if meter := m.meterLine(); meter != "" {
 		sections = append(sections, meter)
 	}
+	if hint := m.scopeHintLine(); hint != "" {
+		sections = append(sections, hint)
+	}
 	sections = append(sections, m.input.View(), m.statusLine())
 	return strings.Join(sections, "\n")
 }
@@ -877,6 +956,80 @@ func (m Model) paletteView() string {
 	}
 	b.WriteString(footer)
 	return b.String()
+}
+
+// periods mirrors the web's hardcoded cycle list (three literal copies
+// in pito; this is the fourth, same contract).
+var periods = []string{"7d", "28d", "3m", "1y", "lifetime"}
+
+// hintMode decides which scope hint is live for the typed text — the
+// exact port of chatbox_hints_controller.js #mode(): first token is the
+// verb; analyze family → period; list/ls + any vids/games noun → channel.
+func hintMode(input string) string {
+	text := strings.ToLower(strings.TrimSpace(input))
+	if text == "" {
+		return ""
+	}
+	tokens := strings.Fields(text)
+	verb := tokens[0]
+	switch verb {
+	case "analyze", "analytics", "stats":
+		return "period"
+	case "list", "ls":
+		for _, t := range tokens[1:] {
+			switch t {
+			case "vid", "vids", "video", "videos", "game", "games", "gamez":
+				return "channel"
+			}
+		}
+	}
+	return ""
+}
+
+// cycleNext is the web's #cycleNext verbatim: forward-only, wraps; an
+// unknown current value counts as index 0 (so the next stop is list[1]).
+func cycleNext(list []string, current string) string {
+	if len(list) == 0 {
+		return current
+	}
+	idx := 0
+	for i, v := range list {
+		if v == current {
+			idx = i
+			break
+		}
+	}
+	return list[(idx+1)%len(list)]
+}
+
+// scopeHintLine renders the dim cycler hint above the prompt when a
+// scope verb is being typed — the web's shiftTab/shiftSpace hint row.
+func (m Model) scopeHintLine() string {
+	switch hintMode(m.input.Value()) {
+	case "channel":
+		if len(m.channels) == 0 {
+			return "" // channel list not served yet (tui-needs ask pending)
+		}
+		return statusStyle.Render("shift+tab channel: ") +
+			lipgloss.NewStyle().Foreground(render.ColorAccent).Render(m.scopeChannel)
+	case "period":
+		return statusStyle.Render("ctrl+space period: ") +
+			lipgloss.NewStyle().Foreground(render.ColorAccent).Render(m.scopePeriod)
+	}
+	return ""
+}
+
+// patchScopeCmd persists the cycled scope, fire-and-forget (the web's
+// PATCH /chat/:uuid — errors only warn).
+func (m Model) patchScopeCmd() tea.Cmd {
+	if m.conv.UUID == "" {
+		return nil
+	}
+	client, uuid, ch, pd := m.client, m.conv.UUID, m.scopeChannel, m.scopePeriod
+	return func() tea.Msg {
+		_ = client.PatchScope(context.Background(), uuid, ch, pd)
+		return nil
+	}
 }
 
 // helpLine is the '?'-toggled keymap strip (keybinding/hint's cousin).
@@ -985,6 +1138,9 @@ func (m Model) contentWidth() int {
 func (m Model) chatViewportHeight() int {
 	h := m.height - 2
 	if m.meterCtx != nil {
+		h--
+	}
+	if m.scopeHintLine() != "" {
 		h--
 	}
 	if m.bannerLine() != "" {

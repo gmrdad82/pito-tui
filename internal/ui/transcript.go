@@ -2,6 +2,7 @@ package ui
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 
 	"github.com/gmrdad82/pito-tui/internal/api"
@@ -168,4 +169,30 @@ func (t *Transcript) dirtyAll() {
 		turn.dirty = true
 	}
 	t.joinedOK = false
+}
+
+// LiveHandles returns the reply handles that are still actionable: the
+// NEWEST turn carrying any non-consumed reply_handle wins outright — the
+// server retires all prior live hashtags whenever a new leading turn
+// arrives (finalizer sweep), so older turns' handles are dead anyway.
+func (t *Transcript) LiveHandles() []string {
+	for i := len(t.turns) - 1; i >= 0; i-- {
+		var handles []string
+		for _, ev := range t.turns[i].Events {
+			var p struct {
+				ReplyHandle   string `json:"reply_handle"`
+				ReplyConsumed bool   `json:"reply_consumed"`
+			}
+			if json.Unmarshal(ev.Payload, &p) != nil {
+				continue
+			}
+			if p.ReplyHandle != "" && !p.ReplyConsumed {
+				handles = append(handles, p.ReplyHandle)
+			}
+		}
+		if len(handles) > 0 {
+			return handles
+		}
+	}
+	return nil
 }

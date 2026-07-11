@@ -42,6 +42,15 @@ type Conversation struct {
 	// Context is the server-computed context meter (tui-needs.md item 1).
 	// The server is the source of truth — the TUI never computes this.
 	Context *ContextMeter `json:"context"`
+	// Scope is the persisted channel/period filter (tui-needs.md ask,
+	// gate on presence): the web seeds its cyclers from these columns.
+	Scope *Scope `json:"scope"`
+}
+
+// Scope mirrors conversation.scope_channel / stats_period.
+type Scope struct {
+	Channel string `json:"channel"`
+	Period  string `json:"period"`
 }
 
 // ContextMeter is the conversation's context fill — served on the chat
@@ -78,6 +87,9 @@ type ChatPage struct {
 	Events        []Event      `json:"events"`
 	Me            *Identity    `json:"me"`
 	Notifications *NotifCount  `json:"notifications"`
+	// Channels is the cycler list (["@all", "@handle", …]) — tui-needs
+	// ask, gate on presence.
+	Channels []string `json:"channels"`
 }
 
 // ResumeRow is one conversation in the picker.

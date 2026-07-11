@@ -21,6 +21,10 @@ type glanceCell struct {
 	value  string
 	rows   []string
 	noData bool
+	// noDataNote is the server's own copy ("No data yet.") rendered
+	// centered over the paper grid (pito c9c1844d) — the server owns the
+	// words, never the client.
+	noDataNote string
 }
 
 type glancePanel struct {
@@ -107,6 +111,9 @@ func parseGlanceCell(n *html.Node) glanceCell {
 			switch {
 			case strings.Contains(class, "pito-metric--nodata"):
 				cell.noData = true
+			case strings.Contains(class, "__nodata-label"):
+				cell.noDataNote = nodeText(m)
+				return
 			case strings.Contains(class, "pito-metric__row") && !strings.Contains(class, "bg-row"):
 				// The plot rows — the web's pre-rendered braille chart.
 				// The dotted-paper background (__bg-row) stays behind.
@@ -175,6 +182,24 @@ func (r *R) glancePanel(g *glancePanel) string {
 // pito-blue shimmer band sweeps the curve like every other chart.
 func (r *R) glanceCell(cell glanceCell, cellW int) string {
 	lines := r.paintBraille(cell.rows, cellW, cell.noData)
+	// The no-data overlay: the server's copy centered over the paper
+	// grid, exactly like the web's absolutely-positioned label.
+	if cell.noData && cell.noDataNote != "" && len(lines) > 0 {
+		mid := (len(lines) - 1) / 2
+		note := cell.noDataNote
+		if len([]rune(note)) > cellW {
+			note = string([]rune(note)[:cellW])
+		}
+		pad := (cellW - lipgloss.Width(note)) / 2
+		if pad < 0 {
+			pad = 0
+		}
+		row := []rune(strings.Repeat("⠂", cellW))
+		line := lipgloss.NewStyle().Foreground(ColorFaint).Render(string(row[:pad])) +
+			r.dim(note) +
+			lipgloss.NewStyle().Foreground(ColorFaint).Render(string(row[pad+lipgloss.Width(note):]))
+		lines[mid] = line
+	}
 	value := cell.value
 	if cell.noData && value == "" {
 		value = "—"

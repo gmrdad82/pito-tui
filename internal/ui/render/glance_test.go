@@ -113,3 +113,16 @@ func TestLinkedGameCardRendersZebraKv(t *testing.T) {
 		t.Errorf("image residue leaked:\n%s", out)
 	}
 }
+
+func TestNoDataCellsWearTheServerCopy(t *testing.T) {
+	withTrueColor(t)
+	out := stripANSI(renderFixture(t, "glance_nodata", 100))
+	if !strings.Contains(out, "No data yet.") {
+		t.Errorf("no-data cells must carry the server's own copy:\n%s", out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if w := lipgloss.Width(line); w > 100 {
+			t.Errorf("line exceeds width (%d): %q", w, line)
+		}
+	}
+}

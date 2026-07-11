@@ -25,53 +25,30 @@ import (
 
 	"github.com/gmrdad82/pito-tui/internal/api"
 	"github.com/gmrdad82/pito-tui/internal/config"
+	"github.com/gmrdad82/pito-tui/internal/grammar"
 )
 
-// Base sort keys per noun, from pito's list_columns.rb: channels sort by
-// handle/title only (SORT_KEYS — there is no id key); games and vids carry
-// id/title in SORT_SPECS with requires_with: false. Unknown tokens are a
-// lenient no-op server-side, so only real keys can be asserted.
+// The column/sort/filter tables come from the GENERATED grammar snapshot
+// (internal/grammar, built by tools/verbsgen from pito's verbs.yml) — a
+// pito rename or new column flows into this spec by re-running
+// `go generate ./internal/grammar/`. Base sort keys are identity columns
+// (not in capabilities) and stay static: channels handle/title, games/
+// vids id/title.
 var listSortKeys = map[string][]string{
 	"channels": {"handle", "title"},
 	"games":    {"id", "title"},
 	"vids":     {"id", "title"},
 }
 
-var listColumns = map[string]map[string]string{ // noun → kwarg → heading
-	"channels": {"likes": "Likes"},
-	"games": {
-		"platform": "Platform", "genre": "Genre", "developer": "Developer",
-		"publisher": "Publisher", "channels": "Channels", "footage": "Footage",
-		"price": "Price", "views": "Views", "likes": "Likes",
-	},
-	"vids": {
-		"channel": "Channel", "visibility": "Visibility", "game": "Game",
-		"duration": "Duration", "views": "Views", "likes": "Likes",
-		"category": "Category",
-	},
+// columnHeading matches a grammar column name against a rendered table
+// heading: lowercase, underscores to spaces ("publish_at" ↔ "Publish at").
+func columnHeading(name string) string {
+	return strings.ReplaceAll(strings.ToLower(name), "_", " ")
 }
 
-// Columns that also join the sort vocabulary while visible
-// (requires_with: true in SORT_SPECS / counter sort lambdas). Absent by
-// design: games platform (icons don't order, owner G26.7) and vids
-// category (not in SORT_SPECS).
-var sortableWith = map[string]map[string]bool{
-	"channels": {"likes": true},
-	"games": {
-		"genre": true, "developer": true, "publisher": true, "channels": true,
-		"footage": true, "price": true, "views": true, "likes": true,
-	},
-	"vids": {
-		"channel": true, "visibility": true, "game": true,
-		"duration": true, "views": true, "likes": true,
-	},
-}
-
-// Default-visible sortable columns (no `with` needed): channels ship
-// subs/views/vids visible (DEFAULT_COLUMNS), each with a sort lambda.
-var defaultSortable = map[string]map[string]string{ // noun → token → heading
-	"channels": {"subs": "Subs", "views": "Views", "vids": "Vids"},
-}
+// filterSamples picks a live token per vocabulary-backed filter — sample
+// values verified present on dev (probe 2026-07-11).
+var filterSamples = map[string]string{"genres": "rpg", "platforms": "playstation"}
 
 type listState struct {
 	eventID  int64
@@ -87,7 +64,7 @@ func (s listState) hasHeading(want string) bool {
 
 func (s listState) headingIndex(want string) int {
 	for i, h := range s.headings {
-		if strings.EqualFold(strings.TrimSpace(h), want) {
+		if strings.ToLower(strings.TrimSpace(h)) == columnHeading(want) {
 			return i
 		}
 	}
@@ -252,8 +229,13 @@ func TestListReplyContract(t *testing.T) {
 		}
 	}
 
-	for noun, columns := range listColumns {
-		noun, columns := noun, columns
+	g, err := grammar.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for noun := range g.Capabilities.Columns {
+		noun, columns := noun, g.Capabilities.Columns[noun]
 		t.Run(noun, func(t *testing.T) {
 			time.Sleep(1500 * time.Millisecond) // stagger nouns; be kind to dev
 			res, err := client.SendMessage(ctx, "", "ls "+noun, 1000)
@@ -267,29 +249,25 @@ func TestListReplyContract(t *testing.T) {
 			}
 			eventID, handle := state.eventID, state.handle
 
-			for kwarg, heading := range columns {
+			for _, col := range columns {
+				if col.Internal {
+					continue // e.g. vids `scheduled` — slate-only, no levers
+				}
+				kwarg := col.Name
 				send(uuid, fmt.Sprintf("#%s with %s", handle, kwarg))
-				if _, ok := waitListState(t, client, uuid, eventID, 12*time.Second, func(s listState) bool { return s.hasHeading(heading) }); !ok {
-					t.Errorf("with %s: heading %q never appeared", kwarg, heading)
+				if _, ok := waitListState(t, client, uuid, eventID, 12*time.Second, func(s listState) bool { return s.hasHeading(kwarg) }); !ok {
+					t.Errorf("with %s: column never appeared", kwarg)
 					continue
 				}
-				// While the column is visible it joins the sort vocabulary
-				// (requires_with) — platform and category never do. NOTE:
-				// channel counter sorts fail until pito's channel_list.rb
-				// mutate_sort passes selected_columns + columns (verbs.md
-				// 1b, owner fixing Rails-side).
-				if sortableWith[noun][kwarg] {
-					testColumnSort(t, uuid, eventID, handle, kwarg, heading)
+				// While visible, sortable columns join the sort vocabulary
+				// (the grammar's own sortable flag — platform/category say no).
+				if col.Sortable {
+					testColumnSort(t, uuid, eventID, handle, kwarg, kwarg)
 				}
 				send(uuid, fmt.Sprintf("#%s without %s", handle, kwarg))
-				if _, ok := waitListState(t, client, uuid, eventID, 12*time.Second, func(s listState) bool { return !s.hasHeading(heading) }); !ok {
-					t.Errorf("without %s: heading %q never left", kwarg, heading)
+				if _, ok := waitListState(t, client, uuid, eventID, 12*time.Second, func(s listState) bool { return !s.hasHeading(kwarg) }); !ok {
+					t.Errorf("without %s: column never left", kwarg)
 				}
-			}
-
-			// Default-visible sortable columns need no `with` first.
-			for token, heading := range defaultSortable[noun] {
-				testColumnSort(t, uuid, eventID, handle, token, heading)
 			}
 
 			// Base sort keys: for each, ascending vs descending must lead
@@ -309,6 +287,114 @@ func TestListReplyContract(t *testing.T) {
 					t.Errorf("sort %s desc: first row never moved off %s", key, asc.firstRef)
 				}
 				prev = desc
+			}
+		})
+	}
+}
+
+// TestListFiltersContract drives every filter the grammar declares
+// (list capabilities.filters): token filters fire their scope,
+// vocabulary filters fire a sampled member. Empty-data outcomes are
+// legitimate (text-only reply); error events are not.
+func TestListFiltersContract(t *testing.T) {
+	instance := os.Getenv("PITO_INSTANCE")
+	if instance == "" {
+		instance = "https://dev.pitomd.com"
+	}
+	dir, err := config.Dir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := api.New(instance, filepath.Join(dir, "cookies.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	g, err := grammar.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Full-list row counts anchor the "filtered ⊆ full" assertions.
+	fullRows := map[string]int{}
+	for noun := range g.Capabilities.Filters {
+		res, err := client.SendMessage(ctx, "", "list "+noun, 1000)
+		if err != nil || res.CreatedUUID == "" {
+			t.Fatalf("list %s: %v", noun, err)
+		}
+		st, ok := waitListState(t, client, res.CreatedUUID, 0, 15*time.Second, func(s listState) bool { return s.handle != "" })
+		if !ok {
+			t.Fatalf("list %s never materialized", noun)
+		}
+		fullRows[noun] = len(st.rows)
+		time.Sleep(800 * time.Millisecond)
+	}
+
+	for noun, filters := range g.Capabilities.Filters {
+		noun, filters := noun, filters
+		t.Run(noun, func(t *testing.T) {
+			for _, f := range filters {
+				token := ""
+				if len(f.Tokens) > 0 {
+					token = f.Tokens[0]
+				} else if sample, ok := filterSamples[f.Vocabulary]; ok {
+					token = sample
+				}
+				if token == "" {
+					t.Logf("filter %s: no live sample for vocabulary %q — skipped", f.Name, f.Vocabulary)
+					continue
+				}
+				input := fmt.Sprintf("list %s %s", noun, token)
+				res, err := client.SendMessage(ctx, "", input, 1000)
+				if err != nil || res.CreatedUUID == "" {
+					t.Fatalf("%s: %v", input, err)
+				}
+				uuid := res.CreatedUUID
+				// Success = a table (subset) OR a text-only empty-data
+				// reply; failure = an error event or nothing at all.
+				deadline := time.Now().Add(20 * time.Second)
+				verdict := ""
+				for time.Now().Before(deadline) && verdict == "" {
+					time.Sleep(1200 * time.Millisecond)
+					page, err := client.FetchChat(t.Context(), uuid)
+					if err != nil {
+						t.Fatal(err)
+					}
+					for _, ev := range page.Events {
+						switch ev.Kind {
+						case "error":
+							var p struct {
+								Text string `json:"text"`
+							}
+							_ = json.Unmarshal(ev.Payload, &p)
+							t.Errorf("%s: error reply: %s", input, p.Text)
+							verdict = "error"
+						case "system":
+							var p struct {
+								Text      string            `json:"text"`
+								Body      string            `json:"body"`
+								TableRows []json.RawMessage `json:"table_rows"`
+							}
+							if json.Unmarshal(ev.Payload, &p) != nil {
+								continue
+							}
+							if len(p.TableRows) > 0 {
+								if len(p.TableRows) > fullRows[noun] {
+									t.Errorf("%s: filtered rows (%d) exceed the full list (%d)", input, len(p.TableRows), fullRows[noun])
+								}
+								verdict = "table"
+							} else if p.Text != "" || p.Body != "" {
+								verdict = "empty-data"
+							}
+						}
+					}
+				}
+				if verdict == "" {
+					t.Errorf("%s: no reply arrived", input)
+				} else {
+					t.Logf("%s → %s", input, verdict)
+				}
+				time.Sleep(800 * time.Millisecond)
 			}
 		})
 	}

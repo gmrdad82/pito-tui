@@ -117,6 +117,15 @@ func TestShowVidAndChannelCards(t *testing.T) {
 			t.Errorf("vid card missing %q:\n%s", want, vid)
 		}
 	}
+	// v1.6.0: tags left the kv grid for their own hairline section —
+	// they must render as a labeled block, not vanish (pito db74203f).
+	if !strings.Contains(vid, "Tags") || !strings.Contains(vid, "talking head") {
+		t.Errorf("tags section missing:\n%s", vid)
+	}
+	tagIdx, descIdx := strings.Index(vid, "Tags"), strings.Index(vid, "Description")
+	if tagIdx < descIdx {
+		t.Errorf("tags section must follow the description (tags=%d desc=%d)", tagIdx, descIdx)
+	}
 	if strings.Contains(vid, "[=") {
 		t.Errorf("vid card must not grow bars:\n%s", vid)
 	}
@@ -130,25 +139,26 @@ func TestShowVidAndChannelCards(t *testing.T) {
 
 func TestKvZebraWrapsValuesInColumn(t *testing.T) {
 	withTrueColor(t)
-	out := renderFixture(t, "show_vid", 80)
+	long := strings.Repeat("wordy ", 30)
+	payload := `{"body":"x","html":true}`
+	_ = payload
+	card := &detailCard{pairs: [][2]string{
+		{"Title", "short"},
+		{"Notes", long},
+	}}
+	out := stripANSI(New(80, WithTruecolor(true)).detailCard(card))
 	for _, line := range strings.Split(out, "\n") {
 		if w := lipgloss.Width(line); w > 80 {
-			t.Errorf("line exceeds width (%d > 80): %q", w, stripANSI(line))
+			t.Errorf("line exceeds width (%d > 80): %q", w, line)
 		}
 	}
-	// The Tags row wraps: continuation lines align into the value column
-	// (indented past the key column), not at the bar edge.
-	plain := stripANSI(out)
-	tagIdx := strings.Index(plain, "Tags")
-	if tagIdx < 0 {
-		t.Fatal("Tags row missing")
+	// Continuation lines align into the value column, not the left edge.
+	lines := strings.Split(out, "\n")
+	if len(lines) < 3 {
+		t.Fatalf("long value should wrap: %d lines\n%s", len(lines), out)
 	}
-	lines := strings.Split(plain[tagIdx:], "\n")
-	if len(lines) < 2 {
-		t.Fatal("Tags row should wrap at width 80")
-	}
-	if !strings.HasPrefix(strings.TrimPrefix(lines[1], "┃"), strings.Repeat(" ", 10)) {
-		t.Errorf("continuation line not indented into the value column: %q", lines[1])
+	if !strings.HasPrefix(lines[len(lines)-1], strings.Repeat(" ", 8)) {
+		t.Errorf("continuation not indented into value column: %q", lines[len(lines)-1])
 	}
 }
 

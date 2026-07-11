@@ -511,3 +511,56 @@ func TestLocalEchoCarriesTimestamp(t *testing.T) {
 		}
 	}
 }
+
+func TestConfirmationCardsShowTheStatsDetail(t *testing.T) {
+	raw, err := os.ReadFile("testdata/confirmation_disconnect.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := plain().Event(event("confirmation", string(raw)))
+
+	// Pending: the web's detail block renders — cyan keys, aligned values,
+	// under a hairline (the blank spacer between Views and Vids survives).
+	for _, key := range []string{"Subs", "Views", "Vids", "Published", "Scheduled", "Unlisted", "Private"} {
+		if !strings.Contains(out, key) {
+			t.Errorf("pending confirmation lost detail key %q:\n%s", key, out)
+		}
+	}
+	if !strings.Contains(out, "─") {
+		t.Errorf("detail block missing its hairline:\n%s", out)
+	}
+
+	// Resolved: the detail drops (web hides it once resolved), outcome stays.
+	var p map[string]any
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatal(err)
+	}
+	p["resolved"] = true
+	p["outcome_text"] = "Called off."
+	resolved, _ := json.Marshal(p)
+	out = plain().Event(event("confirmation", string(resolved)))
+	if strings.Contains(out, "Subs") {
+		t.Errorf("resolved confirmation must hide the stats detail:\n%s", out)
+	}
+	if !strings.Contains(out, "Called off.") {
+		t.Errorf("resolved confirmation lost its outcome text:\n%s", out)
+	}
+}
+
+func TestHelpBlocksKeepTheirLineLayout(t *testing.T) {
+	payload := `{"body":"<div class=\"pito-help-block\"><span data-pito-ts-slot></span><span class=\"text-purple font-bold\">Usage:</span>\n  <span class=\"text-fg-dim\">list games  |  list vids</span>\n\n<span class=\"text-purple font-bold\">Options</span>\n  <span>--help</span></div>","html":true}`
+	out := plain().Event(event("system", payload))
+	lines := strings.Split(out, "\n")
+	usageLine, optionsLine := -1, -1
+	for i, l := range lines {
+		if strings.Contains(l, "Usage:") {
+			usageLine = i
+		}
+		if strings.Contains(l, "Options") {
+			optionsLine = i
+		}
+	}
+	if usageLine < 0 || optionsLine < 0 || optionsLine <= usageLine {
+		t.Errorf("help block lines collapsed (usage=%d options=%d):\n%s", usageLine, optionsLine, out)
+	}
+}
