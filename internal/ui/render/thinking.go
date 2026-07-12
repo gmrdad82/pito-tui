@@ -59,6 +59,16 @@ type PitoCopySnapshot struct {
 		Sections          map[string]string `json:"sections"`
 		Commands          map[string]string `json:"commands"`
 	} `json:"palette"`
+	// AiPicker is the /config ai model picker's chrome
+	// (en.pito.palette.ai_picker + en.pito.copy.ai.picker.key_gate).
+	AiPicker struct {
+		Title             string            `json:"title"`
+		EscHint           string            `json:"esc_hint"`
+		SearchPlaceholder string            `json:"search_placeholder"`
+		NoModel           string            `json:"no_model"`
+		Sections          map[string]string `json:"sections"`
+		KeyGate           string            `json:"key_gate"`
+	} `json:"ai_picker"`
 	Shell struct {
 		ChannelShortcut string `json:"channel_shortcut"`
 		PeriodShortcut  string `json:"period_shortcut"`

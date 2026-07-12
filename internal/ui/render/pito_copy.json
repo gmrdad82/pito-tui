@@ -672,6 +672,18 @@
       "theme_reset": "Reset to Tokyo Night"
     }
   },
+  "ai_picker": {
+    "title": "AI Models",
+    "esc_hint": "Esc",
+    "search_placeholder": "Search models",
+    "no_model": "no model selected",
+    "sections": {
+      "conversation": "Conversation",
+      "favorites": "Favorites",
+      "recents": "Recents"
+    },
+    "key_gate": "Models will load once a key is added."
+  },
   "shell": {
     "channel_shortcut": "shift+tab",
     "period_shortcut": "shift+space",

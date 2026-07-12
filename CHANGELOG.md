@@ -4,6 +4,18 @@ All notable changes to pito-tui are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); from 1.0.0 onward the
 project follows [Semantic Versioning](https://semver.org/).
 
+## [2.2.0] — 2026-07-13
+
+### Added
+
+- **The `/config ai` model picker** — the web's OpenCode-style overlay,
+  in the terminal: every provider with its live model list and key
+  chip, Conversation/Favorites/Recents groups, type-to-filter, enter
+  selects (or reveals a masked API-key entry on keyless providers),
+  ctrl+f favorites, ctrl+x clears a key, and the effort cycler when
+  the active provider reasons. State and writes ride the same
+  `/settings/ai` pair as the web, so the two faces cannot drift.
+
 ## [2.1.0] — 2026-07-12
 
 ### Added

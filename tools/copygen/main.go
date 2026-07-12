@@ -50,6 +50,7 @@ type snapshot struct {
 	Clipboard   []string    `json:"clipboard"`
 	StartScreen startScreen `json:"start_screen"`
 	Palette     palette     `json:"palette"`
+	AiPicker    aiPicker    `json:"ai_picker"`
 	Shell       shell       `json:"shell"`
 }
 
@@ -70,6 +71,20 @@ type palette struct {
 	SearchPlaceholder string            `json:"search_placeholder"`
 	Sections          map[string]string `json:"sections"`
 	Commands          map[string]string `json:"commands"`
+}
+
+// aiPicker: the /config ai model picker strings — the modal chrome from
+// en.pito.palette.ai_picker plus the keyless-provider gate line from
+// en.pito.copy.ai.picker.key_gate (two locale files, one surface).
+// Optional like the other sibling pools: an older ref yields zero
+// values (COPY LAW: absent words render as absent, never substituted).
+type aiPicker struct {
+	Title             string            `json:"title"`
+	EscHint           string            `json:"esc_hint"`
+	SearchPlaceholder string            `json:"search_placeholder"`
+	NoModel           string            `json:"no_model"`
+	Sections          map[string]string `json:"sections"`
+	KeyGate           string            `json:"key_gate"`
 }
 
 // shell: the chatbox cycler-hint + mini-status strings (en.pito.shell).
@@ -127,6 +142,7 @@ func run() error {
 	// it (COPY LAW: absent words render as absent, never substituted).
 	if raw, err := readLocale(repo, ref, "palette"); err == nil {
 		snap.Palette = extractPalette(raw)
+		snap.AiPicker = extractAiPicker(raw, copyRaw)
 	}
 	if raw, err := readLocale(repo, ref, "start_screen"); err == nil {
 		snap.StartScreen.TipPrefix = extractTipPrefix(raw)
@@ -225,6 +241,21 @@ func extractPalette(raw []byte) palette {
 
 func extractTipPrefix(raw []byte) string {
 	return scalar(walk(yamlRoot(raw), "en", "pito", "start_screen", "tip_prefix"))
+}
+
+// extractAiPicker reads the /config ai picker chrome from the palette
+// file and its key-gate line from the copy file — the same two sources
+// Pito::Ai::PickerComponent + ProviderSectionComponent render from.
+func extractAiPicker(paletteRaw, copyRaw []byte) aiPicker {
+	node := walk(yamlRoot(paletteRaw), "en", "pito", "palette", "ai_picker")
+	return aiPicker{
+		Title:             scalar(mapValue(node, "title")),
+		EscHint:           scalar(mapValue(node, "esc_hint")),
+		SearchPlaceholder: scalar(mapValue(node, "search_placeholder")),
+		NoModel:           scalar(mapValue(node, "no_model")),
+		Sections:          stringMap(mapValue(node, "sections")),
+		KeyGate:           scalar(walk(yamlRoot(copyRaw), "en", "pito", "copy", "ai", "picker", "key_gate")),
+	}
 }
 
 func extractShell(raw []byte) shell {

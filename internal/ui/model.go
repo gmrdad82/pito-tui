@@ -31,6 +31,7 @@ const (
 	modeNotifications
 	modeCommandPalette
 	modeEntityPicker
+	modeAiPicker
 )
 
 const maxNotices = 3
@@ -195,6 +196,8 @@ type Model struct {
 	ctrlK ctrlKPanel
 	// show game / show vid picker (entitypicker.go, owner 2026-07-12).
 	entity entityPicker
+	// /config ai model picker (aipicker.go, owner 2026-07-12).
+	aiPicker aiPickerPanel
 	// Mouse text selection + copied-toast (select.go, owner 2026-07-12).
 	selecting              bool
 	selAnchorX, selAnchorY int
@@ -534,6 +537,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onResume(msg)
 	case EntityPickerFetchedMsg:
 		return m.onEntityPickerFetched(msg)
+	case AiPickerFetchedMsg:
+		return m.onAiPickerFetched(msg)
+	case AiSettingsPatchedMsg:
+		return m.onAiSettingsPatched(msg)
 	case VersionFetchedMsg:
 		if msg.Err == nil && msg.Tag != "" {
 			m.serverTag = msg.Tag
@@ -668,6 +675,8 @@ func (m Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.onCtrlKKey(msg)
 	case modeEntityPicker:
 		return m.onEntityPickerKey(msg)
+	case modeAiPicker:
+		return m.onAiPickerKey(msg)
 	}
 	return m.onChatKey(msg)
 }
@@ -784,6 +793,14 @@ func (m Model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.input.Reset()
 			m.suggest = nil
 			return m.openEntityPicker(noun, command)
+		}
+		if aiPickerTrigger(text) {
+			// Bare `/config ai` opens the web's model-picker overlay —
+			// the TUI opens ITS picker (aipicker.go, tui-needs ask #3);
+			// every other /config form still round-trips untouched.
+			m.input.Reset()
+			m.suggest = nil
+			return m.openAiPicker()
 		}
 		if strings.EqualFold(text, "/notifications") {
 			// Client-side grammar, like /login: intercepted before it ever
@@ -1429,7 +1446,7 @@ const (
 // open/close spring). No springs active ⇒ no ticks — the house rule.
 func (m Model) animGateOpen() bool {
 	return len(m.shimmer) > 0 || m.notif.fetching || m.pickerFetching ||
-		m.entity.fetching ||
+		m.entity.fetching || m.aiPicker.fetching ||
 		m.rippleAnim || m.unreadOdoAnim || len(m.shaking) > 0 || m.ghostTyping || m.thumbFading ||
 		m.toastTicks > 0 || m.dotPulseTicks > 0 || m.quitArmed > 0 || m.scrollEasing || m.splashActive() || m.footerAnimating() || m.tourActive() ||
 		m.aiPromptLive()
@@ -1681,6 +1698,9 @@ func (m Model) viewContent() string {
 	}
 	if m.mode == modeEntityPicker {
 		return m.entityPickerView()
+	}
+	if m.mode == modeAiPicker {
+		return m.aiPickerView()
 	}
 
 	// The suggestions palette paints OVER the conversation's bottom
