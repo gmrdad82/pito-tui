@@ -114,7 +114,7 @@ func TestStatusRippleTravelsThenSettlesBackToPlain(t *testing.T) {
 	m, _ := newTestModel(t, chatServer(t), WithConversation("u1"), WithTruecolor(true))
 	m = sized(m)
 	m = drive(m, m.fetchChatCmd("u1", false)())
-	// The slimmed status (dot+tag) only grows a separator once the ✉
+	// The slimmed status (dot+tag) only grows a separator once the ⚑
 	// badge shows — give the ripple a middot to travel through.
 	m.unread = 5
 
@@ -270,7 +270,7 @@ func TestUnreadOdometerNonTruecolorInstantSwap(t *testing.T) {
 	if m.unread != 3 || m.displayUnread() != 3 {
 		t.Errorf("non-truecolor must swap instantly: unread=%d display=%d", m.unread, m.displayUnread())
 	}
-	if !strings.Contains(m.viewContent(), "✉ 3") {
+	if !strings.Contains(m.viewContent(), "⚑ 3") {
 		t.Errorf("status line must show the final value immediately:\n%s", m.viewContent())
 	}
 }

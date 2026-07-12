@@ -96,6 +96,47 @@ const starDensity = 80
 // position, so neighbors don't all draw the identical dot.
 var starGlyphs = [8]rune{'⠁', '⠂', '⠄', '⡀', '⢀', '⠈', '⠐', '⠠'}
 
+// The natural sky (owner 2026-07-12: "breathing, color purple, blue,
+// yellow, like real natural stars, different dots sizes"): starTints
+// are stellar classes weighted like a real field — most stars
+// near-white, then blue-white, warm yellow, and the house purple.
+// starSizeFor is the size ladder — dust dominates, doubles are common
+// enough to notice, real star glyphs stay rare so they mean something.
+var starTints = [4]render.RGB{
+	{R: 0xd8, G: 0xd8, B: 0xe8}, // near-white
+	{R: 0x9d, G: 0xb8, B: 0xff}, // blue-white
+	{R: 0xff, G: 0xe9, B: 0xa3}, // warm yellow
+	{R: 0xbb, G: 0x9a, B: 0xf7}, // purple
+}
+
+func starTintFor(h uint32) render.RGB {
+	switch h % 10 {
+	case 0, 1, 2, 3:
+		return starTints[0]
+	case 4, 5, 6:
+		return starTints[1]
+	case 7, 8:
+		return starTints[2]
+	default:
+		return starTints[3]
+	}
+}
+
+// starSizeFor: 0 = dust (70%), 1 = double dot (20%), 2 = bright ✧ (8%),
+// 3 = brilliant ✦ (2%).
+func starSizeFor(h uint32, fallback rune) (rune, int) {
+	switch v := h % 50; {
+	case v < 35:
+		return fallback, 0
+	case v < 45:
+		return [4]rune{'⠃', '⠘', '⠰', '⡈'}[h%4], 1
+	case v < 49:
+		return '✧', 2
+	default:
+		return '✦', 3
+	}
+}
+
 // ambientStarBG/ambientStarFaint bound every star's brightness: the
 // twinkle's low point (near-background, almost invisible) and its high
 // point — capped at roughly ColorFaint's own weight (owner rule: no
@@ -110,6 +151,9 @@ type skyStar struct {
 	col    int
 	glyph  rune
 	offset float64
+	tint   render.RGB
+	size   int     // 0 dust … 3 brilliant (starSizeFor)
+	period float64 // per-star breathing period multiplier (0.6..1.6)
 }
 
 // skyRowStarCache memoizes star positions per (salted row, drift base):
@@ -129,9 +173,20 @@ func skyRowStars(saltedRow, base, termWidth int) []skyStar {
 	}
 	stars := []skyStar{}
 	for col := 2; col < termWidth-1; col++ {
-		if present, glyph, offset := starAt(saltedRow, col+base); present {
-			stars = append(stars, skyStar{col: col, glyph: glyph, offset: offset})
+		present, glyph, offset := starAt(saltedRow, col+base)
+		if !present {
+			continue
 		}
+		h := fnv.New32a()
+		fmt.Fprintf(h, "%d/%d", saltedRow, col+base)
+		sum := h.Sum32()
+		sized, size := starSizeFor(sum>>4, glyph)
+		stars = append(stars, skyStar{
+			col: col, glyph: sized, offset: offset,
+			tint:   starTintFor(sum >> 12),
+			size:   size,
+			period: 0.6 + float64(sum%97)/97,
+		})
 	}
 	skyRowStarCache[key] = stars
 	return stars
@@ -195,21 +250,27 @@ func paintStarSky(body string, contentRows, termWidth int, skyPhase float64) str
 		// then paint in one left-to-right pass.
 		cells := map[int]float64{}
 		glyphs := map[int]rune{}
+		tints := map[int]render.RGB{}
 		for layer, ld := range layers {
 			for _, st := range skyRowStars(row+layer*3691, ld.base, termWidth) {
-				col, glyph, offset := st.col, st.glyph, st.offset
-				{
-					pulse := (math.Sin((skyPhase*0.13+offset)*2*math.Pi) + 1) / 2
-					// The star sits between col and col-1 by frac: split its
-					// light across both cells (linear crossfade).
-					if cells[col] < pulse*(1-ld.frac) {
-						cells[col] = pulse * (1 - ld.frac)
-						glyphs[col] = glyph
-					}
-					if col-1 >= 2 && cells[col-1] < pulse*ld.frac {
-						cells[col-1] = pulse * ld.frac
-						glyphs[col-1] = glyph
-					}
+				// Each star breathes on its OWN period (organic — a
+				// field, not a metronome); size deepens the breath and
+				// raises the ceiling: dust whispers, ✦ glows.
+				breath := (math.Sin((skyPhase*0.13*st.period+st.offset)*2*math.Pi) + 1) / 2
+				depth := 0.35 + 0.65*breath
+				ceiling := [4]float64{0.45, 0.6, 0.8, 1.0}[st.size]
+				pulse := depth * ceiling
+				// The star sits between col and col-1 by frac: split its
+				// light across both cells (linear crossfade).
+				if cells[st.col] < pulse*(1-ld.frac) {
+					cells[st.col] = pulse * (1 - ld.frac)
+					glyphs[st.col] = st.glyph
+					tints[st.col] = st.tint
+				}
+				if st.col-1 >= 2 && cells[st.col-1] < pulse*ld.frac {
+					cells[st.col-1] = pulse * ld.frac
+					glyphs[st.col-1] = st.glyph
+					tints[st.col-1] = st.tint
 				}
 			}
 		}
@@ -227,7 +288,11 @@ func paintStarSky(body string, contentRows, termWidth int, skyPhase float64) str
 			for ; cursor < col; cursor++ {
 				b.WriteByte(' ')
 			}
-			c := lerpRGB(ambientStarBG, ambientStarFaint, cells[col])
+			tint, ok := tints[col]
+			if !ok {
+				tint = ambientStarFaint
+			}
+			c := lerpRGB(ambientStarBG, tint, cells[col])
 			b.WriteString(lipgloss.NewStyle().Foreground(hexColor(c)).Render(string(glyphs[col])))
 			cursor++
 		}

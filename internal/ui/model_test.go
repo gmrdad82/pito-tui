@@ -1243,7 +1243,7 @@ func TestContextMeterAndMiniStatusFlow(t *testing.T) {
 	// pito fat-cut 2026-07-12: the identity after the dot is the SERVER
 	// tag alone — the httptest host is 127.0.0.1, a dev host, so "dev";
 	// the nickname, host, and state word are all gone.
-	if !strings.Contains(view, "dev") || !strings.Contains(view, "✉ 28") {
+	if !strings.Contains(view, "dev") || !strings.Contains(view, "⚑ 28") {
 		t.Errorf("mini status missing tag/unread:\n%s", view)
 	}
 	for _, gone := range []string{"connected", "gmrdad82@", "127.0.0.1"} {
@@ -1268,7 +1268,7 @@ func TestContextMeterAndMiniStatusFlow(t *testing.T) {
 	if m.meterCtx.Pct != 43 || m.unread != 3 {
 		t.Fatalf("conversation.update not applied: %+v unread=%d", m.meterCtx, m.unread)
 	}
-	if view := m.viewContent(); !strings.Contains(view, "43%") || !strings.Contains(view, "✉ 3") {
+	if view := m.viewContent(); !strings.Contains(view, "43%") || !strings.Contains(view, "⚑ 3") {
 		t.Errorf("patched values not rendered:\n%s", view)
 	}
 }

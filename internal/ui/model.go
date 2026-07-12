@@ -726,7 +726,9 @@ func (m Model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case "tab":
 			m.acceptSuggestion()
 			m.refreshViewport()
-			return m, m.suggestCmd()
+			// The accepted insert can be a Shift+R "#… @ai" handle —
+			// the ">" pulse starts here too.
+			return m, tea.Batch(m.suggestCmd(), m.animate())
 		case "space":
 			// Web parity (v1.6.0 suggestions_controller.js): Space
 			// dismisses the palette WITHOUT swallowing the keystroke —
@@ -849,7 +851,7 @@ func (m Model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.histIndex++
 		m.applyHistoryEntry(m.histMatches[m.histIndex])
-		return m, nil
+		return m, m.animate() // a recalled "@ai …" entry starts the ">" pulse
 	case "down":
 		if m.histPrefix == nil || m.histIndex == -1 {
 			return m, nil // no session / already at the snapshot draft
@@ -860,10 +862,10 @@ func (m Model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			// resumes the same walk (web behavior).
 			m.histIndex = -1
 			m.applyHistoryEntry(m.histDraft)
-			return m, nil
+			return m, m.animate() // the restored draft may itself be @ai
 		}
 		m.applyHistoryEntry(m.histMatches[m.histIndex])
-		return m, nil
+		return m, m.animate() // a recalled "@ai …" entry starts the ">" pulse
 	case "shift+up":
 		// Web parity: shift+↑/↓ scroll the conversation — and unlike the
 		// vim keys they work mid-typing (they never collide with input).
@@ -904,7 +906,9 @@ func (m Model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.input.SetValue(replyPrefill(handles[0]))
 				m.input.CursorEnd()
 				m.suggest = nil
-				return m, m.suggestCmd()
+				// An AI handle prefills "#… @ai " — the ">" starts
+				// pulsing, so the loop must start with it.
+				return m, tea.Batch(m.suggestCmd(), m.animate())
 			case len(handles) > 1:
 				items := make([]api.Suggestion, 0, len(handles))
 				for _, h := range handles {
@@ -939,7 +943,10 @@ func (m Model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.refreshViewport()
 			return m, cmd
 		}
-		return m, tea.Batch(cmd, m.suggestCmd())
+		// m.animate kicks the tick loop the moment the buffer enters the
+		// @ai mood (aiPromptLive) — a no-op whenever the loop already
+		// runs or nothing needs it.
+		return m, tea.Batch(cmd, m.suggestCmd(), m.animate())
 	}
 	return m, cmd
 }
@@ -1424,7 +1431,16 @@ func (m Model) animGateOpen() bool {
 	return len(m.shimmer) > 0 || m.notif.fetching || m.pickerFetching ||
 		m.entity.fetching ||
 		m.rippleAnim || m.unreadOdoAnim || len(m.shaking) > 0 || m.ghostTyping || m.thumbFading ||
-		m.toastTicks > 0 || m.dotPulseTicks > 0 || m.quitArmed > 0 || m.scrollEasing || m.splashActive() || m.footerAnimating() || m.tourActive()
+		m.toastTicks > 0 || m.dotPulseTicks > 0 || m.quitArmed > 0 || m.scrollEasing || m.splashActive() || m.footerAnimating() || m.tourActive() ||
+		m.aiPromptLive()
+}
+
+// aiPromptLive reports the chatbox wearing the AI accent — an @ai turn
+// mid-typing on a truecolor terminal. The pulsing ">" (viewContent's
+// prompt mood) needs the animation loop for as long as it's on screen,
+// exactly like the web's chatbox bar animating while data-accent="ai".
+func (m Model) aiPromptLive() bool {
+	return m.truecolor && aiInputRe.MatchString(m.input.Value())
 }
 
 // animate ensures the animation tick loop runs while anything animGateOpen
@@ -1696,8 +1712,16 @@ func (m Model) viewContent() string {
 	// the web tints its chatbox segment bar the same way (2.0.0).
 	istyles := m.input.Styles()
 	if aiInputRe.MatchString(m.input.Value()) {
-		istyles.Focused.Prompt = aiPromptStyle
-		istyles.Blurred.Prompt = aiPromptStyle
+		prompt := aiPromptStyle
+		if m.truecolor {
+			// The web's chatbox bar ANIMATES while data-accent="ai"
+			// (application.css's pito-ai-bar-shimmer) — here the ">"
+			// pulses purple↔pito-blue on the shared phase at
+			// AIPulseSpeed (owner 2026-07-13: "make the pulses faster").
+			prompt = prompt.Foreground(render.AIPromptColor(m.phase))
+		}
+		istyles.Focused.Prompt = prompt
+		istyles.Blurred.Prompt = prompt
 	} else {
 		istyles.Focused.Prompt = defaultPromptStyle
 		istyles.Blurred.Prompt = defaultPromptStyle
@@ -1969,7 +1993,8 @@ func (m Model) statusLine() string {
 		if display > 0 {
 			style = lipgloss.NewStyle().Foreground(render.ColorWarn)
 		}
-		pieces = append(pieces, style.Render("✉ "+strconv.Itoa(display)))
+		// ⚑ (owner ruling 2026-07-12): the ✉ envelope tofu'd in his font.
+		pieces = append(pieces, style.Render("⚑ "+strconv.Itoa(display)))
 	}
 
 	line := m.joinWithRippleSeparators(pieces)

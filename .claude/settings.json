@@ -27,6 +27,15 @@
             "command": "sh \"$CLAUDE_PROJECT_DIR/.claude/hooks/atomic-agent-check.sh\""
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/production-guard.py\""
+          }
+        ]
       }
     ],
     "Stop": [

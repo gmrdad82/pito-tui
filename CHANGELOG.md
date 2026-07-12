@@ -4,6 +4,33 @@ All notable changes to pito-tui are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); from 1.0.0 onward the
 project follows [Semantic Versioning](https://semver.org/).
 
+## [2.1.0] — 2026-07-12
+
+### Added
+
+- **`--update`** — the binary updates itself from the latest GitHub
+  release: checksum-verified download, atomic replace. For installs
+  outside brew (the AUR is still waiting on registrations).
+- **The AI chrome moves faster** — the answer's gradient border bar
+  sweeps at twice the house cadence (~1.3s), and the chatbox ">" now
+  pulses purple↔pito-blue while an @ai turn is being typed, matching
+  the web's animated chatbox bar.
+- **Unified modal cursor** — /resume, /notifications, ctrl+k and the
+  show pickers all wear the ls-vids look: zebra rows, ▌ bar, and a
+  full-width cursor stripe.
+- **The sky turned real** — stars now come in stellar colors
+  (near-white, blue-white, warm yellow, purple) and four sizes from
+  braille dust to a rare brilliant ✦, each breathing on its own period
+  instead of the whole field pulsing in step.
+
+### Fixed
+
+- **Multiline notifications no longer break the panel** — messages
+  collapse to one row (the IGDB sync used to spill its game list across
+  lines and scatter every timestamp after it).
+- The unread badge glyph is now ⚑ (the ✉ envelope rendered as tofu in
+  common terminal fonts).
+
 ## [2.0.0] — 2026-07-12
 
 The AI moved in, the grammar became tools, every screen answered the

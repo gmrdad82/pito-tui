@@ -138,6 +138,26 @@ var AIAccent = Gradient{Stops: []RGB{
 	{0x51, 0x70, 0xff}, // brand pito
 }}
 
+// AIPulseSpeed multiplies the shared phase for the AI accent's living
+// chrome — the done tile's ┃ band (ai.go's aiChrome) and the chatbox
+// ">" while an @ai turn is being typed (model.go). The web's
+// pito-ai-bar-shimmer runs 2.2s and the house sweep ~2.7s; the owner's
+// 2026-07-13 "make the pulses faster" puts these two at double the
+// house clock (~1.3s per sweep). Integer, so the shared phase's 1→0
+// wrap stays seamless under the multiply.
+const AIPulseSpeed = 2
+
+// AIPromptColor is the chatbox ">"'s pulse: phase (at AIPulseSpeed)
+// folded into a 0→1→0 triangle — the web's band passing through a
+// one-line bar. Purple, blooms pito-blue, settles back to purple;
+// the fold is what makes the wrap seamless (AIAccent carries no
+// return stop of its own).
+func AIPromptColor(phase float64) color.Color {
+	t := phase * AIPulseSpeed
+	t -= math.Floor(t)
+	return hex(AIAccent.At(1 - math.Abs(1-2*t)))
+}
+
 // MeterRamp is the web's green→red 5-stop context/score ramp.
 var MeterRamp = Gradient{Stops: []RGB{
 	{0x5f, 0xd7, 0x87}, {0xaf, 0xd7, 0x5f}, {0xd7, 0xd7, 0x5f},

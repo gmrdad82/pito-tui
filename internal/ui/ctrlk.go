@@ -211,15 +211,20 @@ func (m Model) ctrlKView() string {
 			}
 			label := ctrlKLabel(item)
 			insert := item.insert
-			line := "  " + label
-			if pad := width - lipgloss.Width(line) - lipgloss.Width(insert) - 3; pad > 0 {
-				line += strings.Repeat(" ", pad) + pickerDimStyle.Render(insert) + "  "
+			// ls-vids language: fg zebra + ▌ cursor (owner 2026-07-13).
+			zebra := zebraRowStyle(flat)
+			painted := zebra.Render(label)
+			if flat == sel {
+				painted = pickerCursorStyle.Render(label)
+			}
+			line := " " + painted
+			if pad := width - 1 - lipgloss.Width(line) - lipgloss.Width(insert) - 2; pad > 0 {
+				line += strings.Repeat(" ", pad) + zebra.Render(insert) + "  "
 			}
 			if flat == sel {
-				if pad := width - 1 - lipgloss.Width(line); pad > 0 {
-					line += strings.Repeat(" ", pad)
-				}
-				line = lipgloss.NewStyle().Background(render.ColorElevated).Render(line)
+				line = cursorStripe(line, width)
+			} else {
+				line = " " + line
 			}
 			rows = append(rows, line)
 			flat++

@@ -52,9 +52,10 @@ var (
 	pickerBadgeStyle   = lipgloss.NewStyle().Background(render.ColorPrimary).Foreground(lipgloss.Color("231")).Bold(true).Padding(0, 1)
 	pickerSectionStyle = lipgloss.NewStyle().Foreground(render.ColorPrimary).Bold(true)
 	pickerCursorStyle  = lipgloss.NewStyle().Foreground(render.ColorAccent).Bold(true)
-	pickerNewStyle     = lipgloss.NewStyle().Foreground(render.ColorOK)
-	pickerDimStyle     = lipgloss.NewStyle().Foreground(render.ColorDim)
-	pickerKeyStyle     = lipgloss.NewStyle().Foreground(render.ColorDim).Bold(true)
+
+	pickerNewStyle = lipgloss.NewStyle().Foreground(render.ColorOK)
+	pickerDimStyle = lipgloss.NewStyle().Foreground(render.ColorDim)
+	pickerKeyStyle = lipgloss.NewStyle().Foreground(render.ColorDim).Bold(true)
 )
 
 // pickerView renders the conversation picker, windowed so long lists keep
@@ -185,4 +186,25 @@ func relativeTime(t, now time.Time) string {
 	default:
 		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
 	}
+}
+
+// zebraRowStyle is the ls-vids table language for modal lists —
+// alternating neutral-gray FOREGROUNDS for resting rows (owner
+// 2026-07-13: "use what you used for ls vids. It's way cooler").
+func zebraRowStyle(i int) lipgloss.Style {
+	if i%2 == 0 {
+		return lipgloss.NewStyle().Foreground(render.ColorDim)
+	}
+	return lipgloss.NewStyle().Foreground(render.ColorFaint)
+}
+
+// cursorStripe paints the SELECTED modal row: the ▌ accent bar plus the
+// plum zebra stripe across the full row (owner 2026-07-13: "use the
+// zebra effect from ls vids to show the cursor") — one cursor language
+// for /resume, /notifications, ctrl+k, and the show game/vid pickers.
+func cursorStripe(line string, width int) string {
+	if pad := width - 1 - lipgloss.Width(line); pad > 0 {
+		line += strings.Repeat(" ", pad)
+	}
+	return pickerCursorStyle.Render("▌") + lipgloss.NewStyle().Background(render.ColorZebra).Render(line)
 }

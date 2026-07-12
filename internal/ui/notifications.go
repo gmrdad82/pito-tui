@@ -299,6 +299,10 @@ func notificationsPanelView(p notificationsPanel, width, height int, now time.Ti
 // place (the panel is read-only — there is no separate cursor marker to
 // swap in, the unread/read state must stay visible either way).
 func notificationRowLine(row api.NotificationRow, width int, now time.Time, selected bool) string {
+	// ls-vids cursor language (owner 2026-07-13): a ▌ bar leads the
+	// selected row instead of a block highlight; the unread/read glyph
+	// keeps its own column either way.
+	lead := " "
 	marker := notifReadStyle.Render("○ ")
 	if !row.Read {
 		marker = notifUnreadStyle.Render("● ")
@@ -306,27 +310,29 @@ func notificationRowLine(row api.NotificationRow, width int, now time.Time, sele
 	stamp := pickerDimStyle.Render(notificationStamp(row.CreatedAt, now))
 	stampW := lipgloss.Width(stamp)
 
-	avail := width - lipgloss.Width(marker) - stampW - 1
+	avail := width - 1 - lipgloss.Width(marker) - stampW - 1
 	if avail < 1 {
 		avail = 1
 	}
 	// Server messages may carry simple inline HTML (<strong> around the
-	// entity name — W7.f audit finding); flatten to plain text before
-	// truncating so tags never render literally.
-	body := marker + truncateEllipsis(render.FlattenHTML(row.Message), avail)
+	// entity name) AND embedded newlines (the IGDB sync notification
+	// lists its games one per line — owner screenshot 2026-07-12: rows
+	// spilled across lines and scattered the stamps). Flatten the HTML,
+	// then collapse ALL whitespace runs — newlines included — to single
+	// spaces so every row is exactly one line with its stamp on the
+	// right edge.
+	message := strings.Join(strings.Fields(render.FlattenHTML(row.Message)), " ")
+	body := lead + marker + truncateEllipsis(message, avail)
 
 	pad := width - lipgloss.Width(body) - stampW
 	if pad < 1 {
 		pad = 1
 	}
-	line := body + strings.Repeat(" ", pad) + stamp
-	line = lipgloss.NewStyle().MaxWidth(width).Render(line)
-
+	line := lipgloss.NewStyle().MaxWidth(width).Render(body + strings.Repeat(" ", pad) + stamp)
 	if selected {
-		if pad := width - 1 - lipgloss.Width(line); pad > 0 {
-			line += strings.Repeat(" ", pad)
-		}
-		line = lipgloss.NewStyle().Background(render.ColorElevated).Render(line)
+		// One cursor language across the modals (picker.go cursorStripe):
+		// ▌ bar + the plum zebra stripe.
+		return cursorStripe(line[len(" "):], width)
 	}
 	return line
 }

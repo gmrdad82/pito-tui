@@ -334,8 +334,9 @@ func (r *R) accent(text string) string {
 func (r *R) replyAffordance(handle string) string {
 	// The chip's own leading padding space doubles as the handle/chip
 	// separator — matching the exact web shape "#handle shift+r" with a
-	// single space, not two.
-	return r.accent(handle) + Kbd("shift+r", r.truecolor)
+	// single space, not two. Bare (no bed): the plum background read as
+	// harsh sitting on the @ai tile's lavender (owner 2026-07-13).
+	return r.accent(handle) + KbdBare("shift+r", r.truecolor)
 }
 
 // Kbd renders one keyboard chip — the shared shape for every keybinding
@@ -347,6 +348,24 @@ func (r *R) replyAffordance(handle string) string {
 // brand ramp — each rune a step further along PitoShimmer, a frozen
 // gleam rather than an animated one (a keycap, not a badge). Non-
 // truecolor stays the quiet dim chip.
+// KbdBare is Kbd without the bed — the same brand-ramp glyphs on
+// transparent ground, for chips that sit on tinted surfaces (the reply
+// affordance on the @ai tile; a background-on-background read as harsh).
+func KbdBare(keys string, truecolor bool) string {
+	if !truecolor {
+		return lipgloss.NewStyle().Foreground(ColorDim).Render(" " + keys + " ")
+	}
+	var b strings.Builder
+	b.WriteString(" ")
+	runes := []rune(keys)
+	for i, ru := range runes {
+		t := 0.15 + 0.35*float64(i)/float64(max(len(runes)-1, 1))
+		b.WriteString(lipgloss.NewStyle().Foreground(hex(PitoShimmer.At(t))).Render(string(ru)))
+	}
+	b.WriteString(" ")
+	return b.String()
+}
+
 func Kbd(keys string, truecolor bool) string {
 	if !truecolor {
 		return lipgloss.NewStyle().Foreground(ColorDim).Render(" " + keys + " ")

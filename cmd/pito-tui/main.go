@@ -20,6 +20,7 @@ func main() {
 		showVersion = flag.Bool("version", false, "print version and exit")
 		tour        = flag.Bool("tour", false, "play a scripted, self-driving demo against a new conversation, then hand back control")
 		tourAI      = flag.Bool("tour-ai", false, "include an @ai step in --tour (spends the configured AI provider's budget; no-op without --tour)")
+		update      = flag.Bool("update", false, "self-update: download and install the latest GitHub release, then exit")
 	)
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), `usage: pito-tui [flags] [conversation-uuid]
@@ -33,6 +34,12 @@ func main() {
 	}
 	flag.Parse()
 
+	if *update {
+		if err := app.Update(os.Stdout, "https://api.github.com", ""); err != nil {
+			fail(err)
+		}
+		return
+	}
 	if *showVersion || flag.Arg(0) == "version" {
 		fmt.Printf("pito-tui %s (%s %s)\n", version.Version, version.Commit, version.Date)
 		return

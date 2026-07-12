@@ -191,6 +191,23 @@ func TestNotificationsPaginationAndDuplicateGuard(t *testing.T) {
 	}
 }
 
+// Multiline server messages (the IGDB sync lists its games one per
+// line) must collapse to ONE row with the stamp on the right edge —
+// owner screenshot 2026-07-12: rows spilled and stamps scattered.
+func TestNotificationRowCollapsesMultilineMessages(t *testing.T) {
+	row := api.NotificationRow{
+		Message: "IGDB nightly sync: checked 66 upcoming game(s)\n\nTekken 7\nProject Motor Racing\nR-Type Dimensions",
+		Read:    true,
+	}
+	line := notificationRowLine(row, 100, time.Now(), false)
+	if strings.Contains(ansi.Strip(line), "\n") {
+		t.Fatalf("row must be a single line, got %q", ansi.Strip(line))
+	}
+	if !strings.Contains(ansi.Strip(line), "Tekken 7 Project Motor Racing") {
+		t.Fatalf("newlines must collapse to spaces, got %q", ansi.Strip(line))
+	}
+}
+
 // TestNotificationsUnreadReadGlyphs checks the row glyph/order/stamp
 // contract: unread rows wear "● ", read rows wear "○ ", newest-first as
 // served (no client resort), stamps day-aware.
@@ -412,19 +429,19 @@ func TestTruncateEllipsis(t *testing.T) {
 	}
 }
 
-// TestNotificationRowSelectionUsesElevatedGrayNotZebra pins the retint
-// (owner 2026-07-12 "align to Charm" table restyle): the notification
-// panel's selected row wears the same neutral ColorElevated (#2A2E3A) the
-// picker's cursor row moved to, never the old plum ColorZebra (#1B142B) —
-// a SELECTION affordance keeps a background, just off the plum family now.
-func TestNotificationRowSelectionUsesElevatedGrayNotZebra(t *testing.T) {
+// TestNotificationRowSelectionWearsTheCursorStripe pins the 2026-07-13
+// ruling (supersedes the 07-12 elevated-gray retint): the selected
+// modal row wears the ▌ accent bar + the plum ColorZebra stripe — one
+// cursor language across /resume, /notifications, ctrl+k and the
+// entity pickers (picker.go cursorStripe).
+func TestNotificationRowSelectionWearsTheCursorStripe(t *testing.T) {
 	row := api.NotificationRow{ID: 1, Message: "you have a new reply", Read: false, CreatedAt: fixedNow}
 	out := notificationRowLine(row, 60, fixedNow, true)
-	if strings.Contains(out, "48;2;27;20;43") { // #1B142B, the old ColorZebra
-		t.Errorf("selected notification row must not use the old plum ColorZebra:\n%q", out)
+	if !strings.Contains(out, "▌") {
+		t.Errorf("selected row must lead with the cursor bar:\n%q", out)
 	}
-	if !strings.Contains(out, "48;2;42;46;58") { // #2A2E3A, ColorElevated
-		t.Errorf("selected notification row must use the new ColorElevated:\n%q", out)
+	if !strings.Contains(out, "48;2;") {
+		t.Errorf("selected row must wear the zebra stripe background:\n%q", out)
 	}
 	unselected := notificationRowLine(row, 60, fixedNow, false)
 	if strings.Contains(unselected, "48;2;") {

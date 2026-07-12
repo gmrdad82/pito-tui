@@ -98,14 +98,30 @@ func (r *R) aiPendingLine(payload json.RawMessage) string {
 func (r *R) aiDoneEvent(ev api.Event, p api.AiPayload, width int) string {
 	parts := r.renderAiBlocks(p.Blocks, width)
 	content := r.stamp(ev) + strings.Join(parts, "\n\n")
-	if badge := r.aiBadgeLine(p.Model, formatAiCost(p.CostAmount, p.CostCurrency), width); badge != "" {
-		content += "\n" + badge
-	}
+	// ONE footer row (owner 2026-07-13: "shift+r should be on the same
+	// row as the model. Not 2 rows needed"): the reply affordance sits
+	// left, the ✦ badge right — with a one-cell right margin so the
+	// model name never touches the tile's edge.
+	left := ""
 	if p.ReplyHandle != "" && !p.ReplyConsumed {
 		// The house replyAffordance builder (render.go) — shared so this
-		// and render.go's replyHintFor/confirmation can't drift apart,
-		// even though AiPayload decodes a different payload shape.
-		content += "\n" + r.replyAffordance(p.ReplyHandle)
+		// and render.go's replyHintFor/confirmation can't drift apart.
+		left = r.replyAffordance(p.ReplyHandle)
+	}
+	right := ""
+	if model := strings.TrimSpace(p.Model); model != "" {
+		text := "✦ " + model
+		if cost := formatAiCost(p.CostAmount, p.CostCurrency); cost != "" {
+			text += " · " + cost
+		}
+		right = r.dim(text)
+	}
+	if left != "" || right != "" {
+		pad := width - lipgloss.Width(left) - lipgloss.Width(right) - 1
+		if pad < 1 {
+			pad = 1
+		}
+		content += "\n" + left + strings.Repeat(" ", pad) + right
 	}
 	return r.aiChrome(content) + "\n"
 }
@@ -117,6 +133,11 @@ func (r *R) aiDoneEvent(ev api.Event, p api.AiPayload, width int) string {
 // screen and the web's own data-accent="ai" surfaces keep animating
 // while they're in view. Off-truecolor terminals fall back to a flat
 // ColorPrimary bar, same as every other truecolor/plain split here.
+// The bar is the WHOLE chrome: the tile background it once carried
+// (the web's pito-ai-surface analog) was tried in lavender, faded
+// pink, indigo, and dark teal across 2026-07-12/13 and purged by
+// owner ruling — "We drop the background for the AI message and we
+// leave only the flash border."
 func (r *R) aiChrome(content string) string {
 	body := lipgloss.NewStyle().PaddingLeft(1).Width(r.width - 3).Render(content)
 	lines := strings.Split(body, "\n")
@@ -128,7 +149,7 @@ func (r *R) aiChrome(content string) string {
 			if len(lines) > 1 {
 				t = float64(i) / float64(len(lines)-1)
 			}
-			t += r.phase
+			t += r.phase * AIPulseSpeed
 			t -= math.Floor(t) // wrap into [0,1) — the band travels down the block
 			style = style.Foreground(hex(AIAccent.At(t)))
 		}
@@ -138,26 +159,6 @@ func (r *R) aiChrome(content string) string {
 		b.WriteString(style.Render("┃") + line)
 	}
 	return b.String()
-}
-
-// aiBadgeLine renders the right-aligned "✦ <model> · <cost>" footer.
-// model == "" (contract: badges only appear "when Model != \"\"") means
-// no badge at all, not an empty line — the caller only splices this in
-// when it's non-empty.
-func (r *R) aiBadgeLine(model, cost string, width int) string {
-	model = strings.TrimSpace(model)
-	if model == "" {
-		return ""
-	}
-	text := "✦ " + model
-	if cost != "" {
-		text += " · " + cost
-	}
-	pad := width - lipgloss.Width(text)
-	if pad < 0 {
-		pad = 0
-	}
-	return r.dim(strings.Repeat(" ", pad) + text)
 }
 
 // formatAiCost renders CostAmount/CostCurrency for the badge. A nil

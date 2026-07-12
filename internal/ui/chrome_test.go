@@ -155,8 +155,8 @@ func TestWindowTitleText(t *testing.T) {
 	}{
 		{"new conversation", 0, "pito · new conversation"},
 		{"release prep", 0, "pito · release prep"},
-		{"release prep", 3, "pito · release prep · ✉ 3"},
-		{"(unnamed)", 1, "pito · (unnamed) · ✉ 1"},
+		{"release prep", 3, "pito · release prep · ⚑ 3"},
+		{"(unnamed)", 1, "pito · (unnamed) · ⚑ 1"},
 	}
 	for _, c := range cases {
 		if got := windowTitleText(c.label, c.unread); got != c.want {
@@ -180,7 +180,7 @@ func TestModelWindowTitleLabelFallbacks(t *testing.T) {
 
 	m.conv = api.Conversation{UUID: "u1", DisplayName: "release prep"}
 	m.unread = 2
-	if got, want := m.windowTitle(), "pito · release prep · ✉ 2"; got != want {
+	if got, want := m.windowTitle(), "pito · release prep · ⚑ 2"; got != want {
 		t.Errorf("named + unread: windowTitle() = %q, want %q", got, want)
 	}
 }

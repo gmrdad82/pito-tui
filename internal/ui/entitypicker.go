@@ -226,15 +226,22 @@ func (m Model) entityPickerView() string {
 		if row.Handle != "" {
 			right = row.Handle + " · " + right
 		}
-		line := "  " + row.Title
-		if pad := width - lipgloss.Width(line) - lipgloss.Width(right) - 3; pad > 0 {
-			line += strings.Repeat(" ", pad) + pickerDimStyle.Render(right) + "  "
+		// The ls-vids table language (owner 2026-07-13: "way cooler"):
+		// alternating gray foregrounds instead of background zebra, and
+		// the ▌ cursor bar + lifted title instead of a block highlight.
+		zebra := zebraRowStyle(i)
+		title := zebra.Render(row.Title)
+		if i == p.cursor {
+			title = pickerCursorStyle.Render(row.Title)
+		}
+		line := " " + title
+		if pad := width - 1 - lipgloss.Width(line) - lipgloss.Width(right) - 2; pad > 0 {
+			line += strings.Repeat(" ", pad) + zebra.Render(right) + "  "
 		}
 		if i == p.cursor {
-			if pad := width - 1 - lipgloss.Width(line); pad > 0 {
-				line += strings.Repeat(" ", pad)
-			}
-			line = lipgloss.NewStyle().Background(render.ColorElevated).Render(line)
+			line = cursorStripe(line, width)
+		} else {
+			line = " " + line
 		}
 		lines = append(lines, line)
 	}

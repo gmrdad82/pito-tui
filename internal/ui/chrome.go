@@ -35,7 +35,7 @@ import (
 //     Model.stepFooterAnim/footerAnimating, wired from onAnimTick/
 //     animGateOpen, and Model.onChatKey's own '?' case.
 //   - oscTitleEnabled: the terminal tab title tracks "pito · <conversation
-//     label>", plus " · ✉ N" once unread > 0 — see windowTitle, read by
+//     label>", plus " · ⚑ N" once unread > 0 — see windowTitle, read by
 //     Model.View() into tea.View.WindowTitle (a plain field in Bubble Tea
 //     v2, not a Cmd). Recomputed every View() call, but bubbletea's own
 //     renderer only ever EMITS the OSC sequence when the string actually
@@ -247,12 +247,12 @@ func (m Model) keymapFooterView() string {
 // ── Effect 3: OSC window title ───────────────────────────────────────────
 
 // windowTitleText is the title string's own pure builder: "pito · <label>"
-// plus " · ✉ N" once unread is positive — split out from windowTitle so
+// plus " · ⚑ N" once unread is positive — split out from windowTitle so
 // the label/unread forms are directly testable without a whole Model.
 func windowTitleText(label string, unread int) string {
 	title := "pito · " + label
 	if unread > 0 {
-		title += " · ✉ " + strconv.Itoa(unread)
+		title += " · ⚑ " + strconv.Itoa(unread)
 	}
 	return title
 }

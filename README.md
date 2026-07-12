@@ -22,7 +22,7 @@ here. The star sky, the shimmer, the springs: that's their toolkit,
 pushed as far as we could take it.
 
 Phone person? The same instance also fits in your pocket:
-[**`pito-android`**](https://github.com/gmrdad82/pito-android), a native
+[**pito-android**](https://github.com/gmrdad82/pito-android), a native
 Android shell around your instance's own UI. And for the full tour before
 you commit to anything, the showcase lives at
 [**pitomd.com**](https://pitomd.com) ([source](https://github.com/gmrdad82/pitomd)).
@@ -39,6 +39,12 @@ Updates arrive with your normal `yay -Syu` — the release pipeline
 maintains the AUR package. (Landing in the first patch release: the
 AUR's account registration was closed upstream when 1.0.0 shipped.
 Until then, Arch folks: Homebrew below, the `.deb`, or the tarball.)
+
+**Installed a raw binary?** It updates itself:
+
+```sh
+pito-tui --update
+```
 
 **macOS / Linux via Homebrew**
 
