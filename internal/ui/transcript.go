@@ -31,6 +31,7 @@ type Turn struct {
 	Events []api.Event
 
 	rendered string
+	lines    []string // rendered, split once — the window join's currency
 	dirty    bool
 }
 
@@ -106,6 +107,29 @@ func (t *Transcript) Merge(events []api.Event) int {
 	return changed
 }
 
+// MutateEventPayload looks up an event by ID and rewrites its Payload via
+// fn, marking the owning turn dirty — the ai_block/ai_status streaming
+// mutations (model.go) need to edit one event's payload bytes in place
+// without walking Append/Replace's turn-management logic. fn returning
+// ok=false (a decode failure, or the caller declining to touch the
+// payload) leaves the event untouched. An unknown eventID is a silent
+// no-op — an ai_block/ai_status racing ahead of its event.append, which
+// the eventual event.replace reconciles either way.
+func (t *Transcript) MutateEventPayload(eventID int64, fn func(payload json.RawMessage) (json.RawMessage, bool)) (api.Event, bool) {
+	pos, known := t.byEvent[eventID]
+	if !known {
+		return api.Event{}, false
+	}
+	next, ok := fn(pos.turn.Events[pos.idx].Payload)
+	if !ok {
+		return api.Event{}, false
+	}
+	pos.turn.Events[pos.idx].Payload = next
+	pos.turn.dirty = true
+	t.joinedOK = false
+	return pos.turn.Events[pos.idx], true
+}
+
 // Touch marks one turn dirty (shimmer animation re-renders it per tick
 // without invalidating the rest of the cache).
 func (t *Transcript) Touch(turnID int64) {
@@ -130,19 +154,12 @@ func (t *Transcript) Len() int {
 // View renders the full scrollback at width, re-rendering only dirty
 // turns. Width changes invalidate everything.
 func (t *Transcript) View(width int) string {
-	if width != t.width {
-		t.width = width
-		t.dirtyAll()
-	}
-	if t.joinedOK {
+	if t.joinedOK && width == t.width {
 		return t.joined
 	}
+	t.ensureRendered(width)
 	var b strings.Builder
 	for i, turn := range t.turns {
-		if turn.dirty {
-			turn.rendered = t.renderTurn(turn)
-			turn.dirty = false
-		}
 		if i > 0 {
 			b.WriteString("\n")
 		}
@@ -153,7 +170,91 @@ func (t *Transcript) View(width int) string {
 	return t.joined
 }
 
+// ensureRendered brings every dirty turn's cache (rendered + lines)
+// current at the given width. The full pass runs once per data/width
+// change per turn — animation ticks only dirty VISIBLE turns (model.go's
+// visible-only Touch), so a long scrollback costs nothing per frame.
+func (t *Transcript) ensureRendered(width int) {
+	if width != t.width {
+		t.width = width
+		t.dirtyAll()
+	}
+	for _, turn := range t.turns {
+		if turn.dirty {
+			turn.rendered = t.renderTurn(turn)
+			turn.lines = strings.Split(turn.rendered, "\n")
+			turn.dirty = false
+		}
+	}
+}
+
+// TotalLines is the joined transcript's height in lines at width —
+// turns join with a single newline, so it is simply the sum of each
+// turn's own line count (the boundary newline is the seam between two
+// turns' edge lines, not an extra line).
+func (t *Transcript) TotalLines(width int) int {
+	t.ensureRendered(width)
+	total := 0
+	for _, turn := range t.turns {
+		total += len(turn.lines)
+	}
+	return total
+}
+
+// WindowLines returns lines [yoff, yoff+height) of the joined transcript
+// WITHOUT joining the whole thing — the virtualized viewport's core
+// (owner 2026-07-12: long conversations lagged because every frame
+// re-joined and re-measured the entire scrollback; the web renders only
+// what's visible). O(visible) per call once caches are warm.
+func (t *Transcript) WindowLines(width, yoff, height int) []string {
+	t.ensureRendered(width)
+	if yoff < 0 {
+		yoff = 0
+	}
+	out := make([]string, 0, height)
+	pos := 0
+	for _, turn := range t.turns {
+		n := len(turn.lines)
+		if pos+n <= yoff {
+			pos += n
+			continue
+		}
+		start := 0
+		if yoff > pos {
+			start = yoff - pos
+		}
+		for i := start; i < n && len(out) < height; i++ {
+			out = append(out, turn.lines[i])
+		}
+		pos += n
+		if len(out) >= height {
+			break
+		}
+	}
+	return out
+}
+
+// TurnLineRange reports [start, end) line positions of a turn within the
+// joined transcript, ok=false when absent or not yet rendered — the
+// visible-only animation gate's lookup (model.go touches only shimmer
+// turns that intersect the viewport window).
+func (t *Transcript) TurnLineRange(turnID int64) (start, end int, ok bool) {
+	pos := 0
+	for _, turn := range t.turns {
+		n := len(turn.lines)
+		if turn.ID == turnID {
+			if turn.dirty && n == 0 {
+				return 0, 0, false
+			}
+			return pos, pos + n, true
+		}
+		pos += n
+	}
+	return 0, 0, false
+}
+
 func (t *Transcript) renderTurn(turn *Turn) string {
+	// (lines is refreshed by ensureRendered's caller-side split.)
 	var b strings.Builder
 	for i, ev := range turn.Events {
 		if i > 0 {
@@ -171,13 +272,63 @@ func (t *Transcript) dirtyAll() {
 	t.joinedOK = false
 }
 
+// LiveHandle pairs a still-actionable reply handle with its event's kind —
+// ai handles prefill "@ai " continuations (2.0.0), everything else replies
+// bare.
+// TurnEvents returns the events of one turn (nil when absent) — the
+// shimmer bookkeeping's window into a turn when deciding whether it
+// still needs animation ticks after a replace.
+func (t *Transcript) TurnEvents(turnID int64) []api.Event {
+	if turn, ok := t.byTurn[turnID]; ok {
+		return turn.Events
+	}
+	return nil
+}
+
+// EchoTexts returns the user's sent inputs newest-first, read from the
+// echo events currently in the transcript — the TUI analog of the web
+// seeding its input history from the conversation's last 50 turns
+// (conversations/show.html.erb's sent_history). Consecutive duplicates
+// collapse and the list caps at limit, mirroring history_controller.js's
+// own dedupe/cap rules so a reload reproduces what a live session built.
+func (t *Transcript) EchoTexts(limit int) []string {
+	var out []string
+	for i := len(t.turns) - 1; i >= 0 && len(out) < limit; i-- {
+		for _, ev := range t.turns[i].Events {
+			if ev.Kind != api.KindEcho {
+				continue
+			}
+			var p struct {
+				Text string `json:"text"`
+			}
+			if json.Unmarshal(ev.Payload, &p) != nil || strings.TrimSpace(p.Text) == "" {
+				continue
+			}
+			text := strings.TrimSpace(p.Text)
+			if len(out) > 0 && out[len(out)-1] == text {
+				continue
+			}
+			out = append(out, text)
+			if len(out) >= limit {
+				break
+			}
+		}
+	}
+	return out
+}
+
+type LiveHandle struct {
+	Handle string
+	Kind   string
+}
+
 // LiveHandles returns the reply handles that are still actionable: the
 // NEWEST turn carrying any non-consumed reply_handle wins outright — the
 // server retires all prior live hashtags whenever a new leading turn
 // arrives (finalizer sweep), so older turns' handles are dead anyway.
-func (t *Transcript) LiveHandles() []string {
+func (t *Transcript) LiveHandles() []LiveHandle {
 	for i := len(t.turns) - 1; i >= 0; i-- {
-		var handles []string
+		var handles []LiveHandle
 		for _, ev := range t.turns[i].Events {
 			var p struct {
 				ReplyHandle   string `json:"reply_handle"`
@@ -187,7 +338,7 @@ func (t *Transcript) LiveHandles() []string {
 				continue
 			}
 			if p.ReplyHandle != "" && !p.ReplyConsumed {
-				handles = append(handles, p.ReplyHandle)
+				handles = append(handles, LiveHandle{Handle: p.ReplyHandle, Kind: ev.Kind})
 			}
 		}
 		if len(handles) > 0 {

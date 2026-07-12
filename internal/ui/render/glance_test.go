@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 // The glance panel: 2-row braille sparklines lifted verbatim from the
@@ -87,7 +87,7 @@ func TestGlancePendingWaitsQuietly(t *testing.T) {
 	payload := `{"body":"<div class=\"x__intro\">All-time report</div><div class=\"pito-analytics-scalars\">⠐⠂ dots</div>","html":true,
 		"analytics":{"status":"pending","intro":"All-time report"}}`
 	out := stripANSI(plain().Event(event("system", payload)))
-	if !strings.Contains(out, "crunching the numbers…") {
+	if !strings.Contains(out, strings.Repeat("⠂", 42)) {
 		t.Errorf("pending note missing:\n%s", out)
 	}
 	if strings.Contains(out, "dots") {

@@ -3,8 +3,9 @@ package render
 import (
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 func TestShiniesRailsAndBadges(t *testing.T) {
@@ -16,14 +17,19 @@ func TestShiniesRailsAndBadges(t *testing.T) {
 			t.Errorf("shinies lane missing %q:\n%s", want, out)
 		}
 	}
-	// Badges flow under the rail, faces intact (dates are web-only).
+	// Badges flow under the rail, faces intact.
 	for _, want := range []string{"1 Sub", "2 Subs"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("badge face missing %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "Jun '26") {
-		t.Errorf("badge dates are web-only:\n%s", out)
+	// Shinies-lane badges are the web's EXTENDED form (metric_row_component's
+	// default, unlike the compact detail-card strip): the unlock date now
+	// rides along as a dim suffix — bare "Jun" when the badge's year matches
+	// the clock, "Jun '26" otherwise (shinyDateSuffix's stamp()-style rule).
+	// Contains("Jun") holds either way without pinning wall-clock time here.
+	if !strings.Contains(out, "Jun") {
+		t.Errorf("extended badges must carry their unlock date:\n%s", out)
 	}
 	for _, line := range strings.Split(out, "\n") {
 		if w := lipgloss.Width(line); w > 110 {
@@ -35,16 +41,213 @@ func TestShiniesRailsAndBadges(t *testing.T) {
 func TestShinyBadgeComponent(t *testing.T) {
 	withTrueColor(t)
 	r := New(80, WithTruecolor(true))
-	badge := stripANSI(r.ShinyBadge("gold", "100K Subs"))
+	badge := stripANSI(r.ShinyBadge("gold", "100K Subs", ""))
 	if !strings.Contains(badge, "100K Subs") {
 		t.Errorf("badge face missing: %q", badge)
 	}
-	long := stripANSI(r.ShinyBadge("jade", "200 Viewsandmore"))
+	long := stripANSI(r.ShinyBadge("jade", "200 Viewsandmore", ""))
 	if !strings.Contains(long, "…") {
 		t.Errorf("compact form must trim with ellipsis: %q", long)
 	}
-	if unknown := stripANSI(r.ShinyBadge("vibranium", "5 Things")); !strings.Contains(unknown, "5 Things") {
+	if unknown := stripANSI(r.ShinyBadge("vibranium", "5 Things", "")); !strings.Contains(unknown, "5 Things") {
 		t.Errorf("unknown material must degrade to the neutral pill: %q", unknown)
+	}
+}
+
+// TestShinyBadgeExtendedCarriesDateCompactDoesNot exercises the FULL
+// pipeline (html.go's marker extraction -> tokens.go's paintTokens) on
+// two minimal fragments shaped exactly like the web's two badge forms
+// (badge_component.rb): a compact detail-card badge never renders a
+// __date child at all, so it must stay date-less; an extended badge
+// (shinies-tool lanes) does, and the TUI now shows it — formatted through
+// stamp()'s day-aware rule (shinyDateSuffix) rather than passed through
+// verbatim, so a same-year unlock drops the now-redundant year.
+func TestShinyBadgeExtendedCarriesDateCompactDoesNot(t *testing.T) {
+	withTrueColor(t)
+	// The __date span's OWN class ("pito-shiny__date block") contains the
+	// substring "pito-shiny" — a trap for html.go's badge extraction,
+	// which matches on that same substring. A regression here nests a
+	// SECOND marker sequence inside the date segment (owner bug caught in
+	// the 2026-07-12 vhs capture: tofu glyphs bleeding into the pill), so
+	// this test checks the RENDERED TEXT EXACTLY, not just substrings.
+	extended := `<span class="pito-shiny" data-material="wood">1 Sub<span class="pito-shiny__date block">Jun &#39;26</span></span>`
+	compact := `<span class="pito-shiny pito-shiny--compact" data-material="wood">1 Sub</span>`
+	requireNoMarkerRunes := func(t *testing.T, s string) {
+		t.Helper()
+		for _, marker := range []rune{ShinyStart, ShinySep, ShinyEnd, ShinySpace} {
+			if strings.ContainsRune(s, marker) {
+				t.Errorf("marker rune %U leaked into rendered output: %q", marker, s)
+			}
+		}
+	}
+
+	sameYearNow := time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)
+	r := New(80, WithTruecolor(true), WithNow(func() time.Time { return sameYearNow }))
+
+	extOut := stripANSI(r.paintTokens(FlattenHTML(extended), lipgloss.NewStyle()))
+	requireNoMarkerRunes(t, extOut)
+	// Same-year unlock: the redundant year drops, exactly "1 Sub · Jun"
+	// (padded with the pill's own leading/trailing space and edge caps).
+	if !strings.Contains(extOut, "1 Sub · Jun ") {
+		t.Errorf("extended badge must read exactly %q, got: %q", "1 Sub · Jun", extOut)
+	}
+	if strings.Contains(extOut, "'26") {
+		t.Errorf("same-year badge date must drop the year like stamp(): %q", extOut)
+	}
+
+	compOut := stripANSI(r.paintTokens(FlattenHTML(compact), lipgloss.NewStyle()))
+	requireNoMarkerRunes(t, compOut)
+	if !strings.Contains(compOut, "1 Sub") {
+		t.Errorf("compact badge face missing: %q", compOut)
+	}
+	if strings.Contains(compOut, "Jun") || strings.Contains(compOut, "·") {
+		t.Errorf("compact badges must stay date-less: %q", compOut)
+	}
+
+	// A different year than "now": the qualifier is no longer redundant,
+	// so shinyDateSuffix keeps it — same rule stamp() applies to full
+	// timestamps, just at the month granularity the web actually sends.
+	otherYearNow := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
+	r2 := New(80, WithTruecolor(true), WithNow(func() time.Time { return otherYearNow }))
+	out2 := stripANSI(r2.paintTokens(FlattenHTML(extended), lipgloss.NewStyle()))
+	requireNoMarkerRunes(t, out2)
+	if !strings.Contains(out2, "1 Sub · Jun '26 ") {
+		t.Errorf("cross-year badge must read exactly %q, got: %q", "1 Sub · Jun '26", out2)
+	}
+}
+
+// TestShinyMarkerRoundTripBackwardCompatible pins the pre-glow-up marker
+// shape (material + face, no date segment — the only shape any TUI build
+// before this pass ever produced) and confirms paintTokens/plainTokens
+// still render it exactly as before: SplitN's new limit-3 must not
+// disturb a payload that only ever had one separator.
+func TestShinyMarkerRoundTripBackwardCompatible(t *testing.T) {
+	withTrueColor(t)
+	r := New(80, WithTruecolor(true))
+	old := string(ShinyStart) + "gold" + string(ShinySep) + "1" + string(ShinySpace) + "Sub" + string(ShinyEnd)
+
+	out := stripANSI(r.paintTokens(old, lipgloss.NewStyle()))
+	if !strings.Contains(out, "1 Sub") {
+		t.Errorf("two-segment (legacy) shiny marker must still render its face: %q", out)
+	}
+	for _, marker := range []rune{ShinyStart, ShinySep, ShinyEnd, ShinySpace} {
+		if strings.ContainsRune(out, marker) {
+			t.Errorf("marker rune %U leaked into rendered output: %q", marker, out)
+		}
+	}
+
+	if got := plainTokens(old); got != "1 Sub" {
+		t.Errorf("plainTokens must degrade a legacy shiny marker to its face text, got %q", got)
+	}
+}
+
+// TestShinyHaloPhasePulse20Bounded covers effect 1 (breathing halo): the
+// sine primitive stays in [-1,1], is deterministic for a pinned r.phase,
+// gives distinct badges distinct phases, and scaleRGB — the ±25%
+// brightness envelope it drives — never over/undershoots its bounds.
+func TestShinyHaloPhasePulse20Bounded(t *testing.T) {
+	r := New(80, WithTruecolor(true))
+	for _, phase := range []float64{0, 0.1, 0.33, 0.5, 0.77, 0.999} {
+		r.SetPhase(phase)
+		if p := r.phasePulse20("halo-1 Sub"); p < -1 || p > 1 {
+			t.Fatalf("phasePulse20(%v) = %v out of [-1,1]", phase, p)
+		}
+	}
+	r.SetPhase(0.42)
+	a := r.phasePulse20("halo-100K Subs")
+	if b := r.phasePulse20("halo-100K Subs"); a != b {
+		t.Errorf("phasePulse20 must be deterministic for the same seed: %v != %v", a, b)
+	}
+	if c := r.phasePulse20("halo-1 Like"); a == c {
+		t.Errorf("distinct badges should not share the exact same halo phase (own phase per badge): %v", a)
+	}
+
+	edge := RGB{0xa0, 0x6a, 0x35}
+	if lo := scaleRGB(edge, 0.75); lo.R > edge.R || lo.G > edge.G || lo.B > edge.B {
+		t.Errorf("0.75 factor must darken every channel: %+v -> %+v", edge, lo)
+	}
+	if hi := scaleRGB(edge, 1.25); hi.R < edge.R || hi.G < edge.G || hi.B < edge.B {
+		t.Errorf("1.25 factor must brighten every channel: %+v -> %+v", edge, hi)
+	}
+	if bright := scaleRGB(RGB{250, 250, 250}, 1.25); bright.R != 255 || bright.G != 255 || bright.B != 255 {
+		t.Errorf("scaleRGB must clamp at 255: %+v", bright)
+	}
+}
+
+// TestShinyInkGlintFactorBounded covers effect 2's text-brightening half:
+// inkGlintFactor never returns outside [0, inkGlintStrength], is exactly
+// 0 below the threshold (most of a badge's face, given the tightened
+// gleam sigma), and saturates at inkGlintStrength rather than climbing
+// past it as the raw gleam intensity approaches its own peak of 1.
+func TestShinyInkGlintFactorBounded(t *testing.T) {
+	for _, g := range []float64{-1, 0, 0.1, inkGlintThreshold - 0.01, inkGlintThreshold, inkGlintThreshold + 0.01, 0.7, 1, 2} {
+		f := inkGlintFactor(g)
+		if f < 0 || f > inkGlintStrength {
+			t.Fatalf("inkGlintFactor(%v) = %v out of [0,%v]", g, f, inkGlintStrength)
+		}
+		if g < inkGlintThreshold && f != 0 {
+			t.Errorf("inkGlintFactor(%v) below threshold must be 0, got %v", g, f)
+		}
+	}
+	if f := inkGlintFactor(1); f != inkGlintStrength {
+		t.Errorf("inkGlintFactor should saturate at inkGlintStrength for g=1, got %v", f)
+	}
+}
+
+// TestShinySparkleCadenceDeterministicUnderPinnedPhase covers effect 3:
+// the iridescent trailing twinkle fires in exact, deterministic 3-tick
+// bursts once every sparkleCycleTicks (100 ticks ⇒ ~4s), riding r.ticks
+// (model.go's aliveTicks, forwarded via SetTicks) rather than a new
+// ticker — pinning r.ticks directly exercises that cadence without
+// needing a live animation loop.
+func TestShinySparkleCadenceDeterministicUnderPinnedPhase(t *testing.T) {
+	r := New(80, WithTruecolor(true))
+	seed := "sparkle-1K Subs"
+
+	trace := func() []int64 {
+		var on []int64
+		for tick := int64(0); tick < 3*sparkleCycleTicks; tick++ {
+			r.SetTicks(tick)
+			if r.sparkleActive(seed) {
+				on = append(on, tick)
+			}
+		}
+		return on
+	}
+
+	on := trace()
+	if len(on) != 3*int(sparkleWindowTicks) {
+		t.Fatalf("want exactly %d active ticks across 3 cycles (%d each), got %d: %v",
+			3*sparkleWindowTicks, sparkleWindowTicks, len(on), on)
+	}
+	for cycle := 0; cycle < 3; cycle++ {
+		run := on[cycle*int(sparkleWindowTicks) : (cycle+1)*int(sparkleWindowTicks)]
+		for i := 1; i < len(run); i++ {
+			if run[i] != run[i-1]+1 {
+				t.Errorf("cycle %d sparkle run not contiguous: %v", cycle, run)
+			}
+		}
+		if cycle > 0 && run[0] != on[0]+int64(cycle)*sparkleCycleTicks {
+			t.Errorf("cycle %d sparkle window drifted: want start %d, got %d",
+				cycle, on[0]+int64(cycle)*sparkleCycleTicks, run[0])
+		}
+	}
+
+	// Deterministic: the same pinned tick always gives the same answer.
+	r.SetTicks(on[0])
+	if !r.sparkleActive(seed) {
+		t.Errorf("sparkleActive must be deterministic for a pinned tick")
+	}
+	r.SetTicks(on[0])
+	if !r.sparkleActive(seed) {
+		t.Errorf("sparkleActive must reproduce the same answer on replay")
+	}
+
+	// Own phase per badge: a different face hashes to a different offset
+	// within the cycle, so its window doesn't start where seed's does.
+	other := "sparkle-1 Like"
+	if phaseOffset(seed) == phaseOffset(other) {
+		t.Fatalf("test fixture collision: pick seeds with different phaseOffset hashes")
 	}
 }
 

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 // A live-captured `ls games with platform, price, views` payload wide

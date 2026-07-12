@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 
 	"github.com/gmrdad82/pito-tui/internal/api"
 	"github.com/gmrdad82/pito-tui/internal/ui/render"
@@ -18,16 +18,32 @@ type pickerRow struct {
 	title   string
 	last    time.Time
 	isNew   bool
+	ai      bool   // conversation carries an ai-kind event — sparkle badge
 	section string // "recent" / "older" — group header painted above the first row of each
 }
 
 func pickerRows(list *api.ResumeList) []pickerRow {
 	rows := []pickerRow{{isNew: true, title: "start a new conversation"}}
+	return append(rows, resumeListRows(list)...)
+}
+
+// resumeListRows converts one /resume.json page's recent/older rows to
+// pickerRows, WITHOUT the "new conversation" sentinel — pickerRows (the
+// picker's first page) prepends that; onResume's pagination follow-on
+// (tui-needs ask 9a) appends this straight onto the rows already on
+// screen instead. Pages past the first fold their flat `rows` key into
+// Older on the wire (ResumeList.UnmarshalJSON, events.go) and rarely
+// carry Recent at all, but both slices are read identically here either
+// way, so a page that DID carry genuine recent rows still slots in
+// correctly, continuing (or starting) the RECENT/OLDER section run
+// pickerView paints from.
+func resumeListRows(list *api.ResumeList) []pickerRow {
+	var rows []pickerRow
 	for _, r := range list.Recent {
-		rows = append(rows, pickerRow{uuid: r.UUID, title: r.Label(), last: r.LastActivityAt, section: "recent"})
+		rows = append(rows, pickerRow{uuid: r.UUID, title: r.Label(), last: r.LastActivityAt, ai: r.AI, section: "recent"})
 	}
 	for _, r := range list.Older {
-		rows = append(rows, pickerRow{uuid: r.UUID, title: r.Label(), last: r.LastActivityAt, section: "older"})
+		rows = append(rows, pickerRow{uuid: r.UUID, title: r.Label(), last: r.LastActivityAt, ai: r.AI, section: "older"})
 	}
 	return rows
 }
@@ -43,8 +59,15 @@ var (
 
 // pickerView renders the conversation picker, windowed so long lists keep
 // the cursor on screen (title and help stay fixed). now anchors the
-// relative timestamps so golden frames stay deterministic.
-func pickerView(rows []pickerRow, cursor, width, height int, now time.Time, truecolor bool) string {
+// relative timestamps so golden frames stay deterministic. phase is the
+// model's global shimmer phase, threaded through so ai-flagged rows'
+// sparkle badge rides the same sweep as the rest of the house animation.
+// fetching appends the loadingDots row below the list — the picker's
+// pagination follow-on (tui-needs ask 9a) fetching its next page,
+// mirroring notificationsPanelView's loader row. A server that never
+// sends next_cursor never sets this, so its frames render byte-identical
+// to before pagination existed.
+func pickerView(rows []pickerRow, cursor, width, height int, now time.Time, truecolor bool, phase float64, fetching, canClose bool) string {
 	// Build every list line first, remembering which line the cursor is on
 	// (section headers interleave, so row index ≠ line index).
 	var lines []string
@@ -70,20 +93,28 @@ func pickerView(rows []pickerRow, cursor, width, height int, now time.Time, true
 				label = pickerCursorStyle.Render(row.title)
 			}
 		}
+		if row.ai {
+			label += " " + aiBadge(phase, truecolor)
+		}
 		line := marker + label
 		if !row.last.IsZero() {
 			line += pickerDimStyle.Render("  · " + relativeTime(row.last, now))
 		}
 		line = lipgloss.NewStyle().MaxWidth(width).Render(line)
 		if selected {
-			// The selection wears the zebra stripe, full width — the
-			// picker's cousin of the lists' candy rows.
+			// The selection wears a full-width elevated-gray highlight —
+			// retinted off the table zebra's old plum (owner 2026-07-12
+			// "align to Charm"): this is a SELECTION affordance, not
+			// decoration, so it keeps a background, just a neutral one.
 			if pad := width - 1 - lipgloss.Width(line); pad > 0 {
 				line += strings.Repeat(" ", pad)
 			}
-			line = lipgloss.NewStyle().Background(render.ColorZebra).Render(line)
+			line = lipgloss.NewStyle().Background(render.ColorElevated).Render(line)
 		}
 		lines = append(lines, line)
+	}
+	if fetching {
+		lines = append(lines, loadingDots(phase, truecolor, width))
 	}
 
 	// Window the list to the space between the fixed title (2 lines) and
@@ -115,7 +146,16 @@ func pickerView(rows []pickerRow, cursor, width, height int, now time.Time, true
 	if rule < 4 {
 		rule = 4
 	}
-	b.WriteString(pickerBadgeStyle.Render("pito") + " " + render.Brand("conversations", truecolor) + "\n")
+	head := pickerBadgeStyle.Render("pito") + " " + render.Brand("conversations", truecolor)
+	if canClose {
+		// Opened over a live conversation (/resume) — show the way back,
+		// right-edge chip like every other modal (owner 2026-07-12).
+		esc := render.Kbd("Esc", truecolor)
+		if pad := width - lipgloss.Width(head) - lipgloss.Width(esc) - 1; pad > 0 {
+			head += strings.Repeat(" ", pad) + esc
+		}
+	}
+	b.WriteString(head + "\n")
 	b.WriteString(pickerDimStyle.Render(strings.Repeat("─", rule)) + "\n")
 	if start > 0 {
 		b.WriteString(pickerDimStyle.Render(fmt.Sprintf("  ↑ %d more", start)) + "\n")

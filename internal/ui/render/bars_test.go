@@ -83,10 +83,12 @@ func TestShimmerStagger(t *testing.T) {
 	if len(seen) < len(seeds)-1 { // allow one collision, not a pile-up
 		t.Errorf("stagger buckets collapsed: %d distinct of %d", len(seen), len(seeds))
 	}
-	if p := staggered(0.9, "Rated "); p < 0 || p >= 1 {
+	r90 := &R{phase: 0.9}
+	if p := r90.staggered("Rated "); p < 0 || p >= 1 {
 		t.Errorf("staggered phase must wrap into [0,1): %f", p)
 	}
-	if staggered(0.3, "a") == staggered(0.3, "b") {
+	r30 := &R{phase: 0.3}
+	if r30.staggered("a") == r30.staggered("b") {
 		t.Error("different seeds must shift phase differently")
 	}
 }
@@ -95,8 +97,9 @@ func TestShimmerStagger(t *testing.T) {
 // offsets land exactly on the k/20 grid and distinct seeds spread out.
 func TestTwentyStepStagger(t *testing.T) {
 	seen := map[float64]bool{}
+	r0 := &R{}
 	for _, seed := range []string{"shiny-1 Sub", "shiny-2 Subs", "shiny-2K Subs", "chip-PS", "chip-Steam", "chip-Xbox"} {
-		off := staggered20(0, seed)
+		off := r0.staggered20(seed)
 		if math.Abs(off*20-math.Round(off*20)) > 1e-9 {
 			t.Errorf("offset %f for %q is off the 20-step grid", off, seed)
 		}
@@ -104,6 +107,51 @@ func TestTwentyStepStagger(t *testing.T) {
 	}
 	if len(seen) < 4 { // 6 seeds over 20 buckets: a pile-up means broken hashing
 		t.Errorf("stagger buckets collapsed: %d distinct of 6", len(seen))
+	}
+}
+
+// SetConductor(0) must reproduce today's scattered stagger exactly (the
+// conductor's resting state is a no-op); SetConductor(1) must collapse
+// every distinct seed onto the SAME phase — the synchronized "traveling
+// wave" moment the shimmer conductor sweeps in once per ~30s of alive
+// time (see internal/ui/ambient.go's conductorWeight).
+func TestConductorBlendsStagger(t *testing.T) {
+	seeds := []string{"Rated ", "The hour toll ", "@gmrdad82", "shiny-1 Sub", "chip-PS"}
+
+	rest := &R{phase: 0.42}
+	base := rest.staggered(seeds[0])
+	for _, seed := range seeds[1:] {
+		if rest.staggered(seed) == base {
+			t.Fatalf("resting conductor (0) must keep seeds scattered: %q and %q collided", seeds[0], seed)
+		}
+	}
+
+	synced := &R{phase: 0.42, conductor: 1}
+	want := synced.staggered(seeds[0])
+	for _, seed := range seeds {
+		if got := synced.staggered(seed); got != want {
+			t.Errorf("conductor=1 must synchronize every seed onto r.phase: %q got %f, want %f", seed, got, want)
+		}
+		if got := synced.staggered20(seed); got != want {
+			t.Errorf("conductor=1 must synchronize staggered20 too: %q got %f, want %f", seed, got, want)
+		}
+	}
+
+	// A mid-window weight must land strictly between the two extremes for
+	// a seed whose natural offset isn't already 0 — proof it's a lerp, not
+	// a snap.
+	seed := "The hour toll "
+	off := phaseOffset(seed)
+	if off == 0 {
+		t.Fatalf("test seed %q hashed to a zero offset; pick another", seed)
+	}
+	half := &R{phase: 0.42, conductor: 0.5}
+	gotOffset := half.staggered(seed) - half.phase
+	if gotOffset < 0 {
+		gotOffset += 1
+	}
+	if math.Abs(gotOffset-off*0.5) > 1e-9 {
+		t.Errorf("conductor=0.5 must halve the seed's natural offset: got %f, want %f", gotOffset, off*0.5)
 	}
 }
 

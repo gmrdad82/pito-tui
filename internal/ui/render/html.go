@@ -3,6 +3,7 @@ package render
 import (
 	"strings"
 
+	"charm.land/lipgloss/v2"
 	"golang.org/x/net/html"
 )
 
@@ -12,6 +13,10 @@ var blockTags = map[string]bool{
 	"h1": true, "h2": true, "h3": true, "h4": true, "table": true,
 	"ul": true, "ol": true, "blockquote": true,
 }
+
+// FlattenHTML is htmlToText for callers outside the package (the
+// notifications panel flattens server messages carrying inline tags).
+func FlattenHTML(fragment string) string { return htmlToText(fragment) }
 
 // htmlToText flattens prerendered HTML payloads ({body, html: true}) to
 // plain text: text nodes joined, block elements becoming line breaks. The
@@ -57,6 +62,14 @@ const (
 	ChipEnd   = '\uE011'
 	CoinMark  = '\uE012'
 	StarMark  = '\uE013'
+	// pito-token reference spans (2.0.0: painted cyan on the web).
+	TokenStart = '\uE014'
+	TokenEnd   = '\uE015'
+	// Bold section headers (help groups, /config groups): the web paints
+	// font-bold text-purple/text-yellow — the flattener marks them so
+	// paintShimmer can restore the weight+color.
+	HeaderStart = '\uE016'
+	HeaderEnd   = '\uE017'
 	// Shiny badges: E020 material E021 face-text E022; inner spaces ride
 	// E023 so value wrapping never splits a badge.
 	ShinyStart = '\uE020'
@@ -73,30 +86,90 @@ func walkText(n *html.Node, b *strings.Builder) {
 		switch {
 		case strings.Contains(attr(n, "class"), "pito-shiny") &&
 			!strings.Contains(attr(n, "class"), "shiny-rail"):
-			// Achievement badge (pito G127): keep material + face text as
-			// markers; the date line (extended form) stays web-only.
+			// Achievement badge (pito G127): material + face text as
+			// markers, plus — when present — a THIRD ShinySep segment
+			// carrying the unlock date's raw web text ("Jun '26",
+			// badge_component.rb's unlocked_on.strftime("%b '%y")).
+			// Compact badges (detail card strips, form: :compact) never
+			// render a __date child at all, so they fall straight through
+			// to the two-segment payload exactly as before — no branching
+			// on context needed here, the source HTML already encodes
+			// compact vs extended by whether this span exists. tokens.go's
+			// paintTokens turns the raw date text into the TUI's own
+			// day-aware format (shinyDateSuffix).
 			b.WriteRune(ShinyStart)
 			b.WriteString(attr(n, "data-material"))
 			b.WriteRune(ShinySep)
-			var face strings.Builder
+			var face, date strings.Builder
 			for child := n.FirstChild; child != nil; child = child.NextSibling {
 				if child.Type == html.ElementNode && strings.Contains(attr(child, "class"), "__date") {
+					// Walk the date span's OWN children, not the span via
+					// walkText(child, …) itself — its class
+					// ("pito-shiny__date block") contains the substring
+					// "pito-shiny", which would re-match this very case and
+					// wrap the date text in a second, nested marker
+					// sequence instead of plain text.
+					for dchild := child.FirstChild; dchild != nil; dchild = dchild.NextSibling {
+						walkText(dchild, &date)
+					}
 					continue
 				}
 				walkText(child, &face)
 			}
-			for _, ru := range strings.TrimSpace(face.String()) {
-				if ru == ' ' {
-					ru = ShinySpace
-				}
-				b.WriteRune(ru)
+			escapeSpaces := func(s string) string {
+				// Inner spaces ride ShinySpace so wrapPlain's Fields-based
+				// word wrap (detail.go) never splits a badge — the whole
+				// ShinyStart…ShinyEnd run must stay ONE word.
+				return strings.Map(func(ru rune) rune {
+					if ru == ' ' {
+						return ShinySpace
+					}
+					return ru
+				}, strings.TrimSpace(s))
+			}
+			b.WriteString(escapeSpaces(face.String()))
+			if d := escapeSpaces(date.String()); d != "" {
+				b.WriteRune(ShinySep)
+				b.WriteString(d)
 			}
 			b.WriteRune(ShinyEnd)
 			return
 		case strings.Contains(attr(n, "class"), "pito-help-block"):
-			// Help blocks are pre-formatted (white-space: pre on the web):
-			// their newlines ARE the layout — keep them verbatim.
+			// Help blocks are pre-formatted (white-space: pre-wrap on the
+			// web): their newlines ARE the layout — keep them verbatim.
 			preText(n, b)
+			return
+		case strings.Contains(attr(n, "class"), "whitespace-pre-wrap"):
+			// Free-text prose (video/channel descriptions, tags) sets the
+			// same white-space: pre-wrap rule: the author's blank lines
+			// ARE the paragraph breaks, not incidental source formatting.
+			// The default TextNode case below collapses "\n" to a space
+			// (correct for ordinary flow text) which glues every
+			// paragraph into one wall — preText keeps them verbatim
+			// instead, same contract as the help block above.
+			preText(n, b)
+			return
+		case strings.Contains(attr(n, "class"), "font-bold") &&
+			(strings.Contains(attr(n, "class"), "text-purple") || strings.Contains(attr(n, "class"), "text-yellow")):
+			// Section headers get a breath of air above them (the web's
+			// section rhythm) and carry their bold color through markers.
+			b.WriteString("\n\n")
+			b.WriteRune(HeaderStart)
+			for child := n.FirstChild; child != nil; child = child.NextSibling {
+				walkText(child, b)
+			}
+			b.WriteRune(HeaderEnd)
+			if blockTags[n.Data] || n.Data == "div" {
+				b.WriteString("\n")
+			}
+			return
+		case strings.Contains(attr(n, "class"), "pito-token"):
+			// Reference tokens ("7d", "@handle") — cyan on the web (2.0.0).
+			b.WriteRune(TokenStart)
+			for child := n.FirstChild; child != nil; child = child.NextSibling {
+				walkText(child, b)
+			}
+			b.WriteRune(TokenEnd)
 			return
 		case strings.Contains(attr(n, "class"), "pito-subject-shimmer"):
 			b.WriteRune(ShimmerStart)
@@ -159,15 +232,47 @@ func walkText(n *html.Node, b *strings.Builder) {
 	}
 }
 
-// preText extracts text preserving newlines (pre-formatted blocks).
+// preText extracts text preserving newlines (pre-formatted / pre-wrap
+// blocks: pito-help-block's man pages, and video/channel description and
+// tags prose). Section-header spans — the web's "text-purple font-bold" /
+// "text-yellow font-bold" — are painted to match; every other span (cyan
+// tokens, dim copy, the bare timestamp slot) stays plain runes. That's the
+// one parity gap named for help blocks (the web's colored section
+// rhythm) — not a general markup-fidelity pass.
 func preText(n *html.Node, b *strings.Builder) {
 	if n.Type == html.TextNode {
 		b.WriteString(n.Data)
 		return
 	}
+	if n.Type == html.ElementNode {
+		if style, ok := headerSpanStyle(attr(n, "class")); ok {
+			var inner strings.Builder
+			for child := n.FirstChild; child != nil; child = child.NextSibling {
+				preText(child, &inner)
+			}
+			b.WriteString(style.Render(inner.String()))
+			return
+		}
+	}
 	for child := n.FirstChild; child != nil; child = child.NextSibling {
 		preText(child, b)
 	}
+}
+
+// headerSpanStyle recognizes a pito-help-block section-header span (the
+// web's "text-purple font-bold" — server-side lib/pito/message_builder/
+// man_page.rb's `header` helper; "text-yellow font-bold" covers any sibling
+// payload that colors its headers the other reserved accent) and returns
+// its paint style. classStyle (render.go) already maps the color from the
+// class hint; only the font-bold → Bold(true) pairing is added here.
+func headerSpanStyle(class string) (lipgloss.Style, bool) {
+	if !strings.Contains(class, "font-bold") {
+		return lipgloss.Style{}, false
+	}
+	if !strings.Contains(class, "text-purple") && !strings.Contains(class, "text-yellow") {
+		return lipgloss.Style{}, false
+	}
+	return classStyle(class).Bold(true), true
 }
 
 func attr(n *html.Node, name string) string {

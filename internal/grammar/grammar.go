@@ -1,7 +1,7 @@
 // Package grammar loads a machine-readable snapshot of pito's chat/slash
-// grammar — parsed from the pito Rails app's config/pito/verbs.yml by
-// tools/verbsgen — so pito-tui's tests and docs can assert against the real
-// verb/alias/segment/capability names instead of hardcoding copies that rot
+// grammar — parsed from the pito Rails app's config/pito/tools.yml by
+// tools/toolsgen — so pito-tui's tests and docs can assert against the real
+// tool/alias/segment/capability names instead of hardcoding copies that rot
 // when pito renames or adds things.
 //
 // THIS PACKAGE IS FOR TESTS AND TOOLS ONLY. It must never be imported from
@@ -9,15 +9,20 @@
 // grammar knowledge, and grammar_test.go enforces that guarantee.
 //
 // Regenerate the snapshot with `go generate ./...` (or directly via
-// `go run ./tools/verbsgen`) after pito's verbs.yml changes.
+// `go run ./tools/toolsgen`) after pito's tools.yml changes.
 //
-// The snapshot is PINNED to the pito release this TUI version pairs with —
-// the PITO_REF below names that tag, and verbsgen reads the committed blob
-// (git show <ref>:config/pito/verbs.yml), never the working tree, so WIP in
-// the pito checkout can't leak in. Bump the ref when adopting a new release.
+// The snapshot is normally PINNED to the pito release this TUI version
+// pairs with — PITO_REF names that tag and toolsgen reads the committed
+// blob (git show <ref>:config/pito/tools.yml), so WIP in the pito
+// checkout can't leak in.
+//
+// PROVISIONAL (2026-07-11): pito 2.0.0 is mid-release — tools.yml exists
+// only in the owner's staged tree, so the ref is temporarily WORKTREE.
+// RE-PIN to the pito 2.0.0 tag (and regenerate) at the owner's launch
+// ping, BEFORE shipping v1.3.0 (plan W1.1, docs/claude/2.0.0.md).
 package grammar
 
-//go:generate env PITO_REF=v1.6.0 go run github.com/gmrdad82/pito-tui/tools/verbsgen
+//go:generate env PITO_REF=WORKTREE go run github.com/gmrdad82/pito-tui/tools/toolsgen
 
 import (
 	_ "embed"
@@ -28,12 +33,12 @@ import (
 //go:embed grammar.json
 var grammarJSON []byte
 
-// Grammar is the root of the generated snapshot — see tools/verbsgen/main.go
-// for the code that produces it from verbs.yml, and grammar.json for the
+// Grammar is the root of the generated snapshot — see tools/toolsgen/main.go
+// for the code that produces it from tools.yml, and grammar.json for the
 // current snapshot.
 type Grammar struct {
 	Source         Source                          `json:"source"`
-	Verbs          []Verb                          `json:"verbs"`
+	Tools          []Tool                          `json:"tools"`
 	Segments       map[string]map[string][]Segment `json:"segments"`
 	Capabilities   Capabilities                    `json:"capabilities"`
 	Vocabularies   map[string]Vocabulary           `json:"vocabularies"`
@@ -46,30 +51,29 @@ type Source struct {
 	Note string `json:"note"`
 }
 
-// Verb is one entry from verbs.yml's top-level `verbs:` map.
-type Verb struct {
+// Tool is one entry from tools.yml's top-level `tools:` map.
+type Tool struct {
 	Name    string   `json:"name"`
 	Aliases []string `json:"aliases"`
-	// Auth is the verb's auth requirement (e.g. "session",
+	// Auth is the tool's auth requirement (e.g. "session",
 	// "authenticated_only", "unauthenticated_only"). Resolution order:
-	// top-level `auth:` (chat verbs), then `slash.auth` (slash-only verbs),
+	// top-level `auth:` (chat tools), then `slash.auth` (slash-only tools),
 	// then `chat.auth`. Empty when none of those are set.
 	Auth string `json:"auth,omitempty"`
-	// HasChat/HasSlash reflect presence of a `chat:`/`slash:` block on the
-	// verb — not the (redundant) `availability:` block, which verbsgen
-	// ignores.
+	// HasChat/HasSlash come from the tool's `availability:` block when
+	// declared (2.0.0+), falling back to `chat:`/`slash:` block presence.
 	HasChat  bool `json:"has_chat"`
 	HasSlash bool `json:"has_slash"`
-	// Internal marks reply verbs not shown in user-facing palettes (e.g.
+	// Internal marks reply tools not shown in user-facing palettes (e.g.
 	// `consume`).
 	Internal bool `json:"internal,omitempty"`
-	// UniversalReply is false only when the verb opts out of the global
+	// UniversalReply is false only when the tool opts out of the global
 	// share/revoke reply actions via `universal_reply: false` (e.g. `sync`).
 	UniversalReply bool          `json:"universal_reply"`
 	ReplyTargets   []ReplyTarget `json:"reply_targets"`
 }
 
-// ReplyTarget is one entry from a verb's `reply.targets` map.
+// ReplyTarget is one entry from a tool's `reply.targets` map.
 type ReplyTarget struct {
 	Target  string   `json:"target"`
 	Mode    string   `json:"mode"`
@@ -87,7 +91,7 @@ type Segment struct {
 	EmitIf      string   `json:"emit_if,omitempty"`
 }
 
-// Capabilities holds the `list` verb's capabilities block: the columns and
+// Capabilities holds the `list` tool's capabilities block: the columns and
 // filters available per noun (games/vids/channels).
 type Capabilities struct {
 	Columns map[string][]Column `json:"columns"`
@@ -126,7 +130,7 @@ type Vocabulary struct {
 
 // UniversalReplyAction is one entry from the top-level `universal_reply:`
 // map (share/revoke) — the reply actions offered on followupable events
-// unless a verb opts out (see Verb.UniversalReply).
+// unless a tool opts out (see Tool.UniversalReply).
 type UniversalReplyAction struct {
 	Name    string   `json:"name"`
 	Aliases []string `json:"aliases"`

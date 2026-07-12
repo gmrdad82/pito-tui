@@ -3,7 +3,7 @@ package render
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"golang.org/x/net/html"
 )
 
@@ -161,7 +161,7 @@ func (r *R) rail(ticks []railTick) string {
 		switch {
 		case tick.next && r.truecolor:
 			// The next threshold breathes: brightness rides the phase.
-			pulse := (1 + phasePulse(r.phase, tick.material)) / 2
+			pulse := (1 + r.phasePulse(tick.material)) / 2
 			c := RGB{
 				uint8(float64(m.hi.R)*0.45 + float64(m.hi.R)*0.55*pulse),
 				uint8(float64(m.hi.G)*0.45 + float64(m.hi.G)*0.55*pulse),

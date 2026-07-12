@@ -1,0 +1,49 @@
+{
+ "body": "Queue status",
+ "table_rows": [
+  {
+   "key": "Workers:",
+   "value": "0",
+   "key_class": "text-fg-dim",
+   "value_class": "text-red"
+  },
+  {
+   "key": "Ready:",
+   "value": "0",
+   "key_class": "text-fg-dim",
+   "value_class": "text-green"
+  },
+  {
+   "key": "Scheduled:",
+   "value": "0",
+   "key_class": "text-fg-dim",
+   "value_class": "text-green"
+  },
+  {
+   "key": "Running:",
+   "value": "0",
+   "key_class": "text-fg-dim",
+   "value_class": "text-green"
+  },
+  {
+   "key": "Failed:",
+   "value": "0",
+   "key_class": "text-fg-dim",
+   "value_class": "text-green"
+  },
+  {
+   "key": "Paused:",
+   "value": "none",
+   "key_class": "text-fg-dim",
+   "value_class": "text-fg"
+  },
+  {
+   "key": "Recurring:",
+   "value": "13",
+   "key_class": "text-fg-dim",
+   "value_class": "text-fg"
+  }
+ ],
+ "origin_tool": "jobs",
+ "reply_handle": "eta-4363"
+}

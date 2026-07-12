@@ -27,6 +27,13 @@ const Subprotocol = "actioncable-v1-json"
 const (
 	TypeEventAppend  = "event.append"
 	TypeEventReplace = "event.replace"
+	// TypeEventAiBlock and TypeEventAiStatus are the AI streaming shapes
+	// (tui-needs.md ask 8): a typed block appended/replaced at Index within
+	// EventID's block list, and an ephemeral status line ("Scouring the
+	// internet…") for the same in-flight event. Block stays raw — the UI
+	// layer owns decoding the typed block object.
+	TypeEventAiBlock  = "event.ai_block"
+	TypeEventAiStatus = "event.ai_status"
 )
 
 // StreamMessage is one broadcast from the conversation's JSON stream.
@@ -38,6 +45,15 @@ type StreamMessage struct {
 	// message carries no event). Nil on event.* messages.
 	Context       *api.ContextMeter `json:"context"`
 	Notifications *api.NotifCount   `json:"notifications"`
+	// event.ai_block / event.ai_status fields. EventID identifies the
+	// in-flight AI event; Index positions Block within its block list
+	// (zero value is a valid index, so it also matches an omitted field).
+	// Block is kept raw — the UI layer owns decoding the typed block
+	// object. Text carries the ai_status line. All zero/nil on other types.
+	EventID int64           `json:"event_id"`
+	Index   int             `json:"index"`
+	Block   json.RawMessage `json:"block"`
+	Text    string          `json:"text"`
 }
 
 type ConnState int

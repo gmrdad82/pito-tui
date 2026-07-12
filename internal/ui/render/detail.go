@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"golang.org/x/net/html"
 )
 
@@ -430,6 +430,13 @@ func (r *R) detailCard(c *detailCard) string {
 		parts = append(parts, r.kvRows(c.pairs, width, true))
 	}
 
+	// Score/TTB bars cap at scoreBarCap cells INSIDE the column (owner
+	// rule) — a wide contentWidth must not stretch them the way it
+	// stretches the kv grid and prose above.
+	barWidth := width
+	if barWidth > scoreBarCap {
+		barWidth = scoreBarCap
+	}
 	var bars []string
 	if c.score != nil {
 		label := c.score.label
@@ -439,10 +446,10 @@ func (r *R) detailCard(c *detailCard) string {
 		// The server ljusts the score/TTB labels to a shared width and
 		// the web adds a CSS gap — one space is that gap, for both bars.
 		label += " "
-		bars = append(bars, r.ScoreBar(label, c.score.score, width))
+		bars = append(bars, r.ScoreBar(label, c.score.score, barWidth))
 	}
 	if c.ttb != nil {
-		bars = append(bars, r.ttbBlock(c.ttb, width))
+		bars = append(bars, r.ttbBlock(c.ttb, barWidth))
 	}
 	if len(bars) > 0 {
 		parts = append(parts, r.hairline(width), strings.Join(bars, "\n"))
@@ -464,10 +471,11 @@ func (r *R) hairline(width int) string {
 	return lipgloss.NewStyle().Foreground(ColorFaint).Render(strings.Repeat("─", width))
 }
 
-// kvRows renders label/value pairs — zebra-striped for the details
-// table, plain for the Stats/Shinies block. Long values wrap INSIDE the
-// value column (the web grid's behavior); every wrapped line keeps its
-// row's stripe.
+// kvRows renders label/value pairs — alternating gray VALUE foregrounds
+// for the details table (Charm's own canonical lipgloss/table look, owner
+// 2026-07-12 "align to Charm" — no background stripe), plain for the
+// Stats/Shinies block. Long values wrap INSIDE the value column (the web
+// grid's behavior); every wrapped line keeps its row's alternation.
 func (r *R) kvRows(pairs [][2]string, width int, zebra bool) string {
 	keyWidth := 0
 	for _, pair := range pairs {
@@ -482,14 +490,19 @@ func (r *R) kvRows(pairs [][2]string, width int, zebra bool) string {
 	var rows []string
 	for i, pair := range pairs {
 		key, value := pair[0], stripShimmerMarkers(pair[1])
+		// Keys stay dim regardless of alternation — only the value column
+		// carries the gray stripe (matches Charm's own header/body split).
 		keyStyle := lipgloss.NewStyle().Foreground(ColorDim)
 		valStyle := lipgloss.NewStyle()
-		if pair[1] != value { // value carried shimmer markers → accent it
+		switch {
+		case pair[1] != value:
+			// Value carried shimmer markers → accent it. Meaning, not
+			// decoration — the gray alternation below never overrides it.
 			valStyle = valStyle.Foreground(ColorAccent)
-		}
-		if zebra && i%2 == 1 {
-			keyStyle = keyStyle.Background(ColorZebra)
-			valStyle = valStyle.Background(ColorZebra)
+		case zebra && i%2 == 1:
+			valStyle = valStyle.Foreground(ColorDim)
+		case zebra:
+			valStyle = valStyle.Foreground(ColorFaint)
 		}
 		for li, vline := range wrapPlain(value, valWidth) {
 			keyCell := strings.Repeat(" ", keyWidth+3)
@@ -498,9 +511,6 @@ func (r *R) kvRows(pairs [][2]string, width int, zebra bool) string {
 				keyCell = " " + key + strings.Repeat(" ", pad) + "  "
 			}
 			line := keyStyle.Render(keyCell) + r.paintTokens(vline, valStyle)
-			if fill := width - lipgloss.Width(line); fill > 0 && zebra && i%2 == 1 {
-				line += lipgloss.NewStyle().Background(ColorZebra).Render(strings.Repeat(" ", fill))
-			}
 			rows = append(rows, line)
 		}
 	}
@@ -530,11 +540,12 @@ func wrapPlain(text string, width int) []string {
 // ttbBlock renders the TTB bar with its hour-values row and legend — the
 // three-row anatomy of the web component.
 func (r *R) ttbBlock(t *ttbData, width int) string {
+	// COPY LAW: the label is the server's (a Pito::Copy pool — "Time
+	// price", "Hours needed", …); no label sent → the bar stands alone.
 	label := t.label
-	if label == "" {
-		label = "Time to beat"
+	if label != "" {
+		label += " " // the web's CSS gap — matches the score bar's spacing
 	}
-	label += " " // the web's CSS gap — matches the score bar's spacing
 	var ticks []BarTick
 	for _, tick := range t.ticks {
 		bt := BarTick{Pct: tick.pct, Color: tickColor(tick.key), Bold: true}

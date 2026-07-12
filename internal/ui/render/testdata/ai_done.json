@@ -1,0 +1,40 @@
+{
+  "status": "done",
+  "blocks": [
+    {"type": "text", "text": "Elden Ring is a great pick for your backlog."},
+    {"type": "kv_table", "rows": [
+      ["Genre", "Action RPG"],
+      ["Released", {"v": "2022-02-25", "format": "date"}]
+    ]},
+    {"type": "table", "header": ["Game", "Score"], "rows": [
+      ["Elden Ring", "96"],
+      ["Hades II", "91"]
+    ]},
+    {"type": "suggestion", "command": "show game 12", "note": "top pick"},
+    {"type": "suggestion", "command": "ls games with genre RPG"},
+    {"type": "sparkline", "series": [1, 2, 3, 4, 5], "label": "views/day"},
+    {"type": "chart", "viz": "bar", "label": "Completion split", "data": {
+      "bars": [
+        {"label": "Main", "pct": 60, "color": "green"},
+        {"label": "Extras", "pct": 40, "color": "blue"}
+      ]
+    }},
+    {"type": "score", "value": 94, "label": "Metacritic"},
+    {"type": "ttb", "label": "Time to beat", "levels": [
+      {"label": "Main", "hours": 31},
+      {"label": "Extras", "hours": 71},
+      {"label": "Completionist", "hours": 124}
+    ], "current": {"label": "Recorded", "hours": 12.5}},
+    {"type": "media", "entity": "vid", "id": 42, "variant": "thumb"},
+    {"type": "mystery_block", "note": "novelty", "matrix": {"rows": 2}}
+  ],
+  "prompt": "what should I play next",
+  "model": "claude-sonnet-5",
+  "provider": "anthropic",
+  "effort": "medium",
+  "cost_amount": 0.03,
+  "cost_currency": "USD",
+  "reply_handle": "#ai-7",
+  "reply_consumed": false,
+  "anchor_event_id": 123
+}

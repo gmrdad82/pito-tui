@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 func TestSimilarStripRendersScoredRows(t *testing.T) {
@@ -71,7 +71,7 @@ func TestPendingChannelsWaitsQuietly(t *testing.T) {
 	payload := `{"body":"<span class=\"pito-game-enhanced-message__intro\">Where this game is concentrated</span><div class=\"pito-metric\">⠀⠀⠀⣿⣿⠀</div>","html":true,
 		"channel_distribution":{"status":"pending","intro":"Where this game is concentrated"}}`
 	out := stripANSI(plain().Event(event("system", payload)))
-	if !strings.Contains(out, "mapping the territory…") {
+	if !strings.Contains(out, strings.Repeat("⠂", 42)) {
 		t.Errorf("pending note missing:\n%s", out)
 	}
 	if strings.Contains(out, "⣿") || strings.Contains(out, "⠀") {

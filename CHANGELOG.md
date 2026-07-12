@@ -4,6 +4,195 @@ All notable changes to pito-tui are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); from 1.0.0 onward the
 project follows [Semantic Versioning](https://semver.org/).
 
+## [2.0.0] — 2026-07-12
+
+The AI moved in, the grammar became tools, every screen answered the
+web eye to eye, and the whole terminal came alive — the ambassador
+release, shipped in step with pito 2.0.0.
+
+### Added
+
+- **@ai, first-class** — pito 2.0.0's assistant renders natively:
+  typed content blocks (text with the content-ontology inline markup —
+  bold, italic, the four sanctioned colors, kaomoji; kv tables with
+  typed values where price wears the coin glyphs; data tables;
+  42-cell sparklines; area/bar/heatmap charts; the braille heart,
+  ported dot-for-dot from the web's own curve; score and time-to-beat
+  gauges; numbered suggestions), all under the AI chrome: a traveling
+  purple→pito-blue gradient bar, and a `✦ model · cost` receipt line
+  that shows the provider's reported cost or nothing at all. Media
+  blocks are skipped by rule — no images, ever.
+- **Live block streaming** — @ai answers land block by block as the
+  model produces them, with the server's playful status lines
+  shimmering in the pending message; the final payload stays
+  authoritative. Replies continue threads: Shift+R on an ai message
+  prefills `#handle @ai `.
+- **The notifications panel** — `/notifications` opens a picker-style
+  overlay: ● unread / ○ read rows with day-aware stamps, fifty at a
+  time, the shimmer-dots loader fetching more as you scroll.
+- **A living conversation picker** — conversations with AI messages
+  wear a shimmering ✦; the list lazy-loads through the server's new
+  cursor pagination instead of drowning in hundreds of rows.
+- **Scope cyclers, fully armed** — chat.json now serves channels and
+  scope, so Shift+Tab cycles channels and Ctrl+Space cycles periods
+  exactly like the web chatbox.
+- **The ambassador wave** — a whisper-faint braille star-field for the
+  margin the optional width cap leaves free (dormant while the app
+  runs full-width); a shimmer conductor that periodically
+  phases every gleam on screen into one traveling wave; status-bar
+  ripples on live updates and an odometer-rolling unread badge; error
+  shakes, armed-confirmation glints, self-typing ghost hints, a
+  braille scroll thumb; a gradient-swept braille PITO splash; the `?`
+  keymap footer in quiet kbd chips; OSC window titles and real
+  clickable share links — every effect behind its own kill-switch.
+- **`--tour`** — a self-playing walkthrough that types real commands
+  through the real send path with caption cards, ends interactive,
+  and never touches the AI provider unless `--tour-ai` says so.
+- **The ctrl+k command palette** — the web's own command list, fuzzy
+  subsequence search and all: Enter pre-fills the prompt with the
+  command (placeholders included) and leaves the sending to you; an
+  unauthenticated session sees exactly one offer, `/login`.
+- **The show game / show vid picker** — the bare forms open a searching,
+  50-a-page picker fed by pito's new picker endpoints; Enter sends the
+  command like the web sidebar does. `/resume` opens the conversations
+  picker the same way, Esc chip on the right edge of every modal.
+- **A living sky** — two parallax layers of braille stars drift through
+  the empty space under short conversations and behind the boot logo,
+  moving even at rest; the boot tip decodes in Crush-style from braille
+  static; the animation loop runs a full 60fps (transcript shimmer on
+  a 30fps beat, chrome at the full rate); keyboard chips gleam with the
+  brand ramp on an elevated bed.
+- **Notifications mark themselves read** — arriving on an unread row
+  reads it (Enter toggles), the ✉ badge rolls live and is always
+  present once signed in; boot lands on a fresh chat like the web's
+  start screen instead of the conversations list.
+- **Input history on ↑/↓** — oh-my-zsh-style prefix recall, exactly
+  the web chatbox's: the first ↑ snapshots what you've typed and walks
+  only the entries that start with it, ↓ returns through newer ones to
+  your draft, and the list seeds itself from the conversation's own
+  echoes so it survives restarts.
+
+### Changed
+
+- **Verbs are tools** — the grammar snapshot generator reads pito's
+  `config/pito/tools.yml` (toolsgen, pinned to the paired pito
+  release), the inventory and live contracts speak "tool", and the
+  wire sweeps accept both old and new field spellings.
+- **Full-width rendering** — the conversation, meter, prompt and
+  status bar all stretch to the terminal's real width (charts stay 42
+  cells, gauges cap at 56), and the server is told that width so its
+  tables use it too. The earlier 100-column containment experiment
+  survives behind a build flag, off by default.
+- **Mouse wheel scrolling** — the wheel scrolls the conversation
+  (three lines a notch, waking the braille scroll thumb) and moves the
+  cursor in the notifications overlay.
+- **Select to copy** — drag over any text Claude-Code-style: the
+  selection highlights live, lands on the system clipboard the moment
+  you release (OSC 52), and a small toast on the status row confirms it
+  with one of the owner's fifty quips ("Yoinked to your clipboard.",
+  "Copied. It's your problem now.") — the pool lives in pito's copy
+  file like every other word. The terminal's own selection stays a
+  shift+drag away.
+- **Charm v2 stack** — bubbletea, lipgloss and bubbles moved to the
+  charm.land v2 generation (new cell-diffing renderer); goldens
+  proved the move pixel-invisible.
+- **Tables, aligned to Charm** — bold purple header rows, purple
+  rules, alternating neutral-gray row foregrounds; the plum background
+  zebra is gone everywhere (detail cards included), and selections sit
+  on a neutral elevated gray.
+- **Timestamps grew days** — today stays `15:04`; the rest of the
+  year reads `6 Jul 15:04`; other years `2 Jan '25 15:04`.
+- **Analyze charts grew up** — every stash metric renders the full
+  ticked area chart (duration ticks as M:SS, watched-percent on a
+  fixed 0–100% axis, date x-ticks), keeping the TUI's own
+  total/prev/target caption; breakdowns draws its whole payload now —
+  demographic and device bar groups with colored legends, the
+  day-of-week heatmap, retention and comments curves.
+- **Subjects shimmer pink, references shimmer cyan** — each base paired
+  with a band mathematically derived from it (+24° of hue, a touch of
+  light), theme-agnostic by construction; the orange era is over.
+- **Charts came alive** — braille fills ride the web's own red→orange→
+  yellow→green health ramp against each chart's data-driven target
+  anchor (no target means all green), with the white glint still
+  sweeping over the color; help and /config section headers
+  render bold purple with proper breathing room; multi-paragraph
+  descriptions keep their paragraphs.
+- **Reply affordances match the web** — `#handle shift+r` with a
+  quiet kbd chip, one shared renderer for every message kind.
+- **The thinking indicator grew up** — a braille spinner beside the
+  web's own cycling verbs ("Frobnicating…", "Bribing the cache…" —
+  Capitalized, network-shimmered, replayed from the payload's shared
+  time formula so a browser on the same turn shows the same word),
+  resolving to a seeded kaomoji and the past-tense receipt
+  ("\o/ Read tea leaves for 1.02s"). The pools ride a new copygen
+  snapshot of pito's committed copy — the client never authors words
+  (owner's copy law); the analyze/glance pending fills hold their space
+  with the web's own dot-grid canvas, and the send-window comet dropped
+  its invented "thinking…" caption (the web shows none).
+- **The status bar slimmed to the bone** — one dot, one tag: `■ dev`
+  against a development server (dev.pitomd.com or localhost), `■ 2.0.0`
+  against a released one (the tag fetched from the server's own
+  /version, refreshed on every reconnect), pito's word "tarnished"
+  while logged out. The nickname is gone — pito cut the whole "me"
+  concept and the TUI followed. The dot: red while unauthenticated,
+  orange while an authenticated session connects or drops, green when
+  live — taking a single breath per delivered cable message instead of
+  idling. The conversation name lives where the web puts it (the meter
+  row), the cycler hints moved down beside the status dot, and every
+  modal wears its Esc chip on the right edge.
+- **The boot screen is pito's** — the exact block-art logo in brand
+  blue, and a start-screen tip from pito's own fifty ("Type /help when
+  you inevitably forget everything.") instead of the client-made
+  tagline; the cycler hints above the prompt wear the web's kbd-chip +
+  value shape, red `none` included.
+- **Shinies gleam like they mean it** — a breathing halo, a sharper
+  material-tinted gleam that inks the face as it crosses, an
+  iridescent ✦ sparkle reserved for the iridescent materials (pearl,
+  opal, diamond), and extended badges now carry their unlock month.
+
+### Removed
+
+- The drawer-slide and grow-in spring animations — smoke-tested and cut
+  for cause: the slide's anchoring flickered on short panels and the
+  bounce read as delay on high-refresh displays. Overlays open settled,
+  new content lands at full height, and the follow-glide carries the
+  arrival motion. The boot splash's rise and the `?` footer's accordion
+  keep their springs.
+
+### Fixed
+
+- `/resume` opens the TUI's own conversation picker (the server now
+  reserves its version for browsers), and esc closes it back into the
+  conversation it was opened over.
+- The suggestions palette overlays the conversation instead of
+  reflowing it — no more layout jumps while typing commands.
+- The conversation is virtualized: only visible lines are rendered,
+  measured, or animated — a thousand-turn scrollback types and scrolls
+  like an empty one, and off-screen shimmer costs nothing.
+- Ctrl+C asks before it quits: the first press arms a two-second
+  "again to quit" window on the status row.
+- New content glides the conversation to the bottom instead of
+  snapping; chrome-only animation frames stopped re-rendering the whole
+  scrollback 25 times a second.
+- Resolved thinking lines and settled confirmations no longer hold
+  their turns on the animation loop — a long scrollback types smoothly
+  again instead of re-rendering the whole transcript 25 times a second.
+- The vim scroll letters (j/k/g/G at an empty prompt) are gone — 2.0.0
+  commands start with them, so "glance" typed at rest reached the
+  server as "lance". Scrolling keeps ctrl+u/d, pgup/pgdn, shift+↑/↓
+  and the mouse wheel; every letter now types.
+- `/jobs status` renders its queue table (kv-hash rows with the
+  web's own class colors) instead of dropping it.
+- Old servers see byte-identical requests despite the new
+  pagination-aware clients.
+
+### Known
+
+- A conversation stacking many simultaneously-shimmering turns (the
+  tour does this deliberately) grows the per-tick re-render cost —
+  the wire is cheap on the v2 renderer, the string rebuild is not;
+  a render-cache sweep is queued for 2.0.x.
+
 ## [1.2.0] — 2026-07-11
 
 The grammar comes home, the chatbox learns the web's hands, and every

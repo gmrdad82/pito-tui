@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"golang.org/x/net/html"
 )
 
@@ -220,8 +220,13 @@ func parseGameChannels(fragment string) (*gameChannels, bool) {
 }
 
 // scoredRows renders "label [====score|==]" rows with one shared label
-// width so every bracket aligns — the terminal's card strip.
+// width so every bracket aligns — the terminal's card strip. The bars
+// cap at scoreBarCap cells INSIDE the column (owner rule), same as
+// detail.go's show-card bars.
 func (r *R) scoredRows(rows []scoredRow, width int) string {
+	if width > scoreBarCap {
+		width = scoreBarCap
+	}
 	labelWidth := 0
 	for _, row := range rows {
 		if w := lipgloss.Width(row.label); w > labelWidth {
@@ -260,11 +265,6 @@ func (r *R) shareBars(shares []shareRow, width int) string {
 		if filled > barWidth {
 			filled = barWidth
 		}
-		if r.revealFrac < 1 { // grow-in: the fill extends with the reveal
-			if cut := int(r.revealFrac*float64(barWidth) + 0.5); filled > cut {
-				filled = cut
-			}
-		}
 		outlineStyle := lipgloss.NewStyle().Foreground(ColorFaint)
 		if r.truecolor {
 			outlineStyle = outlineStyle.Foreground(hex(dimRGB(s.color)))
@@ -274,7 +274,7 @@ func (r *R) shareBars(shares []shareRow, width int) string {
 			st := lipgloss.NewStyle()
 			if r.truecolor {
 				// The pito-blue band sweeps the fill, web-style.
-				st = st.Foreground(hex(bandBoost(s.color, i, barWidth, staggered(r.phase, s.label))))
+				st = st.Foreground(hex(bandBoost(s.color, i, barWidth, r.staggered(s.label))))
 			}
 			bar += st.Render("⣿")
 		}
@@ -352,5 +352,6 @@ func channelsIntro(payload []byte) string {
 	if json.Unmarshal(payload, &p) == nil && p.ChannelDistribution.Intro != "" {
 		return htmlToText(p.ChannelDistribution.Intro)
 	}
-	return "Where this game lives"
+	// COPY LAW: no server intro → no intro.
+	return ""
 }

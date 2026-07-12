@@ -9,7 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// grammarDoc parses a verbs.yml-shaped snippet into its root mapping node.
+// grammarDoc parses a tools.yml-shaped snippet into its root mapping node.
 func grammarDoc(t *testing.T, src string) *yaml.Node {
 	t.Helper()
 	var doc yaml.Node
@@ -31,7 +31,7 @@ vocabularies:
   genres:
     members: [rpg, arcade]
     synonyms: { "role-playing": rpg }
-verbs:
+tools:
   list:
     aliases: [ls]
     auth: session
@@ -68,11 +68,11 @@ verbs:
 		t.Errorf("vocabulary misparsed: %+v", vocab)
 	}
 
-	var verbs []verb
+	var tools []tool
 	var caps capabilities
 	segs := map[string]map[string][]segment{}
-	for _, kv := range mapPairs(mapGet(root, "verbs")) {
-		verbs = append(verbs, buildVerb(kv[0].Value, kv[1]))
+	for _, kv := range mapPairs(mapGet(root, "tools")) {
+		tools = append(tools, buildTool(kv[0].Value, kv[1]))
 		if n := mapGet(kv[1], "segments"); n != nil {
 			segs[kv[0].Value] = buildSegments(n)
 		}
@@ -81,15 +81,15 @@ verbs:
 		}
 	}
 
-	if verbs[0].Name != "list" || verbs[0].Aliases[0] != "ls" || !verbs[0].HasChat || verbs[0].HasSlash {
-		t.Errorf("list verb misparsed: %+v", verbs[0])
+	if tools[0].Name != "list" || tools[0].Aliases[0] != "ls" || !tools[0].HasChat || tools[0].HasSlash {
+		t.Errorf("list tool misparsed: %+v", tools[0])
 	}
-	if verbs[1].ReplyTargets[0].Target != "game_detail" || verbs[1].ReplyTargets[0].Aliases[0] != "detail" {
-		t.Errorf("reply targets misparsed: %+v", verbs[1].ReplyTargets)
+	if tools[1].ReplyTargets[0].Target != "game_detail" || tools[1].ReplyTargets[0].Aliases[0] != "detail" {
+		t.Errorf("reply targets misparsed: %+v", tools[1].ReplyTargets)
 	}
 	// login's auth nests under slash: — the fallback chain must find it.
-	if verbs[2].Auth != "anonymous" || !verbs[2].HasSlash {
-		t.Errorf("slash auth fallback misparsed: %+v", verbs[2])
+	if tools[2].Auth != "anonymous" || !tools[2].HasSlash {
+		t.Errorf("slash auth fallback misparsed: %+v", tools[2])
 	}
 
 	cols := caps.Columns["vids"]
@@ -148,7 +148,7 @@ func TestModuleRootFindsGoMod(t *testing.T) {
 
 func TestWriteInventoryMergesTheOverlay(t *testing.T) {
 	snap := snapshot{
-		Verbs: []verb{
+		Tools: []tool{
 			{Name: "list", Aliases: []string{"ls"}, Auth: "session", HasChat: true,
 				ReplyTargets: []replyTarget{{Target: "game_list", Mode: "mutate"}}},
 			{Name: "greet", HasChat: true},
@@ -164,14 +164,14 @@ func TestWriteInventoryMergesTheOverlay(t *testing.T) {
 		t.Fatal(err)
 	}
 	overlay := "list: {status: ok, note: \"pipes | escape\"}\nshare: {status: ok}\nghost: {status: stale}\n"
-	if err := os.WriteFile(filepath.Join(dir, "verb-status.yml"), []byte(overlay), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "tool-status.yml"), []byte(overlay), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	if err := writeInventory(root, snap); err != nil {
 		t.Fatal(err)
 	}
-	out, err := os.ReadFile(filepath.Join(dir, "verbs-inventory.md"))
+	out, err := os.ReadFile(filepath.Join(dir, "tools-inventory.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestWriteInventoryMergesTheOverlay(t *testing.T) {
 	if !strings.Contains(doc, "## Universal reply actions") || !strings.Contains(doc, "| share |") {
 		t.Errorf("universal reply section missing:\n%s", doc)
 	}
-	if !strings.Contains(doc, "## Overlay entries with no matching verb") || !strings.Contains(doc, "**ghost**") {
+	if !strings.Contains(doc, "## Overlay entries with no matching tool") || !strings.Contains(doc, "**ghost**") {
 		t.Errorf("orphan section missing:\n%s", doc)
 	}
 }
@@ -196,7 +196,7 @@ func TestWriteInventorySkipsWithoutOverlay(t *testing.T) {
 	if err := writeInventory(root, snapshot{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "docs", "claude", "verbs-inventory.md")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, "docs", "claude", "tools-inventory.md")); !os.IsNotExist(err) {
 		t.Error("inventory must not be written when the overlay is absent")
 	}
 }

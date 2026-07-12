@@ -34,9 +34,14 @@ type SendResultMsg struct {
 	Input string
 }
 
-// ResumeFetchedMsg carries the conversation list for the picker.
+// ResumeFetchedMsg carries the conversation list for the picker. More
+// marks a pagination follow-on page (tui-needs ask 9a, the picker's own
+// infinite-scroll trigger — see Model.pickerNeedsFetch): its rows APPEND
+// to what's on screen rather than replacing it. Mirrors ChatFetchedMsg's
+// Resync.
 type ResumeFetchedMsg struct {
 	List *api.ResumeList
+	More bool
 	Err  error
 }
 
@@ -50,3 +55,8 @@ type SuggestionsMsg struct {
 	Seq int
 	S   *api.Suggestions
 }
+
+// SkyTickMsg drives the star sky's slow drift loop (ambient.go's
+// startSky/onSkyTick) — independent of the fast animation gate so the
+// sky keeps moving at rest.
+type SkyTickMsg struct{}

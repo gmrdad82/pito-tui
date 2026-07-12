@@ -4,7 +4,7 @@ package app
 
 // Live contract spec for the SHOW screen — the detail cards (`show game/
 // vid/channel`) and their reply surface. Detail replies are append-mode
-// (verbs.yml): `#handle <verb>` adds a new message below the card. Only
+// (tools.yml): `#handle <tool>` adds a new message below the card. Only
 // side-effect-free verbs run here (analyze, shinies, and an invalid
 // action for the error path) — delete/publish/link stay out of a spec
 // that runs against real library state. Run:

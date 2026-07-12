@@ -13,8 +13,8 @@ func TestLoad(t *testing.T) {
 		t.Fatalf("Load() error: %v", err)
 	}
 
-	if len(g.Verbs) == 0 {
-		t.Fatal("Load() returned a grammar with no verbs")
+	if len(g.Tools) == 0 {
+		t.Fatal("Load() returned a grammar with no tools")
 	}
 }
 
@@ -24,18 +24,18 @@ func TestLoad_ListVerbHasAliasLs(t *testing.T) {
 		t.Fatalf("Load() error: %v", err)
 	}
 
-	var list *Verb
-	for i := range g.Verbs {
-		if g.Verbs[i].Name == "list" {
-			list = &g.Verbs[i]
+	var list *Tool
+	for i := range g.Tools {
+		if g.Tools[i].Name == "list" {
+			list = &g.Tools[i]
 			break
 		}
 	}
 	if list == nil {
-		t.Fatal(`verb "list" not found in snapshot`)
+		t.Fatal(`tool "list" not found in snapshot`)
 	}
 	if !contains(list.Aliases, "ls") {
-		t.Errorf(`verb "list" aliases = %v, want to contain "ls"`, list.Aliases)
+		t.Errorf(`tool "list" aliases = %v, want to contain "ls"`, list.Aliases)
 	}
 }
 

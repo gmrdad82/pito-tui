@@ -20,6 +20,7 @@ const (
 	KindEnhancedFollowUp     = "enhanced_follow_up"
 	KindConfirmationFollowUp = "confirmation_follow_up"
 	KindThemeDiff            = "theme_diff"
+	KindAi                   = "ai"
 )
 
 // Event is the canonical scrollback unit. Payload stays raw: kind-specific
@@ -31,6 +32,62 @@ type Event struct {
 	Kind      string          `json:"kind"`
 	Payload   json.RawMessage `json:"payload"`
 	CreatedAt time.Time       `json:"created_at"`
+}
+
+// AiBlock is one entry in an "ai" payload's blocks array. Raw always holds
+// the whole block object — not just its type-specific keys — so a renderer
+// can decode further layers itself; this package only peeks at "type" to
+// route the block, it never interprets a block's body.
+type AiBlock struct {
+	Type string
+	Raw  json.RawMessage
+}
+
+// UnmarshalJSON keeps Raw pointed at the whole block, even when the block
+// isn't shaped like {type, ...}. An unknown block type or a malformed one
+// (missing "type", or not an object at all) still round-trips its bytes
+// untouched and never errors — the server already degrades its side, and
+// the renderer degrades a bad block to a raw-JSON line rather than the
+// whole event failing to decode.
+func (b *AiBlock) UnmarshalJSON(raw []byte) error {
+	b.Raw = append(json.RawMessage(nil), raw...)
+	var head struct {
+		Type string `json:"type"`
+	}
+	_ = json.Unmarshal(raw, &head) // best-effort: a bad head just leaves Type == ""
+	b.Type = head.Type
+	return nil
+}
+
+// AiPayload is the kind "ai" event body (pito 2.0.0, @ai tool). Status is
+// "pending" while the model is still working the turn and "done" once
+// Blocks is final. CostAmount is a pointer because the server distinguishes
+// "no price yet" (nil, e.g. a pending payload or unknown-pricing model)
+// from an actual $0.00 (free model, still a settled cost).
+type AiPayload struct {
+	Status        string    `json:"status"`
+	Blocks        []AiBlock `json:"blocks"`
+	Prompt        string    `json:"prompt"`
+	Model         string    `json:"model"`
+	Provider      string    `json:"provider"`
+	Effort        string    `json:"effort"`
+	CostAmount    *float64  `json:"cost_amount"`
+	CostCurrency  string    `json:"cost_currency"`
+	ReplyHandle   string    `json:"reply_handle"`
+	ReplyConsumed bool      `json:"reply_consumed"`
+	AnchorEventID int64     `json:"anchor_event_id"`
+}
+
+// DecodeAiPayload decodes an "ai" event's payload. It is tolerant of
+// unknown top-level fields — encoding/json already ignores JSON keys with
+// no matching struct field — so the server can ship new payload keys ahead
+// of the TUI knowing about them without breaking the decode. Per-block
+// tolerance is AiBlock.UnmarshalJSON's job; this only ever errors when the
+// payload isn't a JSON object at all.
+func DecodeAiPayload(raw json.RawMessage) (AiPayload, error) {
+	var p AiPayload
+	err := json.Unmarshal(raw, &p)
+	return p, err
 }
 
 type Conversation struct {
@@ -61,15 +118,29 @@ type ContextMeter struct {
 	Threshold int     `json:"threshold"`
 }
 
-// Identity is the signed-in user (the mini status "me").
-type Identity struct {
-	Handle string `json:"handle"`
-	Name   string `json:"name"`
-}
-
 // NotifCount carries the unread notification count.
 type NotifCount struct {
 	Unread int `json:"unread"`
+}
+
+// NotificationRow is one entry in GET /notifications.json.
+type NotificationRow struct {
+	ID        int64     `json:"id"`
+	Message   string    `json:"message"`
+	Read      bool      `json:"read"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// NotificationPage is GET /notifications.json — a cursor-paginated slice of
+// the notification list (newest first, live-verified contract). NextCursor
+// is a plain string rather than a pointer: encoding/json already leaves a
+// non-pointer field at its zero value on a JSON null, so null, an absent
+// key, and an explicit "" all decode to "" here — every one of those means
+// "no more pages" per the contract, so callers never need to special-case
+// null themselves.
+type NotificationPage struct {
+	Rows       []NotificationRow `json:"rows"`
+	NextCursor string            `json:"next_cursor"`
 }
 
 // Label is the human-facing conversation name for status bars and pickers.
@@ -85,7 +156,6 @@ func (c Conversation) Label() string {
 type ChatPage struct {
 	Conversation  Conversation `json:"conversation"`
 	Events        []Event      `json:"events"`
-	Me            *Identity    `json:"me"`
 	Notifications *NotifCount  `json:"notifications"`
 	// Channels is the cycler list (["@all", "@handle", …]) — tui-needs
 	// ask, gate on presence.
@@ -98,6 +168,11 @@ type ResumeRow struct {
 	Title          string    `json:"title"`
 	DisplayName    string    `json:"display_name"`
 	LastActivityAt time.Time `json:"last_activity_at"`
+	// AI marks a conversation with any ai-kind event — the picker's
+	// sparkle badge (tui-needs ask 9b). The wire key isn't named yet: pito
+	// may ship "ai" or "has_ai", so UnmarshalJSON decodes either spelling
+	// until the contract answer picks one.
+	AI bool `json:"-"`
 }
 
 // Label mirrors Conversation.Label for picker rows.
@@ -108,13 +183,71 @@ func (r ResumeRow) Label() string {
 	return r.Title
 }
 
+// UnmarshalJSON decodes ResumeRow's normal fields, then best-effort peeks
+// at "ai" and "has_ai" for AI (tui-needs ask 9b, still unnamed — see AI's
+// doc comment). Either key true sets it; both absent, both false, or a
+// non-bool value under either key all degrade to false rather than erroring
+// the row.
+func (r *ResumeRow) UnmarshalJSON(raw []byte) error {
+	type resumeRowFields ResumeRow
+	var fields resumeRowFields
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return err
+	}
+	*r = ResumeRow(fields)
+
+	var flags struct {
+		AI    *bool `json:"ai"`
+		HasAI *bool `json:"has_ai"`
+	}
+	_ = json.Unmarshal(raw, &flags) // best-effort: a bad flag just leaves it nil
+	r.AI = (flags.AI != nil && *flags.AI) || (flags.HasAI != nil && *flags.HasAI)
+	return nil
+}
+
 // ResumeList is GET /resume.json — Conversation.recency_groups serialized:
-// everything within 24h of the most recent activity is "recent".
+// everything within 24h of the most recent activity is "recent". Paginated
+// per tui-needs ask 9a: page 1 (no `after`) keeps this exact shape, and
+// gains NextCursor, the opaque cursor for the next page. Like
+// NotificationPage.NextCursor, it is a plain string rather than a pointer —
+// a JSON null, an absent key, and an explicit "" all decode to "" here, and
+// every one of those means "no more pages" — which is ALSO what today's
+// unpaginated server's single response looks like (it never sends the key
+// at all), so an old server's one complete page and a genuinely last page
+// are indistinguishable by design: exactly the tolerance old-server support
+// wants.
+//
+// Pages past the first may flatten recency grouping: since nothing beyond
+// page 1 is ever "recent" relative to page 1's own window, later rows may
+// arrive under a flat `rows` key instead of split into recent/older. Rows
+// decodes that key tolerantly; UnmarshalJSON folds it into Older so callers
+// only ever need to read Recent/Older regardless of which shape a given
+// page used.
 type ResumeList struct {
 	Recent        []ResumeRow `json:"recent"`
 	Older         []ResumeRow `json:"older"`
-	Me            *Identity   `json:"me"`
+	Rows          []ResumeRow `json:"rows"`
 	Notifications *NotifCount `json:"notifications"`
+	NextCursor    string      `json:"next_cursor"`
+}
+
+// UnmarshalJSON decodes ResumeList's normal fields, then folds any `rows`
+// entries onto the end of Older (see the type doc comment) so a flat later
+// page reads exactly like a page with an empty `recent` and its rows under
+// `older`. Rows itself is left populated too — it mirrors the wire, in case
+// a caller ever needs to tell "arrived flat" apart from "arrived grouped" —
+// but nothing in this package reads it once the merge is done.
+func (l *ResumeList) UnmarshalJSON(raw []byte) error {
+	type resumeListFields ResumeList
+	var fields resumeListFields
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return err
+	}
+	*l = ResumeList(fields)
+	if len(l.Rows) > 0 {
+		l.Older = append(l.Older, l.Rows...)
+	}
+	return nil
 }
 
 // SendResult is the classified POST /chat reply. Live-verified: the server
@@ -134,9 +267,12 @@ type SendResult struct {
 
 // ServerNotice is the {error, message} reply shape (live-verified:
 // {"error":"web_only","message":"That command wears a mouse cursor…"}).
+// pito 2.0.0 renamed the fallback key verb→tool; both decode for
+// back-compat with pre-2.0.0 servers.
 type ServerNotice struct {
 	Error   string `json:"error"`
 	Message string `json:"message"`
+	Tool    string `json:"tool"`
 	Verb    string `json:"verb"`
 }
 
@@ -145,14 +281,17 @@ func (n ServerNotice) Text() string {
 	if n.Message != "" {
 		return n.Message
 	}
-	if n.Verb != "" {
-		return n.Verb + " is web-only — open the web app for it"
+	if name := n.Tool; name != "" || n.Verb != "" {
+		if name == "" {
+			name = n.Verb
+		}
+		return name + " is web-only — open the web app for it"
 	}
 	return "the server declined that one (" + n.Error + ")"
 }
 
 // Suggestions is POST /suggestions — the server-driven palette. The
-// grammar lives in verbs.yml server-side; the TUI never hardcodes verbs,
+// grammar lives in tools.yml server-side; the TUI never hardcodes tools,
 // it just renders what the ontology answers per keystroke.
 type Suggestions struct {
 	Mode      string       `json:"mode"`

@@ -35,7 +35,7 @@ func TestChannelGamesRendersFromStructuredRows(t *testing.T) {
 func TestSearchResultsRideTheListViewer(t *testing.T) {
 	withTrueColor(t)
 	out := stripANSI(renderFixture(t, "search_games", 100))
-	for _, want := range []string{"Game", "Demon Souls", "reply with"} {
+	for _, want := range []string{"Game", "Demon Souls", "shift+r"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("search list missing %q:\n%s", want, out)
 		}

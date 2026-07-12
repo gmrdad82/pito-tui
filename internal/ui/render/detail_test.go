@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/gmrdad82/pito-tui/internal/api"
 )
 
@@ -137,6 +137,80 @@ func TestShowVidAndChannelCards(t *testing.T) {
 	}
 }
 
+// TestShowVidDescriptionParagraphsAreSpaced covers W2 finding 1: the
+// fixture's description div is "whitespace-pre-wrap" prose with the
+// author's blank lines marking 4 paragraphs (no <p> tags — verified
+// against testdata/show_vid.json directly), and the web renders 4 spaced
+// blocks. htmlToText used to replace every embedded "\n" with a space
+// (correct for ordinary flow text, wrong for pre-wrap), gluing all 4 into
+// one wall of text. Each paragraph anchor below sits on that paragraph's
+// first wrapped line, so wrapping at width 100 doesn't split the match.
+func TestShowVidDescriptionParagraphsAreSpaced(t *testing.T) {
+	// Parses the fixture directly (parseDetailCard → descriptionText),
+	// under the full Event() pipeline's per-line left border ("│" on
+	// every scrollback row) which is orthogonal to this fix and would
+	// otherwise have to be stripped out of every blank-line check.
+	raw, err := os.ReadFile("testdata/show_vid.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p struct {
+		Body string `json:"body"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatal(err)
+	}
+	card, ok := parseDetailCard(p.Body)
+	if !ok {
+		t.Fatal("show_vid fixture no longer parses as a detail card")
+	}
+	// W2 finding 1: the description div is "whitespace-pre-wrap" prose —
+	// no <p> tags (verified against the fixture directly) — with the
+	// author's blank lines marking 4 paragraphs. htmlToText used to
+	// replace every embedded "\n" with a space (correct for ordinary flow
+	// text, wrong for pre-wrap), gluing all 4 into one wall of text; the
+	// fixed flattening keeps them as one blank line per paragraph break.
+	paragraphs := strings.Split(card.descText, "\n\n")
+	if len(paragraphs) != 4 {
+		t.Fatalf("want 4 blank-line-separated paragraphs, got %d:\n%q", len(paragraphs), card.descText)
+	}
+	wantPrefixes := []string{
+		"PITO is a minimalist",
+		"No dashboards with forty tabs",
+		"Built for me first",
+		"#pito #gmrdad82",
+	}
+	for i, want := range wantPrefixes {
+		if !strings.HasPrefix(paragraphs[i], want) {
+			t.Errorf("paragraph %d = %q, want prefix %q", i, paragraphs[i], want)
+		}
+	}
+	// The web's rendered card shows the same 4 blocks with a blank line
+	// between — confirm the full pipeline (word-wrap, left border and
+	// all) doesn't re-glue them by requiring at least one wholly blank
+	// (border-only) line between each paragraph's rendered block.
+	out := renderFixture(t, "show_vid", 100)
+	lines := strings.Split(stripANSI(out), "\n")
+	var blanks int
+	inDesc := false
+	for _, l := range lines {
+		trimmed := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(l), "┃"))
+		if strings.Contains(l, "Description") {
+			inDesc = true
+			continue
+		}
+		if strings.Contains(l, "Tags") {
+			break
+		}
+		if inDesc && trimmed == "" {
+			blanks++
+		}
+	}
+	if blanks < 3 {
+		t.Errorf("want at least 3 blank lines between the description's 4 rendered paragraphs, got %d:\n%s", blanks, stripANSI(out))
+	}
+}
+
 func TestKvZebraWrapsValuesInColumn(t *testing.T) {
 	withTrueColor(t)
 	long := strings.Repeat("wordy ", 30)
@@ -159,6 +233,42 @@ func TestKvZebraWrapsValuesInColumn(t *testing.T) {
 	}
 	if !strings.HasPrefix(lines[len(lines)-1], strings.Repeat(" ", 8)) {
 		t.Errorf("continuation not indented into value column: %q", lines[len(lines)-1])
+	}
+}
+
+// TestKvRowsZebraAlignsToCharmStyling pins the Charm restyle on kvRows
+// (owner 2026-07-12 "align to Charm"): keys stay ColorDim regardless of
+// row parity, VALUES alternate ColorFaint(241, even rows)/ColorDim(245,
+// odd rows) — and no background SGR survives, the old plum stripe is gone.
+func TestKvRowsZebraAlignsToCharmStyling(t *testing.T) {
+	withTrueColor(t)
+	r := New(80, WithTruecolor(true))
+	pairs := [][2]string{
+		{"Title", "Alpha"},
+		{"Genre", "Bravo"},
+		{"Dev", "Charlie"},
+	}
+	out := r.kvRows(pairs, 80, true)
+	if strings.Contains(out, "48;2;") || strings.Contains(out, "48;5;") {
+		t.Errorf("kv rows must carry no background SGR at all (the plum zebra is gone):\n%q", out)
+	}
+	if strings.Count(out, "\x1b[38;5;245m ") != 3 {
+		t.Errorf("every key must stay ColorDim regardless of row parity:\n%q", out)
+	}
+	if !strings.Contains(out, "\x1b[38;5;241mAlpha\x1b[m") {
+		t.Errorf("even value row must use ColorFaint (241):\n%q", out)
+	}
+	if !strings.Contains(out, "\x1b[38;5;245mBravo\x1b[m") {
+		t.Errorf("odd value row must use ColorDim (245):\n%q", out)
+	}
+	if !strings.Contains(out, "\x1b[38;5;241mCharlie\x1b[m") {
+		t.Errorf("even value row must use ColorFaint (241):\n%q", out)
+	}
+
+	// zebra=false (the Stats/Shinies block) keeps plain, unstyled values.
+	plainOut := r.kvRows(pairs, 80, false)
+	if strings.Contains(plainOut, "\x1b[38;5;241m") || strings.Contains(plainOut, "\x1b[38;5;245mAlpha") {
+		t.Errorf("non-zebra kv rows must not gain gray alternation:\n%q", plainOut)
 	}
 }
 

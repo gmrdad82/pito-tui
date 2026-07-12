@@ -5,7 +5,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 // The terminal bar engine — the 1:1 port of the web's ScoreBarComponent /
@@ -70,12 +70,21 @@ var rowLean = 2.0 / math.Tan(ShimmerAngleDeg*math.Pi/180)
 // carries some light, falling off smoothly around the traveling peak;
 // the row lean keeps the global 130° angle.
 func glossBoost(c, tint RGB, i, row, cells int, phase, strength, sigma float64) RGB {
+	f := strength * glossFactor(i, row, cells, phase, sigma)
+	lerp := func(x, y uint8) uint8 { return uint8(float64(x) + (float64(y)-float64(x))*f) }
+	return RGB{lerp(c.R, tint.R), lerp(c.G, tint.G), lerp(c.B, tint.B)}
+}
+
+// glossFactor is glossBoost's raw Gaussian ∈ [0,1] before the caller's own
+// strength scale — extracted so effects that need the bare gleam
+// intensity at a cell (the shiny badge's ink glint, tokens.go) can share
+// the exact same peak/spread math as the surface wash instead of
+// duplicating it.
+func glossFactor(i, row, cells int, phase, sigma float64) float64 {
 	span := float64(cells) + sigma*4 // run the peak past both edges
 	center := phase*span - sigma*2 + float64(row)*rowLean
 	d := (float64(i) - center) / sigma
-	f := strength * math.Exp(-d*d)
-	lerp := func(x, y uint8) uint8 { return uint8(float64(x) + (float64(y)-float64(x))*f) }
-	return RGB{lerp(c.R, tint.R), lerp(c.G, tint.G), lerp(c.B, tint.B)}
+	return math.Exp(-d * d)
 }
 
 // chartTint is the chart glint: pito-blue lifted toward white so the
@@ -100,18 +109,28 @@ func phaseOffset(seed string) float64 {
 	return float64(h.Sum32()%997) / 997
 }
 
-// staggered wraps a phase with a seed offset back into [0,1).
-func staggered(phase float64, seed string) float64 {
-	p := phase + phaseOffset(seed)
+// conductorBlend scales a per-element stagger offset toward zero as the
+// shimmer conductor's sweep window climbs toward weight 1 (r.conductor,
+// set via SetConductor). At weight 0 — the resting state, and the only
+// value ever seen before the conductor existed — this is a no-op, so
+// every caller below keeps its original math unless a conductor window
+// is actually in flight.
+func (r *R) conductorBlend(offset float64) float64 {
+	return offset * (1 - r.conductor)
+}
+
+// staggered wraps r.phase with a seed offset back into [0,1).
+func (r *R) staggered(seed string) float64 {
+	p := r.phase + r.conductorBlend(phaseOffset(seed))
 	return p - math.Floor(p)
 }
 
 // staggered20 quantizes the seed offset onto the web's 20 stagger
 // buckets (pito-shimmer-d0…d19) — shinies and platform chips scatter in
 // discrete steps, never in sync, never in-between (owner call).
-func staggered20(phase float64, seed string) float64 {
+func (r *R) staggered20(seed string) float64 {
 	step := math.Floor(phaseOffset(seed)*20) / 20
-	p := phase + step
+	p := r.phase + r.conductorBlend(step)
 	return p - math.Floor(p)
 }
 
@@ -151,6 +170,14 @@ type BarTick struct {
 	Chip     string // "" = bare tick
 	ChipLeft bool   // chip sits left of the tick (web: score >= 50)
 }
+
+// scoreBarCap is the component cap INSIDE contentWidth (owner rule, W3
+// containment law): score/TTB bars never grow past this many cells,
+// label gutter included, even when the message column is much wider
+// (≈ the web's 450px box). Callers that hand a bar its width — never
+// the shared barLine/ScoreBar primitives themselves, which stay
+// caller-trusted for direct/test use — clamp against this constant.
+const scoreBarCap = 56
 
 // barCells is the [bracket-to-bracket] cell count for a given content
 // width and label. Minimum 10 so degenerate widths stay bars.
@@ -210,12 +237,9 @@ func (r *R) barLine(label string, fill StopGradient, ticks []BarTick, width int,
 		}
 	}
 
-	// The grow-in (web pito-bar-reveal): cells beyond the reveal cut
-	// render as the muted fill; ticks and chips surface once reached.
+	// (The old pito-bar-reveal grow-in cut left with the spring purge,
+	// owner 2026-07-12 — bars render full-width immediately.)
 	cut := cells
-	if r.revealFrac < 1 {
-		cut = int(r.revealFrac*float64(cells) + 0.5)
-	}
 	var b strings.Builder
 	b.WriteString(r.dim(label))
 	b.WriteString(r.dim("["))
@@ -235,7 +259,7 @@ func (r *R) barLine(label string, fill StopGradient, ticks []BarTick, width int,
 		case muted || !r.truecolor:
 			b.WriteString(lipgloss.NewStyle().Foreground(ColorFaint).Render(c.ch))
 		default:
-			b.WriteString(lipgloss.NewStyle().Foreground(hex(bandBoost(c.color, i, cells, staggered(r.phase, label)))).Render(c.ch))
+			b.WriteString(lipgloss.NewStyle().Foreground(hex(bandBoost(c.color, i, cells, r.staggered(label)))).Render(c.ch))
 		}
 	}
 	b.WriteString(r.dim("]"))
@@ -347,7 +371,7 @@ func (r *R) ContextMeter(pct float64, width int) string {
 		st := lipgloss.NewStyle()
 		if r.truecolor {
 			c := MeterRamp.At(float64(i) / float64(max(width-1, 1)))
-			st = st.Foreground(hex(bandBoost(c, i, width, staggered(r.phase, "context-meter"))))
+			st = st.Foreground(hex(bandBoost(c, i, width, r.staggered("context-meter"))))
 		} else {
 			st = st.Foreground(ColorOK)
 		}
@@ -357,6 +381,16 @@ func (r *R) ContextMeter(pct float64, width int) string {
 }
 
 // phasePulse is a per-seed sine in [-1,1] — the breathing primitive.
-func phasePulse(phase float64, seed string) float64 {
-	return math.Sin(staggered(phase, seed) * 2 * math.Pi)
+func (r *R) phasePulse(seed string) float64 {
+	return math.Sin(r.staggered(seed) * 2 * math.Pi)
+}
+
+// phasePulse20 is phasePulse's staggered20-seeded cousin: the same sine
+// breathing wave, but the per-element offset snaps onto the web's 20
+// discrete gleam-delay buckets (staggered20) instead of the continuous
+// 997-bucket spread — a shiny badge's halo rides this so it starts on the
+// same stagger grid as its OWN gleam (tokens.go seeds both off the badge's
+// face text) rather than a second, unrelated spread of offsets.
+func (r *R) phasePulse20(seed string) float64 {
+	return math.Sin(r.staggered20(seed) * 2 * math.Pi)
 }

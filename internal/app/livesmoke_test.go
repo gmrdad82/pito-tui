@@ -48,13 +48,13 @@ func TestLiveSmoke(t *testing.T) {
 	// Session: reuse the jar; on 401 log in the way the TUI actually does —
 	// an in-chat /login send through the server grammar (the reply's
 	// Set-Cookie mints the session straight into the jar).
-	if _, err := client.Resume(ctx); errors.Is(err, api.ErrUnauthorized) {
+	if _, err := client.FetchResume(ctx, "", 0); errors.Is(err, api.ErrUnauthorized) {
 		res, err := client.SendMessage(ctx, "", "/login "+otp, 80)
 		if err != nil {
 			t.Fatalf("in-chat /login failed: %v", err)
 		}
 		t.Logf("in-chat /login accepted (conversation %s)", res.CreatedUUID)
-		if _, err := client.Resume(ctx); err != nil {
+		if _, err := client.FetchResume(ctx, "", 0); err != nil {
 			t.Fatalf("session did not stick after /login: %v", err)
 		}
 	} else if err != nil {

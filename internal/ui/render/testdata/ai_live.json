@@ -1,0 +1,91 @@
+{
+ "model": "deepseek-v4-flash-free",
+ "blocks": [
+  {
+   "text": "Your library's top scores, ranked:",
+   "type": "text"
+  },
+  {
+   "rows": [
+    [
+     "#12",
+     "Elden Ring",
+     "94"
+    ],
+    [
+     "#27",
+     "Astro Bot",
+     "92"
+    ],
+    [
+     "#20",
+     "Demon's Souls",
+     "88"
+    ],
+    [
+     "#18",
+     "Nioh 3",
+     "84"
+    ],
+    [
+     "#16",
+     "Stellar Blade",
+     "83"
+    ],
+    [
+     "#15",
+     "Cyberpunk 2077",
+     "81"
+    ],
+    [
+     "#13",
+     "Elden Ring Nightreign",
+     "81"
+    ],
+    [
+     "#1",
+     "Ghosts 'n Goblins Resurrection",
+     "75"
+    ],
+    [
+     "#22",
+     "Terminator 2D: No Fate",
+     "72"
+    ],
+    [
+     "#26",
+     "Demon Souls",
+     "0"
+    ],
+    [
+     "#19",
+     "Stellar Blade: Blood Rain",
+     "0"
+    ],
+    [
+     "#9",
+     "Tekken 7",
+     "0"
+    ]
+   ],
+   "type": "table",
+   "header": [
+    "#",
+    "Game",
+    "Score"
+   ]
+  },
+  {
+   "text": "The crown goes to **[subject]Elden Ring[/subject]** (#12) with **94** \u2014 the highest score in your collection. [subject]Astro Bot[/subject] (#27) follows closely at 92.",
+   "type": "text"
+  }
+ ],
+ "prompt": "which of my games has the best score?",
+ "status": "done",
+ "provider": "opencode",
+ "cost_amount": 0.0,
+ "origin_tool": "@ai",
+ "reply_handle": "kappa-6401",
+ "reply_target": "ai_message",
+ "cost_currency": "USD"
+}

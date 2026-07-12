@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func newClient(t *testing.T, handler http.Handler) *Client {
@@ -63,7 +64,7 @@ func TestFetchChatRedirectMeansUnauthorized(t *testing.T) {
 	}
 }
 
-func TestResume(t *testing.T) {
+func TestFetchResume(t *testing.T) {
 	fixture := readFixture(t, "resume.json")
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /resume.json", func(w http.ResponseWriter, r *http.Request) {
@@ -72,12 +73,255 @@ func TestResume(t *testing.T) {
 	})
 	c := newClient(t, mux)
 
-	list, err := c.Resume(t.Context())
+	list, err := c.FetchResume(t.Context(), "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(list.Recent) != 2 || len(list.Older) != 1 {
 		t.Errorf("recent/older = %d/%d", len(list.Recent), len(list.Older))
+	}
+}
+
+// TestFetchResumeFirstPageOmitsQueryEntirely pins the deliberate deviation
+// from FetchNotifications' idiom: an unpaginated call (after=="", limit<=0)
+// must send NO query string at all, so a pre-pagination server sees the
+// exact request it has always answered.
+func TestFetchResumeFirstPageOmitsQueryEntirely(t *testing.T) {
+	fixture := readFixture(t, "resume.json")
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /resume.json", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.RawQuery != "" {
+			t.Errorf("RawQuery = %q, want empty — old servers must see a byte-identical request", r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(fixture)
+	})
+	c := newClient(t, mux)
+
+	if _, err := c.FetchResume(t.Context(), "", 0); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFetchResumeSecondPageCarriesCursorAndLimit(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /resume.json", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("after"); got != "cursor-2" {
+			t.Errorf("after = %q, want %q", got, "cursor-2")
+		}
+		if got := r.URL.Query().Get("limit"); got != "10" {
+			t.Errorf("limit = %q, want %q", got, "10")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"older":[],"next_cursor":null}`))
+	})
+	c := newClient(t, mux)
+
+	if _, err := c.FetchResume(t.Context(), "cursor-2", 10); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFetchResumeNextCursorDecodes(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /resume.json", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"recent":[],"older":[],"next_cursor":"abc"}`))
+	})
+	c := newClient(t, mux)
+
+	list, err := c.FetchResume(t.Context(), "", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if list.NextCursor != "abc" {
+		t.Errorf("next_cursor = %q, want %q", list.NextCursor, "abc")
+	}
+}
+
+func TestFetchResumeNullNextCursorMeansExhausted(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /resume.json", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"recent":[],"older":[],"next_cursor":null}`))
+	})
+	c := newClient(t, mux)
+
+	list, err := c.FetchResume(t.Context(), "", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if list.NextCursor != "" {
+		t.Errorf("next_cursor = %q, want empty (null means exhausted)", list.NextCursor)
+	}
+}
+
+// TestFetchResumeOldShapeResponseYieldsEmptyNextCursor covers a genuine
+// pre-2.0.0 server: no `next_cursor` key at all. It must decode as a
+// complete, exhausted page rather than erroring.
+func TestFetchResumeOldShapeResponseYieldsEmptyNextCursor(t *testing.T) {
+	fixture := readFixture(t, "resume.json")
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /resume.json", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(fixture)
+	})
+	c := newClient(t, mux)
+
+	list, err := c.FetchResume(t.Context(), "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if list.NextCursor != "" {
+		t.Errorf("next_cursor = %q, want empty (absent means exhausted)", list.NextCursor)
+	}
+}
+
+// TestFetchResumeFlatRowsAbsorbedAsOlder pins the past-page-1 flattening
+// tolerance: a `rows` array folds onto the end of Older alongside whatever
+// `older` rows also arrived, so callers never special-case the flat shape.
+func TestFetchResumeFlatRowsAbsorbedAsOlder(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /resume.json", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"older": [{"uuid": "already-older", "title": "already older"}],
+			"rows": [
+				{"uuid": "flat-1", "title": "flat one"},
+				{"uuid": "flat-2", "title": "flat two"}
+			],
+			"next_cursor": "next-page"
+		}`))
+	})
+	c := newClient(t, mux)
+
+	list, err := c.FetchResume(t.Context(), "cursor-2", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Recent) != 0 {
+		t.Errorf("recent = %d, want 0 — later pages never carry recent rows", len(list.Recent))
+	}
+	if len(list.Older) != 3 {
+		t.Fatalf("older = %d, want 3 (1 grouped + 2 flattened)", len(list.Older))
+	}
+	wantUUIDs := []string{"already-older", "flat-1", "flat-2"}
+	for i, want := range wantUUIDs {
+		if list.Older[i].UUID != want {
+			t.Errorf("older[%d].UUID = %q, want %q", i, list.Older[i].UUID, want)
+		}
+	}
+}
+
+func TestFetchNotificationsFirstPageOmitsBefore(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /notifications.json", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("after"); got != "" {
+			t.Errorf("before = %q, want omitted on the first page", got)
+		}
+		if _, present := r.URL.Query()["after"]; present {
+			t.Error("before must not appear in the query at all on the first page")
+		}
+		if got := r.URL.Query().Get("limit"); got != "50" {
+			t.Errorf("limit = %q, want default 50", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"rows":[{"id":123,"message":"hi","read":false,"created_at":"2026-07-10T12:00:00Z"}],"next_cursor":"abc"}`))
+	})
+	c := newClient(t, mux)
+
+	page, err := c.FetchNotifications(t.Context(), "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(page.Rows))
+	}
+	row := page.Rows[0]
+	if row.ID != 123 || row.Message != "hi" || row.Read != false {
+		t.Errorf("row = %+v", row)
+	}
+	wantCreatedAt := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	if !row.CreatedAt.Equal(wantCreatedAt) {
+		t.Errorf("created_at = %v, want %v", row.CreatedAt, wantCreatedAt)
+	}
+	if page.NextCursor != "abc" {
+		t.Errorf("next_cursor = %q, want %q", page.NextCursor, "abc")
+	}
+}
+
+func TestFetchNotificationsSecondPageCarriesCursorAndLimit(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /notifications.json", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("after"); got != "cursor-2" {
+			t.Errorf("before = %q, want %q", got, "cursor-2")
+		}
+		if got := r.URL.Query().Get("limit"); got != "10" {
+			t.Errorf("limit = %q, want %q", got, "10")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"rows":[],"next_cursor":null}`))
+	})
+	c := newClient(t, mux)
+
+	page, err := c.FetchNotifications(t.Context(), "cursor-2", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Rows) != 0 {
+		t.Errorf("rows = %d, want 0", len(page.Rows))
+	}
+	if page.NextCursor != "" {
+		t.Errorf("next_cursor = %q, want empty (null means exhausted)", page.NextCursor)
+	}
+}
+
+func TestFetchNotificationsAbsentNextCursorMeansExhausted(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /notifications.json", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"rows":[]}`))
+	})
+	c := newClient(t, mux)
+
+	page, err := c.FetchNotifications(t.Context(), "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.NextCursor != "" {
+		t.Errorf("next_cursor = %q, want empty (absent means exhausted)", page.NextCursor)
+	}
+}
+
+func TestFetchNotificationsNotAcceptableIsUnavailable(t *testing.T) {
+	// Rails answers 406 (not 404) when the route exists for html only —
+	// live-verified against dev before the endpoint rolled out.
+	c := newClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotAcceptable)
+	}))
+	_, err := c.FetchNotifications(t.Context(), "", 0)
+	if !errors.Is(err, ErrNotificationsUnavailable) {
+		t.Fatalf("406 must map to ErrNotificationsUnavailable, got %v", err)
+	}
+}
+
+func TestFetchNotificationsUnavailable(t *testing.T) {
+	c := newClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	_, err := c.FetchNotifications(t.Context(), "", 0)
+	if !errors.Is(err, ErrNotificationsUnavailable) {
+		t.Fatalf("err = %v, want ErrNotificationsUnavailable", err)
+	}
+}
+
+func TestFetchNotificationsUnauthorized(t *testing.T) {
+	c := newClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	_, err := c.FetchNotifications(t.Context(), "", 0)
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("err = %v, want ErrUnauthorized", err)
 	}
 }
 

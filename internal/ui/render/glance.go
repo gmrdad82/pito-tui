@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"golang.org/x/net/html"
 )
 
@@ -55,7 +55,9 @@ func glanceIntroText(payload []byte) string {
 	if json.Unmarshal(payload, &p) == nil && p.Analytics.Intro != "" {
 		return htmlToText(p.Analytics.Intro)
 	}
-	return "The numbers, at a glance."
+	// COPY LAW (owner 2026-07-12): the intro is the server's; a payload
+	// without one renders without one — never a client-made line.
+	return ""
 }
 
 // parseGlance recognizes a ready glance body and pulls the cells out.
@@ -181,7 +183,7 @@ func (r *R) glancePanel(g *glancePanel) string {
 // dotted-paper grid shows through wherever the curve is blank, and the
 // pito-blue shimmer band sweeps the curve like every other chart.
 func (r *R) glanceCell(cell glanceCell, cellW int) string {
-	lines := r.paintBraille(cell.rows, cellW, cell.noData)
+	lines := r.paintBraille(cell.rows, cellW, cell.noData, 1.0)
 	// The no-data overlay: the server's copy centered over the paper
 	// grid, exactly like the web's absolutely-positioned label.
 	if cell.noData && cell.noDataNote != "" && len(lines) > 0 {

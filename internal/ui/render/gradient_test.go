@@ -3,18 +3,17 @@ package render
 import (
 	"strings"
 	"testing"
-
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
 )
 
-// withTrueColor scopes a test to the truecolor profile — gradients now
-// render through lipgloss (the white-charts fix), so Ascii-profile tests
-// see them stripped like every other style.
+// withTrueColor used to scope a test to lipgloss v1's global TrueColor
+// profile — v1's Style.Render() downsampled colors per that profile at
+// render time. Lip Gloss v2 has no renderer/profile: Style.Render always
+// emits full-fidelity ANSI, and downsampling (if any) happens at the
+// output/print layer instead (colorprofile.Writer, or Bubble Tea's own
+// renderer). Gradient.Colorize goes through lipgloss.Style same as before,
+// so it already emits truecolor unconditionally — nothing left to scope.
 func withTrueColor(t *testing.T) {
 	t.Helper()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(termenv.Ascii) })
 }
 
 func TestGradientAtStops(t *testing.T) {
@@ -41,7 +40,10 @@ func TestColorizeEmitsTruecolorPerRune(t *testing.T) {
 	if strings.Count(out, "\x1b[38;2;") != 2 {
 		t.Errorf("want one SGR per rune: %q", out)
 	}
-	if !strings.Contains(out, "\x1b[0m") {
+	// Lip Gloss v2's ANSI writer emits the short reset form "\x1b[m"
+	// (an empty parameter list, equivalent ANSI to "\x1b[0m" — SGR treats
+	// a missing parameter as 0) instead of v1's explicit "\x1b[0m".
+	if !strings.Contains(out, "\x1b[m") {
 		t.Errorf("styles must reset: %q", out)
 	}
 	// Phase shifts the ramp: different phase, different bytes.

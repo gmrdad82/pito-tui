@@ -29,7 +29,7 @@ import (
 )
 
 // The column/sort/filter tables come from the GENERATED grammar snapshot
-// (internal/grammar, built by tools/verbsgen from pito's verbs.yml) — a
+// (internal/grammar, built by tools/toolsgen from pito's tools.yml) — a
 // pito rename or new column flows into this spec by re-running
 // `go generate ./internal/grammar/`. Base sort keys are identity columns
 // (not in capabilities) and stay static: channels handle/title, games/

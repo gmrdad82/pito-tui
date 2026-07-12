@@ -8,28 +8,59 @@ package render
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
+	"image/color"
 	"math"
 	"strings"
+	"time"
 
+	"charm.land/lipgloss/v2"
+	"charm.land/lipgloss/v2/table"
 	"github.com/charmbracelet/glamour"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/lipgloss/table"
 
 	"github.com/gmrdad82/pito-tui/internal/api"
 )
 
+// ContentCap is the owner-locked containment law: EVERYTHING — message
+// blocks, cards, tables, chart canvases, banners, the palette, overlay
+// bodies, the context meter, the prompt line, and the status bar —
+// renders LEFT-ANCHORED inside min(terminalWidth−2, ContentCap)
+// columns as ONE coherent column (owner 2.0.0 smoke, 2026-07-12: a
+// capped conversation over full-width chrome read as two different
+// apps; nothing is exempt anymore). The margin beyond the column
+// belongs to the ambient star-field. The caller (internal/ui
+// Model.contentWidth) computes the margined-and-capped width and feeds
+// it into New — every renderer in this package inherits the cap for
+// free by never reading past r.width.
+const ContentCap = 100
+
 // R renders events at a fixed width. Rebuild it on terminal resize — the
 // glamour renderer word-wraps at construction time.
 type R struct {
-	width      int
-	plain      bool
-	truecolor  bool
-	phase      float64
-	revealFrac float64 // current event's grow-in (1 = settled)
-	reveal     map[int64]float64
-	style      string
-	glam       *glamour.TermRenderer
+	width     int
+	plain     bool
+	truecolor bool
+	phase     float64
+	conductor float64 // 0 = every painter keeps its own stagger; 1 = all collapse onto r.phase (see SetConductor)
+	// shake holds the ambassador wave's per-event error-shake offsets
+	// (micro.go effect 1) — eventID → cells, absent ⇒ render at rest. See
+	// SetShake/shakeFor and Event's own applyShake call.
+	shake map[int64]int
+	// glint is the ambassador wave's confirm-glint sweep progress
+	// (micro.go effect 2): -1 (New's own default) means no sweep is live
+	// right now, 0..1 otherwise. See SetGlint and confirmChrome.
+	glint float64
+	// ticks mirrors model.go's raw aliveTicks (real, gate-open animation
+	// ticks only) — see SetTicks. r.phase alone can't drive a cadence
+	// LONGER than its own ~2.667s wrap (scaling an already-wrapped value
+	// can only shorten its period, never lengthen it), so effects that
+	// need a slower beat — the shiny badge's iridescent twinkle,
+	// tokens.go's sparkleActive — key off this instead, the same
+	// "aliveTicks % cycleTicks" shape ui/micro.go's confirmGlintProgress
+	// already uses for the confirm dialog's own glint.
+	ticks int64
+	now   func() time.Time
+	style string
+	glam  *glamour.TermRenderer
 
 	echoBar      lipgloss.Style
 	systemBar    lipgloss.Style
@@ -55,6 +86,12 @@ func WithTruecolor(on bool) Option {
 	return func(r *R) { r.truecolor = on }
 }
 
+// WithNow injects the clock stamp() ages timestamps against (tests pin
+// it; the app leaves the default).
+func WithNow(now func() time.Time) Option {
+	return func(r *R) { r.now = now }
+}
+
 // WithStyle picks the glamour style ("dark"/"light"). The caller resolves
 // it ONCE before Bubble Tea takes the terminal — glamour's auto style
 // queries the background over stdin, which deadlocks against tea's input
@@ -68,15 +105,16 @@ func New(width int, opts ...Option) *R {
 	if width < 20 {
 		width = 20
 	}
-	bar := func(color lipgloss.Color) lipgloss.Style {
+	bar := func(c color.Color) lipgloss.Style {
 		return lipgloss.NewStyle().
 			Border(lipgloss.ThickBorder(), false, false, false, true).
-			BorderForeground(color).
-			PaddingLeft(1).Width(width - 2)
+			BorderForeground(c).
+			PaddingLeft(1).Width(width - 1)
 	}
 	r := &R{
-		width:      width,
-		revealFrac: 1, // fully revealed unless an animation says otherwise
+		width: width,
+		now:   time.Now,
+		glint: -1, // no confirm-glint sweep in progress until SetGlint says otherwise
 		// Mirrors the web's block language: every message is a left-bar
 		// block — echo in the user accent, replies in their own colors —
 		// with the timestamp inside.
@@ -112,37 +150,91 @@ func New(width int, opts ...Option) *R {
 // drives it only while fresh shimmer is on screen.
 func (r *R) SetPhase(phase float64) { r.phase = phase }
 
-// paintShimmer replaces marker-wrapped words with gradient paint (or a
-// static accent when the terminal cannot truecolor).
+// SetConductor blends every painter's per-element stagger toward zero:
+// weight 0 (the default, and the shimmer conductor's resting state)
+// changes nothing — each element keeps sampling r.phase at its own
+// stable offset, same as before the conductor existed. Weight 1
+// collapses every offset to zero, so every shimmer painter on screen
+// samples the exact same r.phase and the whole surface reads as one
+// traveling wave instead of scattered neighbors. The model ramps this
+// 0→1→0 over its ~2s sweep window (ambient.go's conductorWeight) —
+// SetPhase alone can't produce that synchronized moment because the
+// per-element offset is additive inside staggered/staggered20 (bars.go),
+// not a shift of the shared phase itself.
+func (r *R) SetConductor(weight float64) { r.conductor = weight }
+
+// SetTicks forwards the model's raw aliveTicks counter every animation
+// tick — see the R.ticks field doc for why this exists alongside SetPhase
+// rather than being derived from it.
+func (r *R) SetTicks(ticks int64) { r.ticks = ticks }
+
+// paintShimmer replaces marker-wrapped words with paint (color spec v2,
+// owner 2026-07-12): subject words shimmer pink→derived-band, reference
+// tokens shimmer cyan→derived-band; off-truecolor both settle on their
+// static base (pink 175 / cyan).
 func (r *R) paintShimmer(text string) string {
-	if !strings.ContainsRune(text, ShimmerStart) {
+	if !strings.ContainsRune(text, ShimmerStart) && !strings.ContainsRune(text, TokenStart) &&
+		!strings.ContainsRune(text, HeaderStart) {
 		return text
 	}
 	var b strings.Builder
 	var word *strings.Builder
+	var token *strings.Builder
+	var header *strings.Builder
 	for _, ru := range text {
+		if header != nil {
+			if ru == HeaderEnd {
+				b.WriteString(lipgloss.NewStyle().Foreground(ColorPrimary).Bold(true).Render(header.String()))
+				header = nil
+			} else {
+				header.WriteRune(ru)
+			}
+			continue
+		}
 		switch ru {
+		case HeaderStart:
+			header = &strings.Builder{}
 		case ShimmerStart:
 			word = &strings.Builder{}
 		case ShimmerEnd:
 			if word != nil {
 				if r.truecolor {
-					b.WriteString(PitoShimmer.Colorize(word.String(), r.phase))
+					b.WriteString(SubjectShimmer.Colorize(word.String(), r.phase))
 				} else {
-					b.WriteString(lipgloss.NewStyle().Foreground(ColorAccent).Bold(true).Render(word.String()))
+					b.WriteString(lipgloss.NewStyle().Foreground(ColorSubject).Bold(true).Render(word.String()))
 				}
 				word = nil
 			}
+		case TokenStart:
+			token = &strings.Builder{}
+		case TokenEnd:
+			if token != nil {
+				if r.truecolor {
+					b.WriteString(ReferenceShimmer.Colorize(token.String(), r.phase))
+				} else {
+					b.WriteString(lipgloss.NewStyle().Foreground(ColorCyan).Render(token.String()))
+				}
+				token = nil
+			}
 		default:
-			if word != nil {
+			switch {
+			case token != nil:
+				token.WriteRune(ru)
+			case word != nil:
 				word.WriteRune(ru)
-			} else {
+			default:
 				b.WriteRune(ru)
 			}
 		}
 	}
 	if word != nil { // unterminated marker: degrade to plain
 		b.WriteString(word.String())
+	}
+	if token != nil {
+		b.WriteString(token.String())
+	}
+	if header != nil {
+		b.WriteString(header.String())
 	}
 	return b.String()
 }
@@ -159,31 +251,65 @@ func HasShimmer(payload []byte) bool {
 
 // Event renders one event to a newline-terminated block.
 func (r *R) Event(ev api.Event) string {
-	r.revealFrac = r.revealFor(ev.ID)
+	var block string
 	switch ev.Kind {
 	case api.KindEcho:
-		return r.echo(ev)
+		block = r.echo(ev)
 	case api.KindSystem, api.KindSystemFollowUp:
-		return r.messageBlock(r.systemBar, ev)
+		block = r.messageBlock(r.systemBar, ev)
 	case api.KindEnhanced, api.KindEnhancedFollowUp:
-		return r.messageBlock(r.enhancedBar, ev)
+		block = r.messageBlock(r.enhancedBar, ev)
 	case api.KindError:
-		return r.errorEvent(ev)
+		block = r.errorEvent(ev)
 	case api.KindThinking:
-		return r.thinking(ev)
+		block = r.thinking(ev)
 	case api.KindConfirmation, api.KindConfirmationFollowUp:
-		return r.confirmation(ev)
+		block = r.confirmation(ev)
+	case api.KindAi:
+		block = r.aiEvent(ev)
 	default:
-		return r.fallback(ev)
+		block = r.fallback(ev)
 	}
+	// The ambassador wave's error-shake (micro.go effect 1) hooks in
+	// last, at this same per-event render seam — applyShake is a no-op
+	// (byte-identical return) for every event with no entry in r.shake,
+	// which is every event, always, unless something is actively
+	// shaking right now. See applyShake's own doc comment for why this
+	// never shifts any OTHER event's block.
+	return applyShake(block, r.shakeFor(ev.ID))
 }
 
-// stamp is the dim HH:MM prefix the web shows inside each block.
+// stamp is the dim timestamp prefix the web shows inside each block.
+// Today's messages show bare "HH:MM"; older ones carry their day so a
+// days-old conversation never reads like it happened today. Format is
+// the owner's (2026-07-11): same year "6 Jul 11:04", other years
+// "2 Jan '25 11:04" — day without leading zero, abbreviated month,
+// apostrophe two-digit year.
 func (r *R) stamp(ev api.Event) string {
 	if ev.CreatedAt.IsZero() {
 		return ""
 	}
-	return r.dim(ev.CreatedAt.Local().Format("15:04")) + " "
+	local := ev.CreatedAt.Local()
+	now := r.now()
+	layout := "15:04"
+	switch {
+	case sameYear(local.Year(), now) && local.YearDay() == now.YearDay():
+		// today — time only
+	case sameYear(local.Year(), now):
+		layout = "2 Jan 15:04"
+	default:
+		layout = "2 Jan '06 15:04"
+	}
+	return r.dim(local.Format(layout)) + " "
+}
+
+// sameYear is the day-aware rule stamp() keys its year-elision off — true
+// once year no longer needs spelling out because it matches now's. Shared
+// with tokens.go's shinyDateSuffix (the shiny badge's unlock date), which
+// mirrors this exact rule at month granularity (the web sends no day for
+// badge dates, only "Mon 'YY").
+func sameYear(year int, now time.Time) bool {
+	return year == now.Year()
 }
 
 // dim styles inline fragments without the full-width dimStyle block.
@@ -194,6 +320,50 @@ func (r *R) dim(text string) string {
 // accent styles inline fragments in the user-accent color.
 func (r *R) accent(text string) string {
 	return lipgloss.NewStyle().Foreground(ColorAccent).Render(text)
+}
+
+// replyAffordance renders the reply-affordance meta line — the web's
+// `#handle shift+r` shape (owner screenshots: literally "#iota-5965
+// shift+r"): the handle in the accent it already uses, then "shift+r" as
+// a QUIET kbd chip — dim foreground on a barely-elevated background, no
+// gradient/shimmer (tokens.go's ShinyBadge/platformChip build louder
+// chips; this one is a keyboard hint, not a badge). Non-truecolor drops
+// the background and stays dim-on-default. The one shared builder so the
+// three call sites (render.go's replyHintFor/confirmation, ai.go's
+// aiDoneEvent) can't drift apart again.
+func (r *R) replyAffordance(handle string) string {
+	// The chip's own leading padding space doubles as the handle/chip
+	// separator — matching the exact web shape "#handle shift+r" with a
+	// single space, not two.
+	return r.accent(handle) + Kbd("shift+r", r.truecolor)
+}
+
+// Kbd renders one keyboard chip — the shared shape for every keybinding
+// hint (reply affordance, the chatbox cycler hints, the modal Esc
+// chips, the status row's quit hint). Exported for the ui package's
+// chrome. Truecolor chips got the charm treatment (owner 2026-07-12:
+// "Esc key doesn't look charmy and glossy… use fancyness more on it"):
+// an elevated plum bed with the glyphs riding a static sample of the
+// brand ramp — each rune a step further along PitoShimmer, a frozen
+// gleam rather than an animated one (a keycap, not a badge). Non-
+// truecolor stays the quiet dim chip.
+func Kbd(keys string, truecolor bool) string {
+	if !truecolor {
+		return lipgloss.NewStyle().Foreground(ColorDim).Render(" " + keys + " ")
+	}
+	bed := lipgloss.NewStyle().Background(ColorZebra)
+	var b strings.Builder
+	b.WriteString(bed.Render(" "))
+	runes := []rune(keys)
+	for i, ru := range runes {
+		// Sample the ramp across the chip once, mid-band colors only
+		// (0.15..0.5): bright enough to gleam on the plum bed, never
+		// wrapping back to the dim base stop.
+		t := 0.15 + 0.35*float64(i)/float64(max(len(runes)-1, 1))
+		b.WriteString(bed.Foreground(hex(PitoShimmer.At(t))).Render(string(ru)))
+	}
+	b.WriteString(bed.Render(" "))
+	return b.String()
 }
 
 // dimCopy renders product copy dim, with `backtick` command spans in the
@@ -237,6 +407,8 @@ type textPayload struct {
 	Text string `json:"text"`
 	Body string `json:"body"`
 	HTML bool   `json:"html"`
+	// AI marks @ai turns' echoes (2.0.0) — they wear the AI accent.
+	AI bool `json:"ai"`
 	// Reply affordance (api.md): reply-capable events are stamped with a
 	// reply_handle (#xyz); once a reply consumes it, drop the hint.
 	ReplyHandle   string `json:"reply_handle"`
@@ -272,6 +444,13 @@ type section struct {
 
 type tableRow struct {
 	Cells []tableCell `json:"cells"`
+	// kv-hash shape (jobs status, config status tables): rows carry
+	// key/value + web class hints instead of cells. table() routes
+	// them to the kv renderer.
+	Key        string `json:"key"`
+	Value      string `json:"value"`
+	KeyClass   string `json:"key_class"`
+	ValueClass string `json:"value_class"`
 }
 
 type tableCell struct {
@@ -307,7 +486,7 @@ func (r *R) replyHintFor(ev api.Event) string {
 	}
 	parts := []string{}
 	if p.ReplyHandle != "" && !p.ReplyConsumed {
-		parts = append(parts, r.dim("reply with ")+r.accent(p.ReplyHandle)+r.dim(" …"))
+		parts = append(parts, r.replyAffordance(p.ReplyHandle))
 	}
 	if p.Channel != "" {
 		cyan := lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Render("@" + strings.TrimPrefix(p.Channel, "@"))
@@ -346,11 +525,12 @@ func (r *R) bodyText(ev api.Event) string {
 		// Analyze payloads: the html body is the WEB's drawing (ascii
 		// hearts, pending dot-grids) — the terminal draws its own from
 		// `analyze`, keeping only the intro. While metrics are still
-		// pending (no series yet), show a quiet note instead of the art;
+		// pending (no series yet), hold the space with the web's own
+		// pending dot-grid canvas (COPY LAW: never a client-made note);
 		// the event.replace stream fills the charts in as jobs land.
 		headline = r.paintShimmer(htmlToText(analyzeIntro(ev.Payload)))
 		if charts == "" {
-			charts = r.dim("crunching the numbers…")
+			charts = r.pendingCanvas()
 		}
 	case p.Body != "" && p.HTML:
 		// Show cards and game segments get the structured treatment:
@@ -362,10 +542,10 @@ func (r *R) bodyText(ev api.Event) string {
 			// The distribution fills asynchronously — the web shows a
 			// dotted canvas; the terminal waits quietly. The ready body
 			// arrives by event.replace/resync.
-			headline = r.paintShimmer(channelsIntro(ev.Payload)) + "\n\n" + r.dim("mapping the territory…")
+			headline = r.paintShimmer(channelsIntro(ev.Payload)) + "\n\n" + r.pendingCanvas()
 		case hasPendingGlance(ev.Payload):
 			// Same rhythm for the glance panel's AnalyticsFillJob.
-			headline = r.paintShimmer(glanceIntroText(ev.Payload)) + "\n\n" + r.dim("crunching the numbers…")
+			headline = r.paintShimmer(glanceIntroText(ev.Payload)) + "\n\n" + r.pendingCanvas()
 		default:
 			if card, ok := parseDetailCard(p.Body); ok {
 				headline = r.detailCard(card)
@@ -436,12 +616,86 @@ func (r *R) sections(groups []section) string {
 	return b.String()
 }
 
+// tablePurple resolves the header/rule purple lipgloss/table StyleFuncs
+// share: ColorPrimary ("99") is literally the color Charm's own canonical
+// table example (the Pokémon table) uses for both header text and border
+// rules, on any terminal; truecolor gets the exact web-Charm hex
+// (CharmPurple) instead of that 256-color approximation. See CharmPurple's
+// doc comment (theme.go) for the owner order this ports.
+func tablePurple(truecolor bool) color.Color {
+	if truecolor {
+		return CharmPurple
+	}
+	return ColorPrimary
+}
+
 // table renders structured rows through lipgloss/table — the shared list
 // viewer for ls channels/vids/games (and every reply that re-emits a
-// list). Rounded frame, header rule, zebra rows; alignment follows the
-// server's own class hints (text-right = numbers/dates); columns whose
-// body cells all render empty (images are ignored wholesale) drop.
+// list). Rounded frame, header rule, alternating gray-foreground rows —
+// Charm's own canonical lipgloss/table look (owner 2026-07-12 "align to
+// Charm"), no background zebra; alignment follows the server's own class
+// hints (text-right = numbers/dates); columns whose body cells all render
+// empty (images are ignored wholesale) drop. classStyle maps the web's
+// text-* class hints onto theme colors — the kv-hash rows (jobs/config
+// status) carry explicit classes.
+func classStyle(class string) lipgloss.Style {
+	st := lipgloss.NewStyle()
+	switch {
+	case strings.Contains(class, "text-purple"):
+		// Man-page section headers (pito-help-block's "Usage:"/"Options:"
+		// spans) ride this class — same purple as sections()'s titles.
+		return st.Foreground(ColorPrimary)
+	case strings.Contains(class, "text-red"):
+		return st.Foreground(ColorErr)
+	case strings.Contains(class, "text-green"):
+		return st.Foreground(ColorOK)
+	case strings.Contains(class, "text-yellow"):
+		return st.Foreground(ColorWarn)
+	case strings.Contains(class, "text-cyan"):
+		return st.Foreground(ColorCyan)
+	case strings.Contains(class, "text-fg-dim"), strings.Contains(class, "text-fg-faded"):
+		return st.Foreground(ColorDim)
+	default:
+		return st
+	}
+}
+
+// kvHashTable renders key/value table_rows (jobs status, config status):
+// keys padded to a shared column, both sides honoring their web class
+// hints. The shape has no cells — see tableRow.
+func (r *R) kvHashTable(rows []tableRow) string {
+	keyWidth := 0
+	for _, row := range rows {
+		if w := lipgloss.Width(row.Key); w > keyWidth {
+			keyWidth = w
+		}
+	}
+	var b strings.Builder
+	for i, row := range rows {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		pad := strings.Repeat(" ", keyWidth-lipgloss.Width(row.Key))
+		b.WriteString("  " + classStyle(row.KeyClass).Render(row.Key) + pad + "  " +
+			classStyle(row.ValueClass).Render(row.Value))
+	}
+	return b.String()
+}
+
 func (r *R) table(heading []tableCell, rows []tableRow) string {
+	// kv-hash rows (no cells anywhere, keys present) take the kv path.
+	if len(rows) > 0 {
+		hashRows := true
+		for _, row := range rows {
+			if len(row.Cells) > 0 || row.Key == "" {
+				hashRows = false
+				break
+			}
+		}
+		if hashRows {
+			return r.kvHashTable(rows)
+		}
+	}
 	cellText := func(cell tableCell) string {
 		if cell.HTML {
 			// Chips/coins stay plain inside lipgloss/table cells — the
@@ -525,7 +779,7 @@ func (r *R) table(heading []tableCell, rows []tableRow) string {
 	build := func(width int) string {
 		t := table.New().
 			Border(lipgloss.RoundedBorder()).
-			BorderStyle(lipgloss.NewStyle().Foreground(ColorFaint)).
+			BorderStyle(lipgloss.NewStyle().Foreground(tablePurple(r.truecolor))).
 			BorderColumn(false).
 			BorderRow(false).
 			// Horizontal rules only (owner call): no vertical borders on
@@ -544,15 +798,22 @@ func (r *R) table(heading []tableCell, rows []tableRow) string {
 					st = st.Align(lipgloss.Right)
 				}
 				if row == table.HeaderRow {
-					return st.Foreground(ColorDim).Bold(true)
+					return st.Foreground(tablePurple(r.truecolor)).Bold(true)
 				}
 				if row >= 0 && row < len(accents) && accents[row][src] {
-					st = st.Foreground(ColorAccent)
+					// Class hints that carry MEANING (the pink
+					// pito-action-shimmer ids) keep their own color — the
+					// decorative gray alternation below never overrides it.
+					return st.Foreground(ColorAccent)
 				}
+				// Charm's own canonical look: no background zebra at all —
+				// alternating gray FOREGROUNDS instead, the same two grays
+				// (ColorDim/ColorFaint) Charm's Pokémon table example ships
+				// as gray/lightGray.
 				if row%2 == 1 {
-					st = st.Background(ColorZebra)
+					return st.Foreground(ColorDim)
 				}
-				return st
+				return st.Foreground(ColorFaint)
 			})
 		if hasHeading {
 			t = t.Headers(pick(headerTexts)...)
@@ -605,7 +866,36 @@ func (r *R) markdown(text string) string {
 func (r *R) echo(ev api.Event) string {
 	var p textPayload
 	_ = json.Unmarshal(ev.Payload, &p)
+	if p.AI {
+		// @ai turns wear the AI accent — a vertical purple→pito-blue
+		// gradient bar (the web's data-accent="ai"). W2 adds the shimmer.
+		return r.aiAccentBar(r.stamp(ev)+p.Text) + "\n"
+	}
 	return r.echoBar.Render(r.stamp(ev)+p.Text) + "\n"
+}
+
+// aiAccentBar wraps content like the other message bars but paints the
+// left bar rune-by-rune down the AI gradient. Off-truecolor it settles
+// on the brand purple.
+func (r *R) aiAccentBar(content string) string {
+	body := lipgloss.NewStyle().PaddingLeft(1).Width(r.width - 3).Render(content)
+	lines := strings.Split(body, "\n")
+	var b strings.Builder
+	for i, line := range lines {
+		style := lipgloss.NewStyle().Foreground(ColorPrimary)
+		if r.truecolor {
+			t := 0.0
+			if len(lines) > 1 {
+				t = float64(i) / float64(len(lines)-1)
+			}
+			style = style.Foreground(hex(AIAccent.At(t)))
+		}
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(style.Render("┃") + line)
+	}
+	return b.String()
 }
 
 func (r *R) errorEvent(ev api.Event) string {
@@ -621,7 +911,7 @@ func (r *R) errorEvent(ev api.Event) string {
 		// dump. `verb --help` is always the way out.
 		parts := strings.Split(p.MessageKey, ".")
 		p.Text = strings.ReplaceAll(parts[len(parts)-1], "_", " ")
-		p.Detail = p.MessageKey + " — try `--help` on the verb"
+		p.Detail = p.MessageKey + " — try `--help` on the tool"
 	}
 	if p.Text == "" {
 		return r.fallback(ev)
@@ -631,21 +921,6 @@ func (r *R) errorEvent(ev api.Event) string {
 		content += "\n" + r.dim(p.Detail)
 	}
 	return r.errorStyle.Render(content) + "\n"
-}
-
-func (r *R) thinking(ev api.Event) string {
-	var p struct {
-		Resolved       bool     `json:"resolved"`
-		ElapsedSeconds *float64 `json:"elapsed_seconds"`
-	}
-	_ = json.Unmarshal(ev.Payload, &p)
-	if p.Resolved && p.ElapsedSeconds != nil {
-		return r.dimStyle.Render(fmt.Sprintf(">_< thought for %.1fs", *p.ElapsedSeconds)) + "\n"
-	}
-	if p.Resolved {
-		return r.dimStyle.Render(">_< thought about it") + "\n"
-	}
-	return r.dimStyle.Render("thinking…") + "\n"
 }
 
 func (r *R) confirmation(ev api.Event) string {
@@ -660,7 +935,9 @@ func (r *R) confirmation(ev api.Event) string {
 	_ = json.Unmarshal(ev.Payload, &p)
 	body := p.Body
 	if p.HTML {
-		body = htmlToText(body)
+		// Confirmation bodies carry pito-token spans (e.g. the channel
+		// handle in a disconnect card) — paint them, don't leak markers.
+		body = r.paintShimmer(htmlToText(body))
 	}
 	if p.Resolved && p.OutcomeText != "" {
 		body = p.OutcomeText
@@ -674,15 +951,86 @@ func (r *R) confirmation(ev api.Event) string {
 		}
 	}
 	if !p.Resolved && p.ReplyHandle != "" {
-		content += "\n" + r.dim("reply with ") + r.accent(p.ReplyHandle) + r.dim(" …")
+		content += "\n" + r.replyAffordance(p.ReplyHandle)
 	}
-	bar := r.confirmStyle
-	if !p.Resolved && r.truecolor {
-		// A live confirmation breathes: the warn border pulses with the
-		// shimmer phase until a reply resolves it.
-		bar = bar.BorderForeground(hex(pulseWarn(r.phase)))
+	if p.Resolved || !r.truecolor {
+		return r.confirmStyle.Render(content) + "\n"
 	}
-	return bar.Render(content) + "\n"
+	// A live, truecolor confirmation breathes: the warn border pulses with
+	// the shimmer phase until a reply resolves it, plus the ambassador
+	// wave's own confirm-glint (micro.go effect 2) — a single brighter
+	// cell sliding down the border on top of that pulse. Both need a
+	// PER-LINE border color, which lipgloss's Border()+BorderForeground()
+	// can't give (one color for every line); hand-painted bar cells, like
+	// ai.go's aiChrome, are the seam that can.
+	return r.confirmChrome(content) + "\n"
+}
+
+// confirmChrome hand-paints a pending confirmation's left border one line
+// at a time — ai.go's aiChrome shape, applied here so the confirm-glint
+// (micro.go effect 2) can recolor ONE row independently of every other
+// row's shared pulseWarn breathing. Reproduces confirmStyle's own
+// PaddingLeft(1)+Width(width-1) content box byte-for-byte; only the
+// border character's per-line color differs from the plain
+// BorderForeground path confirmation() takes when the glint is off
+// (r.glint < 0 for every row here), so a settled/inactive sweep renders
+// identically either way.
+func (r *R) confirmChrome(content string) string {
+	body := lipgloss.NewStyle().PaddingLeft(1).Width(r.width - 1).Render(content)
+	lines := strings.Split(body, "\n")
+	base := pulseWarn(r.phase)
+	glintRow := -1
+	if r.glint >= 0 {
+		glintRow = confirmGlintRow(r.glint, len(lines))
+	}
+	var b strings.Builder
+	for i, line := range lines {
+		c := base
+		if i == glintRow {
+			c = brighten(base, 0.4)
+		}
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(lipgloss.NewStyle().Foreground(hex(c)).Render("┃") + line)
+	}
+	return b.String()
+}
+
+// confirmGlintRow resolves the glint's 0..1 sweep progress against THIS
+// block's own row count: round(progress*(rows-1)), so row 0 (top) lights
+// at progress 0 and the last row lights at progress 1 regardless of how
+// tall any particular confirmation card is. rows <= 0 has nothing to
+// light (returns -1, never equal to any real line index).
+func confirmGlintRow(progress float64, rows int) int {
+	if rows <= 0 {
+		return -1
+	}
+	if rows == 1 {
+		return 0
+	}
+	row := int(progress*float64(rows-1) + 0.5)
+	if row < 0 {
+		row = 0
+	}
+	if row > rows-1 {
+		row = rows - 1
+	}
+	return row
+}
+
+// brighten lifts c toward white by amount ∈ [0,1] — the glint's own
+// "+40% brightness" on top of whatever the pulse's base color is at this
+// instant, per channel, clamped at 255.
+func brighten(c RGB, amount float64) RGB {
+	lift := func(x uint8) uint8 {
+		v := float64(x) + (255-float64(x))*amount
+		if v > 255 {
+			v = 255
+		}
+		return uint8(v)
+	}
+	return RGB{R: lift(c.R), G: lift(c.G), B: lift(c.B)}
 }
 
 // expandDetail renders a confirmation card's stats block — the web
@@ -758,20 +1106,26 @@ func (r *R) fallback(ev api.Event) string {
 	return label + "\n" + r.dimStyle.Render(pretty.String()) + "\n"
 }
 
-// SetReveal installs the grow-in fractions for freshly-arrived events
-// (eventID → 0..1); events absent from the map render fully revealed.
-func (r *R) SetReveal(fracs map[int64]float64) { r.reveal = fracs }
+// SetShake installs the ambassador wave's error-shake offsets (micro.go
+// effect 1; eventID → cells). Events absent from the map render at their
+// resting position (no pad) — "absence ⇒ settled".
+func (r *R) SetShake(offsets map[int64]int) { r.shake = offsets }
 
-// revealFor is the current event's grow-in fraction.
-func (r *R) revealFor(id int64) float64 {
-	if r.reveal == nil {
-		return 1
+// shakeFor is the current event's jitter offset — 0 (no entry in the
+// map, or a nil map entirely) means render at rest.
+func (r *R) shakeFor(id int64) int {
+	if r.shake == nil {
+		return 0
 	}
-	if f, ok := r.reveal[id]; ok {
-		return f
-	}
-	return 1
+	return r.shake[id]
 }
+
+// SetGlint installs the ambassador wave's confirm-glint sweep progress
+// (micro.go effect 2): -1 means no sweep is live right now (New's own
+// default, and confirmGlintProgress's off/outside-window result), 0..1
+// otherwise. confirmChrome resolves a non-negative progress against its
+// own row count.
+func (r *R) SetGlint(progress float64) { r.glint = progress }
 
 // gamesTable shapes channel_games rows into the shared table language:
 // #id and vids right-aligned like every list, title left.

@@ -7,10 +7,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -98,9 +100,32 @@ func (c *Client) FetchChat(ctx context.Context, uuid string) (*ChatPage, error) 
 	return &page, nil
 }
 
-// Resume GETs the conversation list for the picker.
-func (c *Client) Resume(ctx context.Context) (*ResumeList, error) {
-	resp, body, err := c.do(ctx, http.MethodGet, "/resume.json", nil)
+// FetchResume GETs one page of the conversation picker list (tui-needs ask
+// 9a). after is the opaque cursor from the previous page's
+// ResumeList.NextCursor; pass "" for the first page. limit defaults to 50
+// when <= 0, mirroring FetchNotifications' cursor idiom — WITH ONE
+// deliberate deviation: when after=="" AND limit<=0 (today's zero-value
+// first-page call), the request carries NO query string at all, so it is
+// byte-identical to the pre-pagination request this endpoint has always
+// taken. A server that predates pagination — or any other combination
+// that still resolves to that exact request — just answers its one
+// complete recent/older payload, which decodes fine since NextCursor and
+// Rows simply come back zero-valued. Any other after/limit combination
+// rides the params, same as FetchNotifications.
+func (c *Client) FetchResume(ctx context.Context, after string, limit int) (*ResumeList, error) {
+	path := "/resume.json"
+	if after != "" || limit > 0 {
+		if limit <= 0 {
+			limit = 50
+		}
+		q := url.Values{}
+		if after != "" {
+			q.Set("after", after)
+		}
+		q.Set("limit", strconv.Itoa(limit))
+		path += "?" + q.Encode()
+	}
+	resp, body, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -115,6 +140,132 @@ func (c *Client) Resume(ctx context.Context) (*ResumeList, error) {
 		return nil, fmt.Errorf("api: decoding resume list: %w", err)
 	}
 	return &list, nil
+}
+
+// ErrNotificationsUnavailable marks a server without /notifications.json —
+// the endpoint predates some servers. A missing route answers 404 or, when
+// Rails content-negotiates the .json format away, 406 (live-verified on
+// dev pre-rollout). Callers gate the notifications panel on this error
+// rather than surfacing it as a hard failure.
+var ErrNotificationsUnavailable = errors.New("api: notifications endpoint unavailable")
+
+// PatchNotification PATCHes /notifications/:id {read:} — the web
+// sidebar's own mark-read call (arrow arrival marks read, click
+// toggles); the server broadcasts the fresh unread count to every
+// client afterward. 204 on success.
+func (c *Client) PatchNotification(ctx context.Context, id int64, read bool) error {
+	path := fmt.Sprintf("/notifications/%d", id)
+	resp, _, err := c.do(ctx, http.MethodPatch, path, map[string]any{"read": read})
+	if err != nil {
+		return err
+	}
+	if err := c.checkAuth(resp); err != nil {
+		return err
+	}
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("notification patch: unexpected status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// PickerRow is one row of the game/video picker feeds (GET
+// /games/picker.json, /videos/picker.json — pito's PickerController,
+// built for this client). Handle is videos-only (the channel it lives on).
+type PickerRow struct {
+	ID     int64  `json:"id"`
+	Title  string `json:"title"`
+	Handle string `json:"handle"`
+}
+
+// PickerPage is one page of a picker feed: 50 rows and the opaque keyset
+// cursor for the next page ("" when the list is exhausted) — the house
+// after=/next_cursor convention.
+type PickerPage struct {
+	Rows       []PickerRow `json:"rows"`
+	NextCursor string      `json:"next_cursor"`
+}
+
+// FetchPickerPage GETs one page of /<noun>/picker.json (noun: "games" or
+// "videos"), after "" for page 1. Auth-gated server-side.
+func (c *Client) FetchPickerPage(ctx context.Context, noun, after string) (*PickerPage, error) {
+	path := "/" + noun + "/picker.json"
+	if after != "" {
+		q := url.Values{}
+		q.Set("after", after)
+		path += "?" + q.Encode()
+	}
+	resp, body, err := c.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.checkAuth(resp); err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%s picker: unexpected status %d", noun, resp.StatusCode)
+	}
+	var page PickerPage
+	if err := json.Unmarshal(body, &page); err != nil {
+		return nil, fmt.Errorf("%s picker: decoding: %w", noun, err)
+	}
+	return &page, nil
+}
+
+// FetchNotifications GETs one page of the notification list. after is the
+// opaque cursor from the previous page's NotificationPage.NextCursor; pass
+// "" for the first page. limit defaults to 50 when <= 0. The param is named
+// `after` to match pito's own keyset convention (Notification.panel_page).
+// FetchVersion GETs /version — the running server build's identity (the
+// tag after the mini-status dot; pito's VersionsController, the same
+// endpoint the web's cable-health nudge polls). Auth-gated server-side,
+// so it rides the same cookie jar as everything else.
+func (c *Client) FetchVersion(ctx context.Context) (string, error) {
+	resp, body, err := c.do(ctx, http.MethodGet, "/version", nil)
+	if err != nil {
+		return "", err
+	}
+	if err := c.checkAuth(resp); err != nil {
+		return "", err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("version: unexpected status %d", resp.StatusCode)
+	}
+	var out struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return "", fmt.Errorf("version: decoding: %w", err)
+	}
+	return out.Version, nil
+}
+
+func (c *Client) FetchNotifications(ctx context.Context, after string, limit int) (*NotificationPage, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	q := url.Values{}
+	if after != "" {
+		q.Set("after", after)
+	}
+	q.Set("limit", strconv.Itoa(limit))
+	resp, body, err := c.do(ctx, http.MethodGet, "/notifications.json?"+q.Encode(), nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.checkAuth(resp); err != nil {
+		return nil, err
+	}
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusNotAcceptable {
+		return nil, ErrNotificationsUnavailable
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("api: GET /notifications.json: %s", resp.Status)
+	}
+	var page NotificationPage
+	if err := json.Unmarshal(body, &page); err != nil {
+		return nil, fmt.Errorf("api: decoding notifications: %w", err)
+	}
+	return &page, nil
 }
 
 // SendMessage POSTs raw input to /chat. uuid may be empty — the server then

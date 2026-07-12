@@ -2,6 +2,7 @@ package ui
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,16 +12,20 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/gmrdad82/pito-tui/internal/api"
 	"github.com/gmrdad82/pito-tui/internal/cable"
+	"github.com/gmrdad82/pito-tui/internal/ui/render"
 )
 
 func TestMain(m *testing.M) {
-	lipgloss.SetColorProfile(termenv.Ascii)
+	// Lip Gloss v2 has no global color profile to force anymore (see
+	// render.TestMain); goldenFrame strips ANSI explicitly for the golden
+	// comparisons instead, and every other assertion here checks plain
+	// substrings that survive being wrapped in color codes.
 	time.Local = time.UTC // deterministic HH:MM stamps in golden frames
 	os.Exit(m.Run())
 }
@@ -58,7 +63,13 @@ func newTestModel(t *testing.T, handler http.Handler, opts ...Option) (Model, *c
 		t.Fatal(err)
 	}
 	rec := &connectRecorder{}
-	opts = append([]Option{WithPlainRender(), WithNow(func() time.Time { return fixedNow })}, opts...)
+	// WithSplash(false): the startup splash (chrome.go/splash.go) defaults
+	// on in NewModel — every test wants a clean first frame, so the
+	// harness forces it off here, mirroring WithPlainRender's own
+	// always-prepended shape. A test that wants to exercise the splash
+	// itself passes WithSplash(true) as one of opts below, which — Option
+	// application being plain in-order last-writer-wins — overrides this.
+	opts = append([]Option{WithPlainRender(), WithNow(func() time.Time { return fixedNow }), WithSplash(false), WithStarSky(false)}, opts...)
 	m := NewModel(client, rec.connect, opts...)
 	return m, rec
 }
@@ -82,12 +93,52 @@ func sized(m Model) Model {
 	return drive(m, tea.WindowSizeMsg{Width: 80, Height: 24})
 }
 
-func key(s string) tea.KeyMsg {
+// driveAnim ticks the animation loop directly, maxTicks times at most,
+// until the model reports nothing left animating (m.animating false) —
+// standing in for the real tea.Tick loop without its 40ms wall-clock
+// wait. A deferred overlay close (spring.go's stepOverlays) surfaces its
+// follow-on command — e.g. the picker's fetchChatCmd, fired only once
+// the slide-out spring actually settles — bundled alongside that tick's
+// recurring animTick; the ONE tick where closeAction flips from set to
+// nil is the only one whose command is actually run (via runCmd, which
+// also re-drives the bundled animTick — harmless, just one extra real
+// tick). Every other tick's command is the bare recurring animTick and
+// is safe to discard untouched.
+func driveAnim(t *testing.T, m Model, maxTicks int) Model {
+	t.Helper()
+	for i := 0; i < maxTicks; i++ {
+		next, _ := m.Update(AnimTickMsg{})
+		m = next.(Model)
+		if !m.animating {
+			return m
+		}
+	}
+	t.Fatalf("animation did not settle within %d ticks", maxTicks)
+	return m
+}
+
+// key builds a synthetic key press for tests. Named keys map onto their v2
+// Code constant; anything else is treated as printable text (Code set to
+// its first rune so msg.String() still matches single-letter cases like
+// "j"/"k", and multi-rune labels like "down"/"up" happen to stringify back
+// to themselves too — see [tea.Key.String]).
+func key(s string) tea.KeyPressMsg {
 	switch s {
 	case "enter":
-		return tea.KeyMsg{Type: tea.KeyEnter}
+		return tea.KeyPressMsg{Code: tea.KeyEnter}
+	case "tab":
+		return tea.KeyPressMsg{Code: tea.KeyTab}
+	case "esc":
+		return tea.KeyPressMsg{Code: tea.KeyEscape}
+	case "backspace":
+		return tea.KeyPressMsg{Code: tea.KeyBackspace}
+	case "down":
+		return tea.KeyPressMsg{Code: tea.KeyDown}
+	case "up":
+		return tea.KeyPressMsg{Code: tea.KeyUp}
 	default:
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+		r := []rune(s)
+		return tea.KeyPressMsg{Code: r[0], Text: s}
 	}
 }
 
@@ -131,13 +182,16 @@ func TestPickerSelectionOpensConversation(t *testing.T) {
 		t.Fatalf("rows = %d, want 3", len(m.rows))
 	}
 
-	// j moves past "new conversation" to the first resume row; enter opens.
+	// j moves past "new conversation" to the first resume row; enter
+	// starts the picker's slide-out close — the actual switch to chat
+	// (and its scrollback fetch) waits for the close spring to settle
+	// (drawer springs purged 2026-07-12: the close is immediate.)
 	m = drive(m, key("j"))
 	m, cmd = driveCmd(m, key("enter"))
 	if m.mode != modeChat || cmd == nil {
-		t.Fatal("enter on a resume row must switch to chat and fetch")
+		t.Fatal("enter on a resume row must switch straight into chat (springs purged)")
 	}
-	m = drive(m, cmd())
+	m = drive(m, cmd()) // the close returned the scrollback fetch — deliver it
 
 	if m.conv.UUID != "u1" || m.conv.Label() != "release prep" {
 		t.Errorf("conversation = %+v", m.conv)
@@ -145,7 +199,7 @@ func TestPickerSelectionOpensConversation(t *testing.T) {
 	if got := rec.calls(); len(got) != 1 || got[0] != "u1" {
 		t.Errorf("connect calls = %v, want [u1]", got)
 	}
-	if view := m.View(); !strings.Contains(view, "pong") {
+	if view := m.viewContent(); !strings.Contains(view, "pong") {
 		t.Errorf("scrollback missing from view:\n%s", view)
 	}
 }
@@ -221,7 +275,7 @@ func TestWebOnlyNoticeRendersDim(t *testing.T) {
 	m, cmd := driveCmd(m, key("enter"))
 	m = drive(m, cmd())
 
-	if view := m.View(); !strings.Contains(view, "wears a mouse cursor") {
+	if view := m.viewContent(); !strings.Contains(view, "wears a mouse cursor") {
 		t.Errorf("view missing the web-only notice:\n%s", view)
 	}
 }
@@ -246,8 +300,11 @@ func TestPendingSpinnerClearsOnTurnArrival(t *testing.T) {
 	if spinCmd == nil {
 		t.Fatal("pending must start the spinner tick loop")
 	}
-	if !strings.Contains(m.View(), "thinking…") {
-		t.Error("view missing the pending spinner line")
+	if !strings.Contains(m.viewContent(), "●") {
+		t.Error("view missing the pending comet line (web post_command_dots parity — no caption)")
+	}
+	if strings.Contains(m.viewContent(), "thinking…") {
+		t.Error("the client must not invent a 'thinking…' caption (owner smoke 2026-07-12)")
 	}
 	if sounds.sends != 1 {
 		t.Errorf("send sound played %d times, want 1", sounds.sends)
@@ -263,8 +320,8 @@ func TestPendingSpinnerClearsOnTurnArrival(t *testing.T) {
 	if sounds.receives != 1 {
 		t.Errorf("receive sound played %d times, want 1", sounds.receives)
 	}
-	if strings.Contains(m.View(), "thinking…") {
-		t.Error("spinner line must disappear with pending")
+	if strings.Contains(m.viewContent(), "●∙") || strings.Contains(m.viewContent(), "∙●") {
+		t.Error("comet line must disappear with pending")
 	}
 }
 
@@ -277,14 +334,14 @@ func TestEventReplaceRewritesViewport(t *testing.T) {
 		Type:  cable.TypeEventAppend,
 		Event: api.Event{ID: 3, TurnID: 8, Kind: "confirmation", Payload: []byte(`{"body":"Sure?","reply_handle":"@confirm-1"}`)},
 	}})
-	if !strings.Contains(m.View(), "Sure?") {
+	if !strings.Contains(m.viewContent(), "Sure?") {
 		t.Fatal("appended confirmation missing")
 	}
 	m = drive(m, CableEventMsg{M: cable.StreamMessage{
 		Type:  cable.TypeEventReplace,
 		Event: api.Event{ID: 3, TurnID: 8, Kind: "confirmation", Payload: []byte(`{"body":"Sure?","resolved":true,"outcome_text":"Done."}`)},
 	}})
-	view := m.View()
+	view := m.viewContent()
 	if !strings.Contains(view, "Done.") || strings.Contains(view, "@confirm-1") {
 		t.Errorf("replace did not rewrite the block:\n%s", view)
 	}
@@ -318,7 +375,7 @@ func TestReconnectTriggersResyncMerge(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("disconnect alone must not refetch")
 	}
-	if !strings.Contains(m.View(), "disconnected") {
+	if !strings.Contains(m.viewContent(), "disconnected") {
 		t.Error("banner missing while disconnected")
 	}
 
@@ -328,11 +385,11 @@ func TestReconnectTriggersResyncMerge(t *testing.T) {
 	}
 	m = drive(m, cmd())
 
-	view := m.View()
+	view := m.viewContent()
 	if !strings.Contains(view, "pong EDITED") || !strings.Contains(view, "missed while offline") {
 		t.Errorf("resync merge incomplete:\n%s", view)
 	}
-	if strings.Contains(m.View(), "disconnected — reconnecting") {
+	if strings.Contains(m.viewContent(), "disconnected — reconnecting") {
 		t.Error("banner must clear once connected")
 	}
 }
@@ -346,8 +403,8 @@ func TestExpiredSessionAsksForInAppLogin(t *testing.T) {
 	m = sized(m)
 	m = drive(m, m.fetchChatCmd("u1", false)())
 
-	if !strings.Contains(m.View(), "send /login") {
-		t.Errorf("view missing the login banner:\n%s", m.View())
+	if !strings.Contains(m.viewContent(), "send /login") {
+		t.Errorf("view missing the login banner:\n%s", m.viewContent())
 	}
 }
 
@@ -368,14 +425,14 @@ func TestLoginRequiredFlowEndsWithChat(t *testing.T) {
 	m, rec := newTestModel(t, mux, WithLoginRequired())
 	m = sized(m)
 
-	if !strings.Contains(m.View(), "send /login") {
-		t.Fatalf("unauthenticated start missing the login banner:\n%s", m.View())
+	if !strings.Contains(m.viewContent(), "send /login") {
+		t.Fatalf("unauthenticated start missing the login banner:\n%s", m.viewContent())
 	}
 	m.input.SetValue("/login 123456")
 	m, cmd := driveCmd(m, key("enter"))
 	m, cmd = driveCmd(m, cmd()) // SendResultMsg: created + minted
 	m = runCmd(m, cmd)          // fetch succeeds — the auth-gated proof
-	if strings.Contains(m.View(), "send /login") {
+	if strings.Contains(m.viewContent(), "send /login") {
 		t.Error("banner must clear once an auth-gated fetch succeeds")
 	}
 	if got := rec.calls(); len(got) != 1 || got[0] != "fresh" {
@@ -391,20 +448,41 @@ func TestScrollKeysAndFollow(t *testing.T) {
 	if !m.follow {
 		t.Fatal("follow must start true")
 	}
-	m = drive(m, key("g"))
-	if m.follow {
-		t.Error("g (top) must break follow")
+	// A tall transcript so the viewport can actually scroll.
+	for i := int64(100); i <= 180; i++ {
+		m.transcript.Append(api.Event{ID: i, TurnID: i, Kind: "system",
+			Payload: []byte(`{"text":"row"}`)})
 	}
-	m = drive(m, key("G"))
+	m.refreshViewport()
+	m.sc.GotoBottom()
+	// The vim scroll letters are gone (2.0.0 commands start with them —
+	// "glance", "jobs"): every letter types, even at an empty prompt.
+	m = drive(m, key("g"))
+	if got := m.input.Value(); got != "g" {
+		t.Errorf("input = %q — g must type at an empty prompt, not scroll", got)
+	}
 	if !m.follow {
-		t.Error("G must re-enable follow")
+		t.Error("typing must not touch follow")
+	}
+	m.input.Reset()
+
+	// Scrolling still breaks/restores follow via the chorded keys.
+	m = drive(m, tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+	if m.follow {
+		t.Error("ctrl+u (up) must break follow")
+	}
+	for i := 0; i < 50; i++ {
+		m = drive(m, tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+	}
+	if !m.follow {
+		t.Error("ctrl+d back to the bottom must restore follow")
 	}
 
 	// With text in the prompt, letters belong to the input.
 	m.input.SetValue("hel")
 	m = drive(m, key("j"))
 	if got := m.input.Value(); got != "helj" {
-		t.Errorf("input = %q — j must type, not scroll, while the prompt has text", got)
+		t.Errorf("input = %q — j must type while the prompt has text", got)
 	}
 }
 
@@ -435,12 +513,11 @@ func TestChatKeyBranches(t *testing.T) {
 	}
 
 	// Half-page scrolls break follow at the top.
-	m = drive(m, tea.KeyMsg{Type: tea.KeyCtrlU})
-	m = drive(m, tea.KeyMsg{Type: tea.KeyCtrlD})
-	m = drive(m, key("j"), key("k"))
+	m = drive(m, tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+	m = drive(m, tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
 
 	// ctrl-c quits from chat mode.
-	_, cmd = driveCmd(m, tea.KeyMsg{Type: tea.KeyCtrlC})
+	_, cmd = driveCmd(m, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatal("ctrl-c must quit")
 	}
@@ -460,18 +537,19 @@ func TestPickerCursorBounds(t *testing.T) {
 		t.Errorf("cursor = %d, want %d", m.cursor, len(m.rows)-1)
 	}
 
-	// Enter on "new conversation" opens an empty chat without fetching.
-	m = drive(m, key("k"), key("k"))
-	m.cursor = 0
-	m, cmd := driveCmd(m, key("enter"))
-	if m.mode != modeChat || cmd != nil || m.conv.UUID != "" {
-		t.Error("new-conversation entry must open an empty chat, no fetch")
-	}
-
-	// ctrl-c also quits from the picker.
-	_, cmd = driveCmd(m, tea.KeyMsg{Type: tea.KeyCtrlC})
+	// ctrl-c quits from the picker.
+	_, cmd := driveCmd(m, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Error("ctrl-c must quit from the picker")
+	}
+
+	// Enter on "new conversation" lands straight in an empty chat, no
+	// fetch (drawer springs purged 2026-07-12).
+	m = drive(m, key("k"), key("k"))
+	m.cursor = 0
+	m, _ = driveCmd(m, key("enter"))
+	if m.mode != modeChat || m.conv.UUID != "" {
+		t.Error("new-conversation entry must land in an empty chat, no fetch")
 	}
 }
 
@@ -489,8 +567,166 @@ func TestResumeErrorShowsMessage(t *testing.T) {
 	m, _ := newTestModel(t, mux)
 	m = sized(m)
 	m = drive(m, m.fetchResumeCmd()())
-	if !strings.Contains(m.View(), "could not load conversations") {
-		t.Errorf("view missing the load error:\n%s", m.View())
+	if !strings.Contains(m.viewContent(), "could not load conversations") {
+		t.Errorf("view missing the load error:\n%s", m.viewContent())
+	}
+}
+
+// TestPickerPaginationAndDuplicateGuard drives the picker's full
+// three-page /resume.json flow (tui-needs ask 9a): page 1 arrives
+// grouped {recent, older} with a cursor, page 2 arrives flat {rows}
+// carrying an ai-flagged row, page 3 arrives flat and exhausted
+// (next_cursor null). It pins the same contract
+// TestNotificationsPaginationAndDuplicateGuard pins for the
+// notifications panel: scrolling to the last loaded row fires exactly
+// one fetch, a repeated nudge while it's in flight is a no-op (duplicate
+// guard), the loader row shows only while fetching, appended rows render
+// with their ✦ badge intact, and exhaustion stops fetching for good.
+func TestPickerPaginationAndDuplicateGuard(t *testing.T) {
+	var calls []string
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /resume.json", func(w http.ResponseWriter, r *http.Request) {
+		after := r.URL.Query().Get("after")
+		calls = append(calls, after)
+		w.Header().Set("Content-Type", "application/json")
+		switch after {
+		case "":
+			_, _ = w.Write([]byte(`{
+				"recent": [{"uuid":"u1","title":"first","display_name":"first","last_activity_at":"2026-07-04T11:58:00Z"}],
+				"older":  [{"uuid":"u2","title":"second","display_name":"second","last_activity_at":"2026-06-28T20:30:00Z"}],
+				"next_cursor":"c2"
+			}`))
+		case "c2":
+			_, _ = w.Write([]byte(`{"rows":[
+				{"uuid":"u3","title":"third","display_name":"third","last_activity_at":"2026-06-20T09:00:00Z","ai":true}
+			],"next_cursor":"c3"}`))
+		case "c3":
+			_, _ = w.Write([]byte(`{"rows":[
+				{"uuid":"u4","title":"fourth","display_name":"fourth","last_activity_at":"2026-06-10T09:00:00Z"}
+			],"next_cursor":null}`))
+		default:
+			t.Errorf("unexpected fetch with after=%q", after)
+			_, _ = w.Write([]byte(`{"rows":[],"next_cursor":null}`))
+		}
+	})
+	m, _ := newTestModel(t, mux)
+	m = sized(m)
+
+	// Page 1 lands (new + first + second = 3 rows, last index 2).
+	m = drive(m, m.fetchResumeCmd()())
+	if len(m.rows) != 3 || m.pickerNext != "c2" || m.pickerFetching {
+		t.Fatalf("page 1 not absorbed: rows=%d next=%q fetching=%v", len(m.rows), m.pickerNext, m.pickerFetching)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("calls = %v, want exactly 1 after page 1", calls)
+	}
+
+	// "j" to row 1: not the last row yet, must not fetch.
+	m, cmd := driveCmd(m, key("j"))
+	if m.cursor != 1 || cmd != nil || m.pickerFetching {
+		t.Fatalf("moving off the last row must not fetch: cursor=%d fetching=%v cmd=%v", m.cursor, m.pickerFetching, cmd)
+	}
+
+	// "j" to row 2 (the last loaded row): fires page 2.
+	m, cmd = driveCmd(m, key("j"))
+	if m.cursor != 2 || !m.pickerFetching || cmd == nil {
+		t.Fatalf("reaching the last row must trigger page 2: cursor=%d fetching=%v cmd=%v", m.cursor, m.pickerFetching, cmd)
+	}
+	if !strings.Contains(m.viewContent(), loaderDots) {
+		t.Errorf("loader row missing mid-fetch:\n%s", m.viewContent())
+	}
+
+	// A duplicate nudge while the fetch is in flight must NOT re-request.
+	m, cmd = driveCmd(m, key("j"))
+	if cmd != nil {
+		t.Fatal("a nudge while fetching must be a no-op (duplicate-fetch guard)")
+	}
+	if len(calls) != 1 {
+		t.Fatalf("calls = %v, want still 1 — the guard must have blocked the duplicate", calls)
+	}
+
+	// Land page 2 — appends below the existing rows (new + first + second
+	// + third = 4 rows, last index 3), carries the ai flag.
+	m = drive(m, m.fetchResumeMoreCmd(m.pickerNext)())
+	if len(m.rows) != 4 || m.pickerNext != "c3" || m.pickerFetching {
+		t.Fatalf("page 2 not absorbed: rows=%d next=%q fetching=%v", len(m.rows), m.pickerNext, m.pickerFetching)
+	}
+	if !m.rows[3].ai || m.rows[3].title != "third" {
+		t.Fatalf("appended row wrong: %+v", m.rows[3])
+	}
+	if len(calls) != 2 {
+		t.Fatalf("calls = %v, want exactly 2 total", calls)
+	}
+	var thirdLine, secondLine string
+	for _, l := range strings.Split(m.viewContent(), "\n") {
+		switch {
+		case strings.Contains(l, "third"):
+			thirdLine = l
+		case strings.Contains(l, "second"):
+			secondLine = l
+		}
+	}
+	if !strings.Contains(thirdLine, aiSparkle) {
+		t.Errorf("appended ai-flagged row missing its badge: %q", thirdLine)
+	}
+	if strings.Contains(secondLine, aiSparkle) {
+		t.Errorf("unflagged row must not show the badge: %q", secondLine)
+	}
+
+	// "j" to row 3 (the new last row): fires page 3.
+	m, cmd = driveCmd(m, key("j"))
+	if m.cursor != 3 || !m.pickerFetching || cmd == nil {
+		t.Fatalf("reaching the new last row must trigger page 3: cursor=%d fetching=%v cmd=%v", m.cursor, m.pickerFetching, cmd)
+	}
+	if !strings.Contains(m.viewContent(), loaderDots) {
+		t.Errorf("loader row missing mid-fetch for page 3:\n%s", m.viewContent())
+	}
+
+	// Land page 3 — exhausted (next_cursor null).
+	m = drive(m, m.fetchResumeMoreCmd(m.pickerNext)())
+	if len(m.rows) != 5 || m.pickerNext != "" || m.pickerFetching {
+		t.Fatalf("page 3 not absorbed: rows=%d next=%q fetching=%v", len(m.rows), m.pickerNext, m.pickerFetching)
+	}
+	if len(calls) != 3 {
+		t.Fatalf("calls = %v, want exactly 3 total", calls)
+	}
+	if strings.Contains(m.viewContent(), loaderDots) {
+		t.Errorf("exhausted list must never show the loader:\n%s", m.viewContent())
+	}
+
+	// Scrolling to the new last row (now exhausted) must not fetch again.
+	m, cmd = driveCmd(m, key("j"))
+	if cmd != nil || m.pickerFetching {
+		t.Fatal("an exhausted list must never fetch again")
+	}
+	if len(calls) != 3 {
+		t.Fatalf("calls = %v, want still 3 after exhaustion", calls)
+	}
+}
+
+// TestPickerCursorlessServerNeverFetchesMore covers old-server tolerance
+// (tui-needs ask 9a): a /resume.json reply with no next_cursor at all —
+// today's pre-pagination shape, and what resumeJSON's fixture in
+// chatServer serves — must never grow a loader row or schedule a
+// follow-on fetch, no matter how far the cursor scrolls. This is the
+// byte-identical path TestGoldenPicker also pins.
+func TestPickerCursorlessServerNeverFetchesMore(t *testing.T) {
+	m, _ := newTestModel(t, chatServer(t))
+	m = sized(m)
+	m = drive(m, m.fetchResumeCmd()())
+	if m.pickerNext != "" {
+		t.Fatalf("setup: pickerNext = %q, want \"\" for a cursorless server", m.pickerNext)
+	}
+
+	var cmd tea.Cmd
+	for range len(m.rows) + 2 { // past the end and back — still nothing to fetch
+		m, cmd = driveCmd(m, key("j"))
+		if cmd != nil || m.pickerFetching {
+			t.Fatalf("cursorless server must never schedule a fetch: cursor=%d fetching=%v", m.cursor, m.pickerFetching)
+		}
+	}
+	if strings.Contains(m.viewContent(), loaderDots) {
+		t.Errorf("cursorless server must never show the loader row:\n%s", m.viewContent())
 	}
 }
 
@@ -505,8 +741,8 @@ func TestSendFailureBranches(t *testing.T) {
 		m.input.SetValue("hi")
 		m, cmd := driveCmd(m, key("enter"))
 		m = drive(m, cmd())
-		if !strings.Contains(m.View(), "send failed") {
-			t.Errorf("view missing the send-failed notice:\n%s", m.View())
+		if !strings.Contains(m.viewContent(), "send failed") {
+			t.Errorf("view missing the send-failed notice:\n%s", m.viewContent())
 		}
 	})
 
@@ -520,8 +756,8 @@ func TestSendFailureBranches(t *testing.T) {
 		m.input.SetValue("hi")
 		m, cmd := driveCmd(m, key("enter"))
 		m = drive(m, cmd())
-		if !strings.Contains(m.View(), "send /login") {
-			t.Errorf("view missing the login banner:\n%s", m.View())
+		if !strings.Contains(m.viewContent(), "send /login") {
+			t.Errorf("view missing the login banner:\n%s", m.viewContent())
 		}
 	})
 }
@@ -594,8 +830,12 @@ func TestUnknownConversationFallsBackToPicker(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("the fallback must fetch the resume list")
 	}
-	m = drive(m, cmd())
-	view := m.View()
+	// The fallback batches the resume fetch with the picker's slide-in
+	// spring kickoff (tea.Batch(fetchResumeCmd, animate)) — runCmd
+	// expands the batch, unlike drive's single-message Update.
+	m = runCmd(m, cmd)
+	m = driveAnim(t, m, 40) // let the slide-in settle before reading the (clipped) view
+	view := m.viewContent()
 	if !strings.Contains(view, "does not exist anymore") || !strings.Contains(view, "release prep") {
 		t.Errorf("picker fallback view wrong:\n%s", view)
 	}
@@ -621,8 +861,8 @@ func TestAnonymousSendDoesNotClearLoginBanner(t *testing.T) {
 	m, cmd := driveCmd(m, key("enter"))
 	m, cmd = driveCmd(m, cmd())
 	m = runCmd(m, cmd)
-	if !strings.Contains(m.View(), "send /login") {
-		t.Errorf("banner must survive an anonymous send:\n%s", m.View())
+	if !strings.Contains(m.viewContent(), "send /login") {
+		t.Errorf("banner must survive an anonymous send:\n%s", m.viewContent())
 	}
 }
 
@@ -644,7 +884,7 @@ func TestPickerWindowsLongLists(t *testing.T) {
 	m = sized(m) // 80×24
 	m = drive(m, m.fetchResumeCmd()())
 
-	view := m.View()
+	view := m.viewContent()
 	if lines := strings.Count(view, "\n"); lines > 24 {
 		t.Errorf("picker view has %d lines for a 24-row terminal", lines)
 	}
@@ -662,7 +902,7 @@ func TestPickerWindowsLongLists(t *testing.T) {
 	for range 70 {
 		m = drive(m, key("j"))
 	}
-	view = m.View()
+	view = m.viewContent()
 	if !strings.Contains(view, "↑") {
 		t.Errorf("scrolled-down view missing the top overflow indicator:\n%s", view)
 	}
@@ -689,8 +929,8 @@ func TestAckArrivingAfterEventsDoesNotStrandTheSpinner(t *testing.T) {
 	if cmd != nil {
 		t.Error("no spinner loop for an already-rendered turn")
 	}
-	if strings.Contains(m.View(), "thinking…") {
-		t.Errorf("stranded spinner:\n%s", m.View())
+	if strings.Contains(m.viewContent(), "●∙") || strings.Contains(m.viewContent(), "∙●") {
+		t.Errorf("stranded comet spinner:\n%s", m.viewContent())
 	}
 }
 
@@ -797,7 +1037,7 @@ func TestPaletteFetchesPerKeystrokeAndRenders(t *testing.T) {
 	if m.suggest == nil || len(m.suggest.MenuItems) != 2 {
 		t.Fatalf("suggestions not set: %+v", m.suggest)
 	}
-	view := m.View()
+	view := m.viewContent()
 	if !strings.Contains(view, "/config") || !strings.Contains(view, "Read or write credentials") {
 		t.Errorf("palette missing from view:\n%s", view)
 	}
@@ -839,7 +1079,7 @@ func TestPaletteNavigationAcceptDismiss(t *testing.T) {
 		t.Errorf("sel = %d, want 0", m.suggestSel)
 	}
 
-	m, _ = driveCmd(m, tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = driveCmd(m, tea.KeyPressMsg{Code: tea.KeyTab})
 	if got := m.input.Value(); got != "/config " {
 		t.Errorf("tab accept → %q, want %q", got, "/config ")
 	}
@@ -848,7 +1088,7 @@ func TestPaletteNavigationAcceptDismiss(t *testing.T) {
 	}
 
 	m.suggest = &api.Suggestions{MenuItems: []api.Suggestion{{Label: "x"}}}
-	m = drive(m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = drive(m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.suggest != nil {
 		t.Error("esc must dismiss")
 	}
@@ -859,7 +1099,7 @@ func TestPaletteTokenReplacement(t *testing.T) {
 	m = sized(m)
 	m.input.SetValue("ls cha")
 	m.suggest = &api.Suggestions{MenuItems: []api.Suggestion{{Label: "channels", Insert: "channels"}}}
-	m, _ = driveCmd(m, tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = driveCmd(m, tea.KeyPressMsg{Code: tea.KeyTab})
 	if got := m.input.Value(); got != "ls channels " {
 		t.Errorf("token replace → %q, want %q", got, "ls channels ")
 	}
@@ -870,31 +1110,33 @@ func TestClearingInputDismissesPalette(t *testing.T) {
 	m = sized(m)
 	m.input.SetValue("x")
 	m.suggest = &api.Suggestions{MenuItems: []api.Suggestion{{Label: "y"}}}
-	m = drive(m, tea.KeyMsg{Type: tea.KeyBackspace})
+	m = drive(m, tea.KeyPressMsg{Code: tea.KeyBackspace})
 	if m.suggest != nil {
 		t.Error("empty input must clear the palette")
 	}
 }
 
-func TestPaletteResizesTheViewport(t *testing.T) {
+// The palette used to SHRINK the viewport; that contract inverted on
+// 2026-07-12 (owner: no layout shift) — it overlays now. The frame must
+// still never overflow the terminal, open or closed.
+func TestPaletteNeverResizesTheViewport(t *testing.T) {
 	m, _ := newTestModel(t, suggestionsServer(t), WithConversation("u1"))
 	m = sized(m)
-	tall := m.vp.Height
+	tall := m.sc.height
 	m.input.SetValue("/co")
 	m.suggestSeq = 1
 	m = drive(m, SuggestionsMsg{Seq: 1, S: &api.Suggestions{MenuItems: []api.Suggestion{
 		{Label: "/config"}, {Label: "/connect"},
 	}}})
-	if m.vp.Height >= tall {
-		t.Errorf("viewport must shrink for the palette: %d → %d", tall, m.vp.Height)
+	if m.sc.height != tall {
+		t.Errorf("palette must not resize the viewport: %d → %d", tall, m.sc.height)
 	}
-	// The full frame must never exceed the terminal height.
-	if lines := strings.Count(m.View(), "\n") + 1; lines > 24 {
+	if lines := strings.Count(m.viewContent(), "\n") + 1; lines > 24 {
 		t.Errorf("frame overflows the terminal: %d lines", lines)
 	}
-	m = drive(m, tea.KeyMsg{Type: tea.KeyEsc})
-	if m.vp.Height != tall {
-		t.Errorf("dismiss must restore the viewport: %d → %d", tall, m.vp.Height)
+	m = drive(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.sc.height != tall {
+		t.Errorf("dismiss must leave the viewport untouched: %d → %d", tall, m.sc.height)
 	}
 }
 
@@ -910,7 +1152,7 @@ func TestAvatarCellsVanishEverywhere(t *testing.T) {
 		Type:  cable.TypeEventAppend,
 		Event: api.Event{ID: 62, TurnID: 32, Kind: "system", Payload: []byte(payload)},
 	}})
-	view := m.View()
+	view := m.viewContent()
 	if strings.Contains(view, "◉") {
 		t.Errorf("no stand-in glyphs:\n%s", view)
 	}
@@ -947,7 +1189,7 @@ func TestMutationReplyEchoesAndResyncs(t *testing.T) {
 	m, cmd := driveCmd(m, key("enter"))
 	m, cmd = driveCmd(m, cmd()) // SendResultMsg{turn_id null}
 
-	view := m.View()
+	view := m.viewContent()
 	if !strings.Contains(view, "#gamma-5324 sort title desc") {
 		t.Errorf("mutation reply must echo locally:\n%s", view)
 	}
@@ -961,47 +1203,14 @@ func TestMutationReplyEchoesAndResyncs(t *testing.T) {
 	}
 	m, cmd = driveCmd(m, deferred)
 	m = drive(m, cmd())
-	if view := m.View(); !strings.Contains(view, "SORTED NEW") || strings.Contains(view, "SORTED OLD") {
+	if view := m.viewContent(); !strings.Contains(view, "SORTED NEW") || strings.Contains(view, "SORTED OLD") {
 		t.Errorf("resync must merge the in-place mutation:\n%s", view)
-	}
-}
-
-func TestFreshChartsRevealThenSettle(t *testing.T) {
-	m, _ := newTestModel(t, http.NotFoundHandler(), WithConversation("u-1"), WithTruecolor(true))
-	m = sized(m)
-
-	payload := `{"body":"<span class=\"pito-bar-shimmer\">x</span>","html":true}`
-	next, _ := m.Update(CableEventMsg{M: cable.StreamMessage{
-		Type:  cable.TypeEventAppend,
-		Event: api.Event{ID: 7, TurnID: 3, Kind: "system", Payload: []byte(payload)},
-	}})
-	m = next.(Model)
-	if len(m.revealing) != 1 {
-		t.Fatalf("fresh chart must start revealing, got %d", len(m.revealing))
-	}
-
-	// Mid-flight: a tick keeps it revealing with a fraction below 1.
-	next, _ = m.Update(AnimTickMsg{})
-	m = next.(Model)
-	if len(m.revealing) != 1 {
-		t.Fatalf("reveal must persist mid-flight")
-	}
-
-	// Age it past the duration: the next tick settles it.
-	info := m.revealing[7]
-	info.born = time.Now().Add(-2 * revealDuration)
-	m.revealing[7] = info
-	next, _ = m.Update(AnimTickMsg{})
-	m = next.(Model)
-	if len(m.revealing) != 0 {
-		t.Fatalf("reveal must settle after its duration")
 	}
 }
 
 func TestContextMeterAndMiniStatusFlow(t *testing.T) {
 	page := `{"conversation":{"uuid":"u-1","title":"t","display_name":"t",
 		"context":{"pct":2.0,"count":2,"threshold":100}},
-		"me":{"handle":"@gmrdad82","name":"gmrdad82"},
 		"notifications":{"unread":28},"events":[]}`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1022,17 +1231,31 @@ func TestContextMeterAndMiniStatusFlow(t *testing.T) {
 	if m.meterCtx == nil || m.meterCtx.Pct != 2.0 {
 		t.Fatalf("meter not absorbed from fetch: %+v", m.meterCtx)
 	}
-	if m.me == nil || m.me.Handle != "@gmrdad82" || m.unread != 28 {
-		t.Fatalf("me/unread not absorbed: %+v unread=%d", m.me, m.unread)
+	if m.unread != 28 {
+		t.Fatalf("unread not absorbed: %d", m.unread)
 	}
 
-	// The meter line renders above the input; status carries me + unread.
-	view := m.View()
+	// The meter line renders above the input; status = dot + tag + unread.
+	view := m.viewContent()
 	if !strings.Contains(view, "2%") {
 		t.Errorf("meter counter missing from view:\n%s", view)
 	}
-	if !strings.Contains(view, "@gmrdad82") || !strings.Contains(view, "✉ 28") {
-		t.Errorf("mini status missing me/unread:\n%s", view)
+	// pito fat-cut 2026-07-12: the identity after the dot is the SERVER
+	// tag alone — the httptest host is 127.0.0.1, a dev host, so "dev";
+	// the nickname, host, and state word are all gone.
+	if !strings.Contains(view, "dev") || !strings.Contains(view, "✉ 28") {
+		t.Errorf("mini status missing tag/unread:\n%s", view)
+	}
+	for _, gone := range []string{"connected", "gmrdad82@", "127.0.0.1"} {
+		if strings.Contains(view, gone) {
+			t.Errorf("%q must be gone from the status bar:\n%s", gone, view)
+		}
+	}
+	// Unauthenticated sessions read as pito's own anonymous word.
+	loggedOut := m
+	loggedOut.needsLogin = true
+	if !strings.Contains(loggedOut.viewContent(), "tarnished") {
+		t.Errorf("unauthenticated status must read pito's anonymous word:\n%s", loggedOut.viewContent())
 	}
 
 	// conversation.update patches both live.
@@ -1045,7 +1268,7 @@ func TestContextMeterAndMiniStatusFlow(t *testing.T) {
 	if m.meterCtx.Pct != 43 || m.unread != 3 {
 		t.Fatalf("conversation.update not applied: %+v unread=%d", m.meterCtx, m.unread)
 	}
-	if view := m.View(); !strings.Contains(view, "43%") || !strings.Contains(view, "✉ 3") {
+	if view := m.viewContent(); !strings.Contains(view, "43%") || !strings.Contains(view, "✉ 3") {
 		t.Errorf("patched values not rendered:\n%s", view)
 	}
 }
@@ -1059,14 +1282,14 @@ func TestShiftArrowsScrollEvenWhileTyping(t *testing.T) {
 			Payload: []byte(`{"text":"row"}`)})
 	}
 	m.refreshViewport()
-	m.vp.GotoBottom()
+	m.sc.GotoBottom()
 	m.follow = true
 
 	// Mid-typing: text in the prompt, shift+up still scrolls.
 	m.input.SetValue("ls games")
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftUp})
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift})
 	m = next.(Model)
-	if m.vp.AtBottom() {
+	if m.sc.AtBottom() {
 		t.Fatal("shift+up must scroll the viewport even while typing")
 	}
 	if m.follow {
@@ -1077,11 +1300,427 @@ func TestShiftArrowsScrollEvenWhileTyping(t *testing.T) {
 	}
 	// And shift+down heads back toward the bottom.
 	for i := 0; i < 100; i++ {
-		next, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftDown})
+		next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown, Mod: tea.ModShift})
 		m = next.(Model)
 	}
-	if !m.vp.AtBottom() || !m.follow {
+	if !m.sc.AtBottom() || !m.follow {
 		t.Fatal("shift+down to the bottom must restore follow")
+	}
+}
+
+func TestMouseWheelScrollsConversationAndRestoresFollow(t *testing.T) {
+	m, _ := newTestModel(t, http.NotFoundHandler(), WithConversation("u-1"))
+	m = sized(m)
+	for i := int64(1); i <= 80; i++ {
+		m.transcript.Append(api.Event{ID: i, TurnID: i, Kind: "system",
+			Payload: []byte(`{"text":"row"}`)})
+	}
+	m.refreshViewport()
+	m.sc.GotoBottom()
+	m.follow = true
+
+	// The View must actually ask the terminal for wheel events.
+	if m.View().MouseMode == tea.MouseModeNone {
+		t.Fatal("View must enable a mouse mode or wheel events never arrive")
+	}
+
+	next, _ := m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	m = next.(Model)
+	if m.sc.AtBottom() {
+		t.Fatal("wheel up must scroll the viewport")
+	}
+	if m.follow {
+		t.Fatal("wheel up must release follow")
+	}
+	for i := 0; i < 100; i++ {
+		next, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+		m = next.(Model)
+	}
+	if !m.sc.AtBottom() || !m.follow {
+		t.Fatal("wheel down to the bottom must restore follow")
+	}
+}
+
+func TestMouseWheelMovesNotificationsCursor(t *testing.T) {
+	m, _ := newTestModel(t, http.NotFoundHandler(), WithConversation("u-1"))
+	m = sized(m)
+	m.mode = modeNotifications
+	for i := 0; i < 5; i++ {
+		m.notif.rows = append(m.notif.rows, api.NotificationRow{Message: "n"})
+	}
+	m.notif.fetched = true
+
+	next, _ := m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	m = next.(Model)
+	if m.notif.cursor != 1 {
+		t.Fatalf("wheel down in notifications must move the cursor, got %d", m.notif.cursor)
+	}
+	next, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	m = next.(Model)
+	if m.notif.cursor != 0 {
+		t.Fatalf("wheel up in notifications must move the cursor back, got %d", m.notif.cursor)
+	}
+}
+
+// The web contract under test: history_controller.js — oh-my-zsh prefix
+// recall on ↑/↓, snapshot draft at index -1, no wrap, edits end the walk.
+func TestInputHistoryPrefixRecall(t *testing.T) {
+	m, _ := newTestModel(t, http.NotFoundHandler(), WithConversation("u-1"))
+	m = sized(m)
+	m.histEntries = []string{"/config google", "list vids", "/config", "list games"} // newest first
+
+	up := func() { next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyUp}); m = next.(Model) }
+	down := func() { next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown}); m = next.(Model) }
+
+	// Empty buffer: ↑ walks everything, newest first.
+	up()
+	if got := m.input.Value(); got != "/config google" {
+		t.Fatalf("first ↑ must recall the newest entry, got %q", got)
+	}
+	up()
+	if got := m.input.Value(); got != "list vids" {
+		t.Fatalf("second ↑ must recall the next older entry, got %q", got)
+	}
+	// ↓ returns to the newest, then to the (empty) draft.
+	down()
+	if got := m.input.Value(); got != "/config google" {
+		t.Fatalf("↓ must walk back newer, got %q", got)
+	}
+	down()
+	if got := m.input.Value(); got != "" {
+		t.Fatalf("↓ past the newest must restore the empty draft, got %q", got)
+	}
+	// The prefix survived the draft restore: a further ↑ resumes the walk.
+	up()
+	if got := m.input.Value(); got != "/config google" {
+		t.Fatalf("↑ after the draft restore must resume the walk, got %q", got)
+	}
+
+	// A real edit ends the session; the next ↑ prefix-filters on "/conf".
+	m.input.SetValue("/conf")
+	next, _ := m.Update(tea.KeyPressMsg{Text: "i", Code: 'i'})
+	m = next.(Model)
+	if m.histPrefix != nil {
+		t.Fatal("a real edit must end the recall session")
+	}
+	m.input.SetValue("/conf")
+	up()
+	if got := m.input.Value(); got != "/config google" {
+		t.Fatalf("prefixed ↑ must recall the newest /conf… entry, got %q", got)
+	}
+	up()
+	if got := m.input.Value(); got != "/config" {
+		t.Fatalf("prefixed ↑ again must skip non-matches, got %q", got)
+	}
+	// No wrap at the oldest match.
+	up()
+	if got := m.input.Value(); got != "/config" {
+		t.Fatalf("↑ at the oldest match must hold (no wrap), got %q", got)
+	}
+	// ↓ back down restores the snapshot draft "/conf".
+	down()
+	down()
+	if got := m.input.Value(); got != "/conf" {
+		t.Fatalf("↓ past the newest match must restore the draft, got %q", got)
+	}
+}
+
+func TestInputHistoryRecordsSendsAndSeedsFromEchoes(t *testing.T) {
+	sent := make(chan string, 1)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/chat", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Message string `json:"message"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		sent <- body.Message
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"ok":true,"turn_id":9}`)
+	})
+	m, _ := newTestModel(t, mux, WithConversation("u-1"))
+	m = sized(m)
+
+	// Sending records the entry (newest first) and consecutive dupes collapse.
+	for _, text := range []string{"list games", "list games", "ls vids"} {
+		m.input.SetValue(text)
+		next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		m = next.(Model)
+		if cmd != nil {
+			cmd() // run the send so the httptest handler sees it
+			<-sent
+		}
+	}
+	if len(m.histEntries) != 2 || m.histEntries[0] != "ls vids" || m.histEntries[1] != "list games" {
+		t.Fatalf("send recording wrong: %#v", m.histEntries)
+	}
+
+	// Empty history is a no-op ↑ (fresh model, nothing seeded).
+	m2, _ := newTestModel(t, http.NotFoundHandler(), WithConversation("u-2"))
+	m2 = sized(m2)
+	next, _ := m2.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	m2 = next.(Model)
+	if m2.input.Value() != "" || m2.histPrefix != nil {
+		t.Fatal("↑ with no history must be a no-op")
+	}
+
+	// Seeding: echo events in the transcript become entries, newest first —
+	// the web's page-load sent_history analog.
+	m2.transcript.Append(api.Event{ID: 1, TurnID: 1, Kind: api.KindEcho,
+		Payload: []byte(`{"text":"analyze channel"}`)})
+	m2.transcript.Append(api.Event{ID: 2, TurnID: 2, Kind: api.KindEcho,
+		Payload: []byte(`{"text":"show game 3"}`)})
+	m2.seedHistory()
+	if len(m2.histEntries) != 2 || m2.histEntries[0] != "show game 3" || m2.histEntries[1] != "analyze channel" {
+		t.Fatalf("seeding wrong: %#v", m2.histEntries)
+	}
+}
+
+// The web contract under test: chatbox_hints_controller.js + the
+// Filter/Channel components — kbd chip + plain value token, no prefix
+// words, red "none" when the account has no channels.
+func TestScopeHintChipAndNoneState(t *testing.T) {
+	m, _ := newTestModel(t, http.NotFoundHandler(), WithConversation("u-1"))
+	m = sized(m)
+
+	m.input.SetValue("list vids")
+	m.channels = nil
+	hint := ansi.Strip(m.scopeHintLine())
+	if !strings.Contains(hint, "shift+tab") || !strings.Contains(hint, "none") {
+		t.Fatalf("channel hint without channels must show the chip + red none: %q", hint)
+	}
+	if strings.Contains(hint, "channel:") {
+		t.Fatalf("no prefix words — the web shows none: %q", hint)
+	}
+
+	m.channels = []string{"@all", "@gmrdad82"}
+	m.scopeChannel = "@all"
+	hint = ansi.Strip(m.scopeHintLine())
+	if !strings.Contains(hint, "shift+tab") || !strings.Contains(hint, "@all") {
+		t.Fatalf("channel hint = %q", hint)
+	}
+
+	m.input.SetValue("analyze")
+	hint = ansi.Strip(m.scopeHintLine())
+	if !strings.Contains(hint, "ctrl+space") || !strings.Contains(hint, "7d") {
+		t.Fatalf("period hint = %q", hint)
+	}
+}
+
+// The perf regression under test (owner 2026-07-12: "everything seems
+// very very slow"): resolved thinking/confirmation events must NOT hold
+// their turns on the 40ms animation loop — only genuinely animating
+// events may.
+func TestShimmerMarksOnlyPendingWork(t *testing.T) {
+	m, _ := newTestModel(t, http.NotFoundHandler(), WithConversation("u-1"), WithTruecolor(true))
+	m = sized(m)
+
+	// A backfill full of RESOLVED thinking lines (one per turn — the
+	// real shape of a scrollback) must not mark anything.
+	m = drive(m, ChatFetchedMsg{Page: &api.ChatPage{
+		Conversation: api.Conversation{UUID: "u-1"},
+		Events: []api.Event{
+			{ID: 1, TurnID: 1, Kind: api.KindThinking, Payload: []byte(`{"resolved":true,"elapsed_seconds":1.0}`)},
+			{ID: 2, TurnID: 2, Kind: api.KindThinking, Payload: []byte(`{"resolved":true,"elapsed_seconds":2.0}`)},
+			{ID: 3, TurnID: 3, Kind: api.KindConfirmation, Payload: []byte(`{"resolved":true,"outcome_text":"done"}`)},
+		},
+	}})
+	if len(m.shimmer) != 0 {
+		t.Fatalf("resolved events must not join the shimmer map: %v", m.shimmer)
+	}
+
+	// A PENDING thinking event animates — and its resolve releases it.
+	m = drive(m, CableEventMsg{M: cable.StreamMessage{
+		Type:  cable.TypeEventAppend,
+		Event: api.Event{ID: 4, TurnID: 9, Kind: api.KindThinking, Payload: []byte(`{"resolved":false,"dictionary":"slash","order":[0]}`)},
+	}})
+	if !m.shimmer[9] {
+		t.Fatal("a pending thinking event must animate")
+	}
+	m = drive(m, CableEventMsg{M: cable.StreamMessage{
+		Type:  cable.TypeEventReplace,
+		Event: api.Event{ID: 4, TurnID: 9, Kind: api.KindThinking, Payload: []byte(`{"resolved":true,"word_index":0,"elapsed_seconds":1.2}`)},
+	}})
+	if m.shimmer[9] {
+		t.Fatal("a resolved thinking event must release its turn from the animation loop")
+	}
+}
+
+// The palette must OVERLAY the conversation, not reflow it (owner
+// 2026-07-12: "autocomplete shifts the conversation up and down").
+func TestSuggestionsPaletteOverlaysWithoutReflow(t *testing.T) {
+	m, _ := newTestModel(t, http.NotFoundHandler(), WithConversation("u-1"))
+	m = sized(m)
+	for i := int64(1); i <= 40; i++ {
+		m.transcript.Append(api.Event{ID: i, TurnID: i, Kind: "system",
+			Payload: []byte(`{"text":"row"}`)})
+	}
+	m.refreshViewport()
+	heightBefore := m.chatViewportHeight()
+	linesBefore := strings.Count(m.viewContent(), "\n")
+
+	m.input.SetValue("/con")
+	m.suggest = &api.Suggestions{MenuItems: []api.Suggestion{
+		{Label: "/connect", Insert: "/connect"},
+		{Label: "/config", Insert: "/config"},
+	}}
+	if got := m.chatViewportHeight(); got != heightBefore {
+		t.Fatalf("palette must not change the viewport height: %d → %d", heightBefore, got)
+	}
+	view := m.viewContent()
+	if strings.Count(view, "\n") != linesBefore {
+		t.Fatalf("palette must not change the frame's line count: %d → %d", linesBefore, strings.Count(view, "\n"))
+	}
+	if !strings.Contains(view, "/connect") {
+		t.Fatal("palette content must still render (overlaid)")
+	}
+}
+
+// /resume is client grammar now (owner bug 2026-07-12): the server
+// answers it browser-only, so the TUI opens its own picker instead —
+// and esc returns to the conversation it was opened over.
+func TestSlashResumeOpensPickerAndEscReturns(t *testing.T) {
+	m, _ := newTestModel(t, chatServer(t), WithConversation("u1"))
+	m = sized(m)
+	m = drive(m, m.fetchChatCmd("u1", false)())
+
+	m.input.SetValue("/resume")
+	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(Model)
+	if m.mode != modePicker {
+		t.Fatal("/resume must open the conversation picker client-side")
+	}
+	if cmd == nil {
+		t.Fatal("/resume must fire the page-1 resume fetch")
+	}
+	if m.input.Value() != "" {
+		t.Fatal("/resume must clear the prompt")
+	}
+	// Deliver the page-1 fetch (the in-flight loader holds the gate
+	// open until it lands), then let the open spring settle.
+	m = drive(m, m.fetchResumeCmd()())
+	m = driveAnim(t, m, 60)
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = next.(Model)
+	m = driveAnim(t, m, 60)
+	if m.mode != modeChat || m.conv.UUID != "u1" {
+		t.Fatalf("esc must return to the open conversation, mode=%v uuid=%q", m.mode, m.conv.UUID)
+	}
+}
+
+// Cable arrivals GLIDE the following viewport to the bottom over a few
+// ticks instead of snapping (owner 2026-07-12: "snaps and jumps all
+// over the place"); giant jumps (backfills) still land instantly.
+func TestFollowGlidesOnSmallGrowthSnapsOnBackfill(t *testing.T) {
+	m, _ := newTestModel(t, http.NotFoundHandler(), WithConversation("u-1"))
+	m = sized(m)
+	for i := int64(1); i <= 60; i++ {
+		m.transcript.Append(api.Event{ID: i, TurnID: i, Kind: "system",
+			Payload: []byte(`{"text":"row"}`)})
+	}
+	m.refreshViewport() // giant first paint: snaps straight to the bottom
+	if !m.sc.AtBottom() {
+		t.Fatal("a backfill-sized jump must land instantly")
+	}
+
+	// A small arrival: the viewport starts gliding, holds the gate open,
+	// and reaches the bottom within a few ticks.
+	m = drive(m, CableEventMsg{M: cable.StreamMessage{
+		Type: cable.TypeEventAppend,
+		Event: api.Event{ID: 100, TurnID: 100, Kind: "system",
+			Payload: []byte(`{"text":"one\ntwo\nthree\nfour"}`)},
+	}})
+	if m.sc.AtBottom() {
+		t.Fatal("a small arrival must glide, not snap")
+	}
+	if !m.scrollEasing || !m.animGateOpen() {
+		t.Fatal("a glide in flight must hold the animation gate open")
+	}
+	for i := 0; i < 30 && !m.sc.AtBottom(); i++ {
+		m = drive(m, AnimTickMsg{})
+	}
+	if !m.sc.AtBottom() {
+		t.Fatal("the glide must reach the bottom")
+	}
+	if m.scrollEasing {
+		t.Fatal("a landed glide must release the gate")
+	}
+}
+
+// ctrl+c confirms Crush-style (owner 2026-07-12): first press arms +
+// shows the warning, second quits, any other key stands down.
+func TestCtrlCArmsThenQuits(t *testing.T) {
+	m, _ := newTestModel(t, http.NotFoundHandler(), WithConversation("u-1"))
+	m = sized(m)
+	next, _ := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	m = next.(Model)
+	if m.quitArmed == 0 {
+		t.Fatal("first ctrl+c must open the confirm window, not quit")
+	}
+	if !strings.Contains(ansi.Strip(m.viewContent()), "again to quit") {
+		t.Fatal("the armed window must say so on the status row")
+	}
+	next, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	m = next.(Model)
+	if cmd == nil {
+		t.Fatal("second ctrl+c must quit")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatal("second ctrl+c's command must be tea.Quit")
+	}
+
+	// Any other key disarms.
+	m.quitArmed = quitArmTicks
+	next, _ = m.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
+	m = next.(Model)
+	if m.quitArmed != 0 {
+		t.Fatal("another key must stand the quit down")
+	}
+}
+
+// The virtualization contract (owner 2026-07-12, launch-guarding):
+// off-screen shimmer turns are NOT re-rendered by animation ticks.
+func TestAnimTicksTouchOnlyVisibleShimmerTurns(t *testing.T) {
+	m, _ := newTestModel(t, http.NotFoundHandler(), WithConversation("u-1"), WithTruecolor(true))
+	m = sized(m)
+	// A tall transcript: turn 1 (shimmer-marked) far above a full screen
+	// of filler, viewport pinned at the bottom.
+	m.transcript.Append(api.Event{ID: 1, TurnID: 1, Kind: "system",
+		Payload: []byte(`{"text":"<span class="pito-subject-shimmer">Old Subject</span>","html":true}`)})
+	for i := int64(2); i <= 120; i++ {
+		m.transcript.Append(api.Event{ID: i, TurnID: i, Kind: "system",
+			Payload: []byte(`{"text":"row"}`)})
+	}
+	m.shimmer[1] = true
+	m.refreshViewport()
+	m.sc.GotoBottom()
+
+	renders := 0
+	m.transcript.SetRenderer(func(ev api.Event, width int) string {
+		if ev.TurnID == 1 {
+			renders++
+		}
+		return "x"
+	})
+	m.transcript.TotalLines(m.contentWidth()) // settle caches post-swap
+	renders = 0
+	for i := 0; i < 10; i++ {
+		next, _ := m.Update(AnimTickMsg{})
+		m = next.(Model)
+		_ = m.viewContent() // materialize the frame — renders are lazy now
+	}
+	if renders != 0 {
+		t.Fatalf("an off-screen shimmer turn re-rendered %d times during ticks", renders)
+	}
+	// Scrolled into view, it animates again (within the 30fps shimmer
+	// beat — every second tick — so a few ticks guarantee one).
+	m.sc.GotoTop()
+	for i := 0; i < 4; i++ {
+		next, _ := m.Update(AnimTickMsg{})
+		m = next.(Model)
+		_ = m.viewContent()
+	}
+	if renders == 0 {
+		t.Fatal("a visible shimmer turn must re-render on ticks")
 	}
 }
 
@@ -1119,7 +1758,7 @@ func TestEnterWithPaletteOpenSendsRaw(t *testing.T) {
 	}
 	// Enter with the palette open: the RAW text goes out, the suggestion
 	// is never inserted (web parity, owner 2026-07-09).
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = next.(Model)
 	if cmd == nil {
 		t.Fatal("enter must produce the send command")
@@ -1150,7 +1789,7 @@ func TestSpaceDismissesPaletteAndTypesThrough(t *testing.T) {
 	if m.suggest == nil {
 		t.Fatal("palette should be open")
 	}
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 	m = next.(Model)
 	if m.suggest != nil {
 		t.Fatal("space must dismiss the palette")
@@ -1165,7 +1804,7 @@ func TestShiftRPrefillsTheLiveHandle(t *testing.T) {
 	m = sized(m)
 
 	// Zero live handles: R types through like any rune.
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
+	next, _ := m.Update(tea.KeyPressMsg{Code: 'R', Text: "R"})
 	m = next.(Model)
 	if m.input.Value() != "R" {
 		t.Fatalf("with no handles R must type through, got %q", m.input.Value())
@@ -1175,7 +1814,7 @@ func TestShiftRPrefillsTheLiveHandle(t *testing.T) {
 	// One live handle on the newest turn → instant prefill.
 	m.transcript.Append(api.Event{ID: 1, TurnID: 1, Kind: "system",
 		Payload: []byte(`{"text":"x","reply_handle":"iota-1111"}`)})
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
+	next, _ = m.Update(tea.KeyPressMsg{Code: 'R', Text: "R"})
 	m = next.(Model)
 	if m.input.Value() != "#iota-1111 " {
 		t.Fatalf("shift+R must prefill the handle, got %q", m.input.Value())
@@ -1188,7 +1827,7 @@ func TestShiftRPrefillsTheLiveHandle(t *testing.T) {
 		Payload: []byte(`{"text":"a","reply_handle":"mu-2222"}`)})
 	m.transcript.Append(api.Event{ID: 3, TurnID: 2, Kind: "enhanced",
 		Payload: []byte(`{"text":"b","reply_handle":"nu-3333"}`)})
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
+	next, _ = m.Update(tea.KeyPressMsg{Code: 'R', Text: "R"})
 	m = next.(Model)
 	if m.suggest == nil || len(m.suggest.MenuItems) != 2 {
 		t.Fatalf("several handles must open the picker, got %+v", m.suggest)
@@ -1196,7 +1835,7 @@ func TestShiftRPrefillsTheLiveHandle(t *testing.T) {
 	if m.input.Value() != "" {
 		t.Fatalf("picker path must not prefill, got %q", m.input.Value())
 	}
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	m = next.(Model)
 	if m.input.Value() != "#mu-2222 " {
 		t.Fatalf("tab must complete the picked handle, got %q", m.input.Value())
@@ -1211,7 +1850,7 @@ func TestShiftRPrefillsTheLiveHandle(t *testing.T) {
 		Payload: []byte(`{"text":"a","reply_handle":"mu-2222","reply_consumed":true}`)})
 	m.transcript.Replace(api.Event{ID: 3, TurnID: 2, Kind: "enhanced",
 		Payload: []byte(`{"text":"b","reply_handle":"nu-3333","reply_consumed":true}`)})
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
+	next, _ = m.Update(tea.KeyPressMsg{Code: 'R', Text: "R"})
 	m = next.(Model)
 	if m.input.Value() != "#iota-1111 " {
 		t.Fatalf("scan must fall back to the older live handle, got %q", m.input.Value())
@@ -1221,7 +1860,7 @@ func TestShiftRPrefillsTheLiveHandle(t *testing.T) {
 	m.input.Reset()
 	m.transcript.Replace(api.Event{ID: 1, TurnID: 1, Kind: "system",
 		Payload: []byte(`{"text":"x","reply_handle":"iota-1111","reply_consumed":true}`)})
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
+	next, _ = m.Update(tea.KeyPressMsg{Code: 'R', Text: "R"})
 	m = next.(Model)
 	if m.input.Value() != "R" {
 		t.Fatalf("all-consumed must type through, got %q", m.input.Value())
@@ -1250,7 +1889,7 @@ func TestScopeCyclersFollowTheWebRules(t *testing.T) {
 
 	// Shift+Tab cycles channels only while the channel hint is live.
 	m.input.SetValue("list vids")
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	m = next.(Model)
 	if m.scopeChannel != "@alpha" { // "@all" is index 0 → next
 		t.Fatalf("cycle from @all should land @alpha, got %q", m.scopeChannel)
@@ -1260,7 +1899,7 @@ func TestScopeCyclersFollowTheWebRules(t *testing.T) {
 	}
 	// Wraps.
 	m.scopeChannel = "@beta"
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	m = next.(Model)
 	if m.scopeChannel != "@all" {
 		t.Fatalf("cycle must wrap to @all, got %q", m.scopeChannel)
@@ -1268,7 +1907,7 @@ func TestScopeCyclersFollowTheWebRules(t *testing.T) {
 	// Inert outside the hint.
 	m.input.SetValue("show game #1")
 	before := m.scopeChannel
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	m = next.(Model)
 	if m.scopeChannel != before {
 		t.Fatal("shift+tab must be inert without the channel hint")
@@ -1276,7 +1915,7 @@ func TestScopeCyclersFollowTheWebRules(t *testing.T) {
 
 	// Ctrl+Space cycles periods during analyze.
 	m.input.SetValue("analyze")
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlAt})
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Mod: tea.ModCtrl})
 	m = next.(Model)
 	if m.scopePeriod != "28d" {
 		t.Fatalf("period cycle from 7d should land 28d, got %q", m.scopePeriod)
@@ -1315,7 +1954,7 @@ func TestScopeParamsRideOnlyWithLiveHints(t *testing.T) {
 
 	send := func(text string) map[string]any {
 		m.input.SetValue(text)
-		next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		m = next.(Model)
 		if cmd == nil {
 			t.Fatalf("send %q produced no command", text)
@@ -1346,5 +1985,296 @@ func TestScopeParamsRideOnlyWithLiveHints(t *testing.T) {
 	}
 	if _, has := body["period"]; has {
 		t.Fatal("unscoped verbs must not carry period")
+	}
+}
+
+func TestAiInputPatternMatchesTheWebRegex(t *testing.T) {
+	// The prompt accent gates on the web's own pattern: /^\s*@ai\b/i.
+	for _, in := range []string{"@ai hello", "  @AI what now", "@Ai", "@ai\twrapped"} {
+		if !aiInputRe.MatchString(in) {
+			t.Errorf("should match %q", in)
+		}
+	}
+	for _, in := range []string{"mail@ai.dev", "ai hello", "@aim high", "say @ai later"} {
+		if aiInputRe.MatchString(in) {
+			t.Errorf("must not match %q", in)
+		}
+	}
+}
+
+// ── AI block/status streaming (event.ai_block / event.ai_status) ─────────
+
+// pendingAiEvent starts a fresh pending "ai" event on the transcript — the
+// event.append every ai_block/ai_status test builds on.
+func pendingAiEvent(m Model, id, turnID int64, extraFields string) Model {
+	payload := `{"status":"pending","blocks":[]` + extraFields + `}`
+	return drive(m, CableEventMsg{M: cable.StreamMessage{
+		Type:  cable.TypeEventAppend,
+		Event: api.Event{ID: id, TurnID: turnID, Kind: api.KindAi, Payload: []byte(payload)},
+	}})
+}
+
+func aiBlockMsg(eventID int64, index int, text string) CableEventMsg {
+	return CableEventMsg{M: cable.StreamMessage{
+		Type:    cable.TypeEventAiBlock,
+		EventID: eventID,
+		Index:   index,
+		Block:   json.RawMessage(`{"type":"text","text":"` + text + `"}`),
+	}}
+}
+
+func aiStatusMsg(eventID int64, text string) CableEventMsg {
+	return CableEventMsg{M: cable.StreamMessage{
+		Type:    cable.TypeEventAiStatus,
+		EventID: eventID,
+		Text:    text,
+	}}
+}
+
+// rawAiPayload peeks at an event's current raw payload bytes without
+// mutating it (MutateEventPayload's fn returns ok=false).
+func rawAiPayload(t *testing.T, m Model, eventID int64) map[string]any {
+	t.Helper()
+	var raw json.RawMessage
+	m.transcript.MutateEventPayload(eventID, func(p json.RawMessage) (json.RawMessage, bool) {
+		raw = append(json.RawMessage(nil), p...)
+		return nil, false
+	})
+	var fields map[string]any
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatalf("payload for event %d did not decode: %v (raw: %s)", eventID, err, raw)
+	}
+	return fields
+}
+
+func TestAiBlocksStreamInOrder(t *testing.T) {
+	m, _ := newTestModel(t, http.NotFoundHandler(), WithConversation("u-1"))
+	m = sized(m)
+	m = pendingAiEvent(m, 50, 20, "")
+
+	m = drive(m, aiBlockMsg(50, 0, "Block0"))
+	m = drive(m, aiBlockMsg(50, 1, "Block1"))
+
+	view := m.viewContent()
+	i0, i1 := strings.Index(view, "Block0"), strings.Index(view, "Block1")
+	if i0 == -1 || i1 == -1 {
+		t.Fatalf("both blocks must render:\n%s", view)
+	}
+	if i0 >= i1 {
+		t.Errorf("blocks must render in index order, got Block0@%d Block1@%d", i0, i1)
+	}
+}
+
+func TestAiBlocksStreamOutOfOrder(t *testing.T) {
+	m, _ := newTestModel(t, http.NotFoundHandler(), WithConversation("u-1"))
+	m = sized(m)
+	m = pendingAiEvent(m, 55, 21, "")
+
+	// Index 1 lands before index 0 — the slot for 0 gets padded, then
+	// backfilled once its own message arrives.
+	m = drive(m, aiBlockMsg(55, 1, "Block1"))
+	m = drive(m, aiBlockMsg(55, 0, "Block0"))
+
+	view := m.viewContent()
+	i0, i1 := strings.Index(view, "Block0"), strings.Index(view, "Block1")
+	if i0 == -1 || i1 == -1 {
+		t.Fatalf("both blocks must render:\n%s", view)
+	}
+	if i0 >= i1 {
+		t.Errorf("out-of-order arrival must still render index order, got Block0@%d Block1@%d", i0, i1)
+	}
+}
+
+func TestAiStatusLineReplacesEllipsisThenUpdates(t *testing.T) {
+	m, _ := newTestModel(t, http.NotFoundHandler(), WithConversation("u-1"))
+	m = sized(m)
+	m = pendingAiEvent(m, 51, 22, "")
+
+	if !strings.Contains(m.viewContent(), "…") {
+		t.Fatalf("pending ai turn must show the bare ellipsis before any status:\n%s", m.viewContent())
+	}
+
+	m = drive(m, aiStatusMsg(51, "Scouring the internet…"))
+	view := m.viewContent()
+	if !strings.Contains(view, "Scouring the internet…") {
+		t.Fatalf("status line must replace the ellipsis:\n%s", view)
+	}
+
+	m = drive(m, aiStatusMsg(51, "Crunching numbers…"))
+	view = m.viewContent()
+	if strings.Contains(view, "Scouring the internet…") {
+		t.Errorf("a stale status line must not survive a newer one:\n%s", view)
+	}
+	if !strings.Contains(view, "Crunching numbers…") {
+		t.Fatalf("second status line must land:\n%s", view)
+	}
+}
+
+func TestAiReplaceWinsWhollyOverStreamedStateAndStatus(t *testing.T) {
+	m, _ := newTestModel(t, http.NotFoundHandler(), WithConversation("u-1"))
+	m = sized(m)
+	m = pendingAiEvent(m, 52, 23, "")
+	m = drive(m, aiBlockMsg(52, 0, "Streamed"))
+	m = drive(m, aiStatusMsg(52, "Scouring the internet…"))
+
+	m = drive(m, CableEventMsg{M: cable.StreamMessage{
+		Type: cable.TypeEventReplace,
+		Event: api.Event{ID: 52, TurnID: 23, Kind: api.KindAi, Payload: []byte(
+			`{"status":"done","blocks":[{"type":"text","text":"Final answer"}],"model":"opus"}`)},
+	}})
+
+	view := m.viewContent()
+	if strings.Contains(view, "Streamed") {
+		t.Errorf("streamed blocks must not survive the final replace:\n%s", view)
+	}
+	if strings.Contains(view, "Scouring the internet") {
+		t.Errorf("status line must not survive the final replace:\n%s", view)
+	}
+	if !strings.Contains(view, "Final answer") {
+		t.Fatalf("the replace payload must render:\n%s", view)
+	}
+
+	fields := rawAiPayload(t, m, 52)
+	if _, has := fields["status_line"]; has {
+		t.Error("status_line must not survive the final replace — the server payload never carries it")
+	}
+}
+
+func TestAiBlockAndStatusForUnknownEventIDAreIgnored(t *testing.T) {
+	m, _ := newTestModel(t, http.NotFoundHandler(), WithConversation("u-1"))
+	m = sized(m)
+
+	// No event.append for 999 — these race ahead of it and must be
+	// dropped silently (and, above all, not panic).
+	m = drive(m, aiBlockMsg(999, 0, "orphan"))
+	m = drive(m, aiStatusMsg(999, "orphan status"))
+
+	if m.transcript.Len() != 0 {
+		t.Errorf("an unknown event id must not create a transcript entry, got %d events", m.transcript.Len())
+	}
+	if strings.Contains(m.viewContent(), "orphan") {
+		t.Errorf("an orphan block/status must not render:\n%s", m.viewContent())
+	}
+}
+
+func TestAiBlockAppendPreservesUnknownPayloadFields(t *testing.T) {
+	m, _ := newTestModel(t, http.NotFoundHandler(), WithConversation("u-1"))
+	m = sized(m)
+	m = pendingAiEvent(m, 53, 24, `,"sentinel":"keep-me","anchor_event_id":7`)
+
+	m = drive(m, aiBlockMsg(53, 0, "hi"))
+
+	fields := rawAiPayload(t, m, 53)
+	if fields["sentinel"] != "keep-me" {
+		t.Errorf("unknown top-level field must round-trip untouched, got %v", fields["sentinel"])
+	}
+	if got, want := fields["anchor_event_id"], float64(7); got != want {
+		t.Errorf("anchor_event_id must round-trip, got %v want %v", got, want)
+	}
+}
+
+// ── containment law (2.0.0) ────────────────────────────────────────────
+
+// TestContainmentCapsWideTerminalsChromeIncluded is the resize
+// proof for the owner-locked containment law: EVERYTHING — message
+// blocks and the bottom chrome alike — renders LEFT-ANCHORED inside
+// min(terminalWidth−2, render.ContentCap) columns as one coherent
+// column (owner 2.0.0 smoke: no exemptions; the status bar right-aligns
+// WITHIN the column). A long message forces real word-wrap so the
+// assertion actually exercises the cap rather than passing on a short
+// fixture that would fit either way.
+func TestContainmentCapsWideTerminalsChromeIncluded(t *testing.T) {
+	if !widthCapEnabled {
+		t.Skip("width cap disabled by owner ruling 2026-07-12 — the contract below re-arms with the flag")
+	}
+	m, _ := newTestModel(t, chatServer(t), WithConversation("u1"))
+	m = drive(m, tea.WindowSizeMsg{Width: 220, Height: 24})
+	m = drive(m, m.fetchChatCmd("u1", false)())
+
+	if got := m.contentWidth(); got != render.ContentCap {
+		t.Fatalf("contentWidth at 220 cols = %d, want the %d-col cap", got, render.ContentCap)
+	}
+
+	long := strings.Repeat("wide terminal word ", 20) // ~380 chars — wraps very differently at 100 vs 218
+	m = drive(m, CableEventMsg{M: cable.StreamMessage{
+		Type: cable.TypeEventAppend,
+		Event: api.Event{
+			ID: 50, TurnID: 50, Kind: "system",
+			Payload:   []byte(`{"text":"` + long + `"}`),
+			CreatedAt: fixedNow,
+		},
+	}})
+
+	content := m.transcript.View(m.contentWidth())
+	for _, line := range strings.Split(content, "\n") {
+		if w := lipgloss.Width(line); w > render.ContentCap {
+			t.Errorf("message line wider than the containment cap (%d > %d): %q", w, render.ContentCap, line)
+		}
+	}
+
+	// Owner 2.0.0 smoke (2026-07-12): the status bar follows the SAME
+	// content column as everything else — one coherent column on wide
+	// terminals, the margin left to the star-field.
+	if w := lipgloss.Width(m.statusLine()); w > render.ContentCap {
+		t.Errorf("status line width = %d, escaped the content column (cap %d)", w, render.ContentCap)
+	}
+}
+
+// TestContainmentLeavesNarrowTerminalsExactlyAsToday is the regression
+// proof: below the cap's bite point (terminalWidth ≤ ContentCap+2 =
+// 102) contentWidth returns the raw terminal width, unmargined — a
+// 60-col terminal renders exactly as it did before this law existed,
+// and the 80×24 golden frames (also under 102) never move.
+func TestContainmentLeavesNarrowTerminalsExactlyAsToday(t *testing.T) {
+	// Holds with the cap on OR off: narrow terminals always get raw width.
+	m, _ := newTestModel(t, chatServer(t), WithConversation("u1"))
+	m = drive(m, tea.WindowSizeMsg{Width: 60, Height: 24})
+
+	if got, want := m.contentWidth(), 60; got != want {
+		t.Fatalf("contentWidth at 60 cols = %d, want %d (the cap must not bite below 102)", got, want)
+	}
+}
+
+// TestViewportWidthPixelsFollowTheCappedColumn proves the wire
+// contract: viewport_width POSTed to the server is contentWidth()×8
+// pixels — the server sizes its own tables to OUR column, not the raw
+// terminal — at both a narrow terminal (cap inert, 60 cols) and a wide
+// one (cap biting, 220 cols).
+func TestViewportWidthPixelsFollowTheCappedColumn(t *testing.T) {
+	for _, width := range []int{60, 220} {
+		got := make(chan map[string]any, 1)
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/chat" && r.Method == http.MethodPost {
+				var body map[string]any
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				got <- body
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{"uuid":"u-1","turn_id":5}`))
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		client, err := api.New(srv.URL, filepath.Join(t.TempDir(), "cookies.json"))
+		if err != nil {
+			srv.Close()
+			t.Fatal(err)
+		}
+		m, _ := newTestModel(t, nil, WithConversation("u-1"))
+		m.client = client
+		m = drive(m, tea.WindowSizeMsg{Width: width, Height: 24})
+
+		wantWidth := m.contentWidth()
+		m.input.SetValue("ping")
+		next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		m = next.(Model)
+		if cmd == nil {
+			t.Fatalf("send at width %d produced no command", width)
+		}
+		cmd()
+		body := <-got
+		if want := float64(wantWidth * 8); body["viewport_width"] != want {
+			t.Errorf("width %d: viewport_width = %v, want %v (contentWidth()*8 = %d*8)", width, body["viewport_width"], want, wantWidth)
+		}
+		srv.Close()
 	}
 }

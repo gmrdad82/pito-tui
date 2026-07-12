@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/muesli/termenv"
 
 	"github.com/gmrdad82/pito-tui/internal/api"
@@ -28,6 +28,8 @@ type Options struct {
 	InstanceURL  *string // nil → not set on the CLI
 	Sounds       *bool   // nil → not set on the CLI
 	Conversation string  // positional argument, "" → picker
+	Tour         bool    // --tour: play the self-driving walkthrough, then hand back control
+	TourAI       bool    // --tour-ai: include the @ai step (spends the AI provider's budget) — no-op without Tour
 	Stdout       io.Writer
 }
 
@@ -84,6 +86,14 @@ Point pito-tui at your install:
 	// Resolve the markdown style NOW, before Bubble Tea owns the terminal:
 	// termenv's background query talks over stdin, and doing it inside the
 	// program deadlocks against tea's input reader (the "loading…" freeze).
+	// Bubble Tea v2 still owns stdin exclusively once Program.Run() starts —
+	// this synchronous, pre-tea query is unchanged and still required. v2
+	// does add an async alternative (tea.RequestBackgroundColor in Init(),
+	// tea.BackgroundColorMsg in Update()) for programs that want the query
+	// to run inside the event loop, but that trades this one blocking call
+	// for an async render-setup dance (the renderer isn't built until the
+	// message arrives) — not worth it here, and the v2 upgrade guide's own
+	// "compat" quick-path keeps doing exactly this: blocking, outside tea.
 	glamourStyle := "dark"
 	if !termenv.HasDarkBackground() {
 		glamourStyle = "light"
@@ -113,14 +123,30 @@ Point pito-tui at your install:
 	case !authed:
 		// Login is the app's own grammar: the user types /login <code>
 		// into the chat, exactly like the web chatbox. No side-channel
-		// prompt — the TUI opens unauthenticated and says so.
+		// prompt — the TUI opens unauthenticated and says so. (This wins
+		// over --tour too: the script sends real messages, so it needs a
+		// real session — an unauthenticated run just falls back to the
+		// ordinary login banner instead of typing into a dead end.)
 		modelOpts = append(modelOpts, ui.WithLoginRequired())
+	case opts.Tour:
+		// --tour/--tour-ai (ambassador wave): a self-playing, zero-
+		// interaction walkthrough against a brand-new conversation — see
+		// ui.TourScript/ui.WithTour.
+		modelOpts = append(modelOpts, ui.WithTour(ui.TourScript(opts.TourAI)))
 	case cfg.Conversation != "":
 		modelOpts = append(modelOpts, ui.WithConversation(cfg.Conversation))
+	default:
+		// pito's own flow (owner 2026-07-12): boot lands on a FRESH chat
+		// — the splash plays, the prompt waits, the first send creates
+		// the conversation. The conversations list is /resume's job now,
+		// never the landing screen.
+		modelOpts = append(modelOpts, ui.WithNewConversation())
 	}
 	model := ui.NewModel(client, connect, modelOpts...)
 
-	program = tea.NewProgram(model, tea.WithAltScreen())
+	// AltScreen moved from a NewProgram option to a declarative field on
+	// the model's View() (tea.View.AltScreen) in v2 — see ui.Model.View.
+	program = tea.NewProgram(model)
 	_, err = program.Run()
 	return err
 }
@@ -130,7 +156,7 @@ Point pito-tui at your install:
 // grammar, like the web chatbox) from "cannot reach the backend at all"
 // (an error worth stopping for).
 func Preflight(ctx context.Context, client *api.Client) (authed bool, err error) {
-	_, err = client.Resume(ctx)
+	_, err = client.FetchResume(ctx, "", 0)
 	switch {
 	case err == nil:
 		return true, nil
