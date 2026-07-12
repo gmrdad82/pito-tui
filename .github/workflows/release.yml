@@ -119,7 +119,7 @@ jobs:
           cache: true
 
       - name: goreleaser (build, GitHub Release, deb, AUR)
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: "~> v2"
