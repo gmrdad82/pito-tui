@@ -22,7 +22,7 @@
 // ping, BEFORE shipping v1.3.0 (plan W1.1, docs/claude/2.0.0.md).
 package grammar
 
-//go:generate env PITO_REF=WORKTREE go run github.com/gmrdad82/pito-tui/tools/toolsgen
+//go:generate env PITO_REF=v2.0.0 go run github.com/gmrdad82/pito-tui/tools/toolsgen
 
 import (
 	_ "embed"

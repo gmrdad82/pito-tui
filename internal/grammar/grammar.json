@@ -1492,7 +1492,6 @@
         "api_key",
         "slack",
         "discord",
-        "nickname",
         "model"
       ]
     },
@@ -1504,7 +1503,6 @@
         "voyage",
         "igdb",
         "webhook",
-        "me",
         "sound",
         "timezone"
       ]

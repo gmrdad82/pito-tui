@@ -4,6 +4,8 @@
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-ff69b4?logo=githubsponsors)](https://github.com/sponsors/gmrdad82)
 
+![pito-tui: starfield boot, braille analytics in color, the game picker](docs/media/pito-tui-loop.gif)
+
 Terminal client for [PITO](https://github.com/gmrdad82/pito) — the
 self-hosted, chat-first YouTube channel manager. One scrollback, one prompt,
 the same server-side command grammar as the web chatbox, live over
@@ -13,6 +15,11 @@ The TUI is a thin client by design: it sends raw text (slash commands
 included) and renders the JSON events the server emits. All parsing,
 grammar, and behavior live in the Rails app — this binary is the window,
 your server is the product.
+
+Built on the [Charm](https://github.com/charmbracelet) stack — Bubble
+Tea, Lip Gloss, Bubbles, Harmonica, and VHS for every capture you see
+here. The star sky, the shimmer, the springs: that's their toolkit,
+pushed as far as we could take it.
 
 Phone person? The same instance also fits in your pocket:
 [**`pito-android`**](https://github.com/gmrdad82/pito-android), a native
