@@ -69,6 +69,15 @@ type PitoCopySnapshot struct {
 		Sections          map[string]string `json:"sections"`
 		KeyGate           string            `json:"key_gate"`
 	} `json:"ai_picker"`
+	// ScrollbackNav is the floating scroll-pill copy
+	// (en.pito.copy.scrollback_nav): 50 count variants with
+	// %{count}/%{direction} + {singular|plural} braces, and the two
+	// one-variant jump glyphs.
+	ScrollbackNav struct {
+		Count       []string `json:"count"`
+		JumpToStart string   `json:"jump_to_start"`
+		JumpToEnd   string   `json:"jump_to_end"`
+	} `json:"scrollback_nav"`
 	Shell struct {
 		ChannelShortcut string `json:"channel_shortcut"`
 		PeriodShortcut  string `json:"period_shortcut"`

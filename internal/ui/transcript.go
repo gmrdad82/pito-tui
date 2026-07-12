@@ -253,6 +253,26 @@ func (t *Transcript) TurnLineRange(turnID int64) (start, end int, ok bool) {
 	return 0, 0, false
 }
 
+// TurnsOutside counts turns FULLY above and FULLY below the viewport
+// window [yoff, yoff+height) — the scroll-nav pills' numbers (the web's
+// scroll_nav_controller counts [data-scrollback-message] rects the same
+// way; a turn straddling an edge belongs to neither count). Line ranges
+// come from the same caches TurnLineRange walks, materialized for width.
+func (t *Transcript) TurnsOutside(width, yoff, height int) (above, below int) {
+	t.ensureRendered(width)
+	pos := 0
+	for _, turn := range t.turns {
+		n := len(turn.lines)
+		if pos+n <= yoff && n > 0 {
+			above++
+		} else if pos >= yoff+height && n > 0 {
+			below++
+		}
+		pos += n
+	}
+	return above, below
+}
+
 func (t *Transcript) renderTurn(turn *Turn) string {
 	// (lines is refreshed by ensureRendered's caller-side split.)
 	var b strings.Builder

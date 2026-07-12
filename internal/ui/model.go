@@ -893,6 +893,18 @@ func (m Model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.sc.ScrollDown(1)
 		m.setFollow(m.sc.AtBottom())
 		return m, m.animate()
+	case "ctrl+home":
+		// Web parity (pito--scroll-nav#jumpTop): jump to the very start.
+		m.sc.GotoTop()
+		m.setFollow(m.sc.AtBottom())
+		return m, m.animate()
+	case "ctrl+end":
+		// Web parity (#jumpBottom smooth-scrolls): re-engage follow and
+		// let the house glide carry the viewport down (easeTowardBottom;
+		// more than two screens away still lands instantly, its rule).
+		m.setFollow(true)
+		m.scrollEasing = true
+		return m, m.animate()
 	}
 
 	if msg.String() == "ctrl+space" {
@@ -1711,6 +1723,11 @@ func (m Model) viewContent() string {
 	vpBody := m.scrollerView()
 	if palette := m.paletteView(); palette != "" {
 		vpBody = overlayBottom(vpBody, palette, m.contentWidth())
+	}
+	if top, bottom := m.scrollNavPills(); top != "" || bottom != "" {
+		// scrollnav.go: the floating "N messages above/below" pills with
+		// their ctrl+home/ctrl+end jump tokens (web's scroll-nav).
+		vpBody = paintScrollNavOverlay(vpBody, top, bottom, m.contentWidth())
 	}
 	sections := []string{vpBody}
 	if footer := m.keymapFooterView(); footer != "" {

@@ -15,6 +15,11 @@ project follows [Semantic Versioning](https://semver.org/).
   ctrl+f favorites, ctrl+x clears a key, and the effort cycler when
   the active provider reasons. State and writes ride the same
   `/settings/ai` pair as the web, so the two faces cannot drift.
+- **Scroll-nav pills + ctrl+home / ctrl+end** — the web's floating
+  "N messages above/below" pills land on the conversation's top and
+  bottom edges while you're scrolled away, drawing from the same
+  50-variant server-authored copy pool; ctrl+home jumps to the start,
+  ctrl+end glides back to the live edge.
 
 ## [2.1.0] — 2026-07-12
 
