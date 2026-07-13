@@ -4,6 +4,24 @@ All notable changes to pito-tui are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); from 1.0.0 onward the
 project follows [Semantic Versioning](https://semver.org/).
 
+## [2.4.0] — 2026-07-14
+
+### Added
+
+- **`/resume` picker learns `n` rename and `dd` delete** — web sidebar
+  parity (resume_controller.js). `n` on the highlighted conversation opens
+  an inline text input seeded with its current title (same textinput
+  styling as the chatbox); enter PATCHes `/chat/:uuid` `{title:}` and
+  restyles the row from the server's canonical reply, esc cancels with no
+  network call, and a blank/whitespace submit cancels the same way. `d`
+  arms the highlighted row for ~500ms — a second `d` within the window
+  DELETEs `/chat/:uuid` and drops the row; moving the highlight or
+  pressing esc disarms early, and the window auto-expires on its own,
+  mirroring the web chord's timing exactly. Deleting the conversation the
+  picker is open over clears it, same as the web's post-delete
+  navigate-home rule. The picker's hint line now reads
+  `n rename · dd delete` alongside the existing keys.
+
 ## [2.3.1] — 2026-07-13
 
 ### Fixed

@@ -56,6 +56,13 @@ var (
 	pickerNewStyle = lipgloss.NewStyle().Foreground(render.ColorOK)
 	pickerDimStyle = lipgloss.NewStyle().Foreground(render.ColorDim)
 	pickerKeyStyle = lipgloss.NewStyle().Foreground(render.ColorDim).Bold(true)
+
+	// pickerDeleteConfirmStyle paints the dd-armed row's confirm prompt —
+	// the same "needs a second press to confirm" language as the armed-quit
+	// chip (onKey's "ctrl+c again to quit"), not the web's orange (pito
+	// blue's warn accent is ColorWarn here, no direct copy of the web's
+	// Pito::Copy palette).
+	pickerDeleteConfirmStyle = lipgloss.NewStyle().Foreground(render.ColorWarn).Bold(true)
 )
 
 // pickerView renders the conversation picker, windowed so long lists keep
@@ -67,8 +74,15 @@ var (
 // pagination follow-on (tui-needs ask 9a) fetching its next page,
 // mirroring notificationsPanelView's loader row. A server that never
 // sends next_cursor never sets this, so its frames render byte-identical
-// to before pagination existed.
-func pickerView(rows []pickerRow, cursor, width, height int, now time.Time, truecolor bool, phase float64, fetching, canClose bool) string {
+// to before pagination existed. renamingUUID/renameInputView swap the
+// highlighted row for the live rename textinput.Model's own View() (the
+// picker's `n` key, mirroring the web's pito--rename inline <input>
+// swap); deleteArmed swaps it for the dd confirm prompt instead (the
+// picker's `d`/`dd` key, mirroring resume_controller.js's #arm). Both are
+// mutually exclusive with each other and only ever apply to the row under
+// cursor — a renamingUUID that doesn't match the cursor row (stale after
+// a fetch reshuffled rows) is simply never matched below.
+func pickerView(rows []pickerRow, cursor, width, height int, now time.Time, truecolor bool, phase float64, fetching, canClose bool, renamingUUID, renameInputView string, deleteArmed bool) string {
 	// Build every list line first, remembering which line the cursor is on
 	// (section headers interleave, so row index ≠ line index).
 	var lines []string
@@ -79,26 +93,43 @@ func pickerView(rows []pickerRow, cursor, width, height int, now time.Time, true
 			section = row.section
 			lines = append(lines, pickerSectionStyle.Render(strings.ToUpper(section)))
 		}
+		selected := i == cursor
+
+		// Inline rename replaces the row entirely with the input widget —
+		// the web's own row.innerHTML swap (pito--rename #startRename).
+		if selected && renamingUUID != "" && row.uuid == renamingUUID {
+			marker := pickerCursorStyle.Render("▌ ")
+			cursorLine = len(lines)
+			lines = append(lines, lipgloss.NewStyle().MaxWidth(width).Render(marker+renameInputView))
+			continue
+		}
+
+		// A dd-armed row replaces its content with the confirm prompt —
+		// the web's own row.innerHTML swap (pito--resume #arm).
+		armed := selected && deleteArmed && !row.isNew
+
 		marker := "  "
 		label := row.title
-		if row.isNew {
+		switch {
+		case armed:
+			label = pickerDeleteConfirmStyle.Render("d again to delete")
+		case row.isNew:
 			label = pickerNewStyle.Render("+ " + label)
-		} else if label == "" {
+		case label == "":
 			label = "(unnamed)"
 		}
-		selected := i == cursor
 		if selected {
 			marker = pickerCursorStyle.Render("▌ ")
 			cursorLine = len(lines)
-			if !row.isNew {
+			if !row.isNew && !armed {
 				label = pickerCursorStyle.Render(row.title)
 			}
 		}
-		if row.ai {
+		if row.ai && !armed {
 			label += " " + aiBadge(phase, truecolor)
 		}
 		line := marker + label
-		if !row.last.IsZero() {
+		if !row.last.IsZero() && !armed {
 			line += pickerDimStyle.Render("  · " + relativeTime(row.last, now))
 		}
 		line = lipgloss.NewStyle().MaxWidth(width).Render(line)
@@ -169,6 +200,8 @@ func pickerView(rows []pickerRow, cursor, width, height int, now time.Time, true
 	}
 	help := pickerKeyStyle.Render("j/k") + pickerDimStyle.Render(" move · ") +
 		pickerKeyStyle.Render("enter") + pickerDimStyle.Render(" open · ") +
+		pickerKeyStyle.Render("n") + pickerDimStyle.Render(" rename · ") +
+		pickerKeyStyle.Render("dd") + pickerDimStyle.Render(" delete · ") +
 		pickerKeyStyle.Render("ctrl-c") + pickerDimStyle.Render(" quit")
 	b.WriteString("\n" + help)
 	return b.String()

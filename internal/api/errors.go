@@ -14,4 +14,8 @@ var (
 	// ErrNotFound is an unknown conversation uuid — the client goes back
 	// to the picker instead of erroring.
 	ErrNotFound = errors.New("api: not found")
+	// ErrInvalidTitle is a rejected rename PATCH (blank/whitespace-only
+	// title) — the same 422 conversations_controller.rb#update returns for
+	// the web's inline rename.
+	ErrInvalidTitle = errors.New("api: invalid conversation title")
 )

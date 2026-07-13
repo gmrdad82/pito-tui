@@ -161,6 +161,19 @@ type Model struct {
 	// Mirrors notificationsPanel's next/fetching (notifications.go).
 	pickerNext     string
 	pickerFetching bool
+	// pickerRenaming is the uuid of the row currently in inline-rename
+	// mode ("" when none) — the picker's `n` key (mirrors the web's
+	// pito--rename inline <input> swap, resume_controller.js "n" handler).
+	// pickerRenameInput is the textinput.Model backing it, built fresh on
+	// every rename start (see openPickerRename).
+	pickerRenaming    string
+	pickerRenameInput textinput.Model
+	// pickerDeleteArmed: ticks left in the picker's dd delete-arm window
+	// ("first d arms the highlighted row, second d within the window
+	// deletes it" — resume_controller.js's #arm/#disarm, 500ms). Always
+	// scoped to the row currently under the cursor: moving the highlight
+	// disarms, exactly like the web.
+	pickerDeleteArmed int64
 
 	// notifications overlay state (see notifications.go)
 	notif notificationsPanel
@@ -555,6 +568,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onKey(msg)
 	case ResumeFetchedMsg:
 		return m.onResume(msg)
+	case ConversationRenamedMsg:
+		return m.onConversationRenamed(msg)
+	case ConversationDeletedMsg:
+		return m.onConversationDeleted(msg)
 	case EntityPickerFetchedMsg:
 		return m.onEntityPickerFetched(msg)
 	case AiPickerFetchedMsg:
@@ -715,13 +732,22 @@ func (m Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) onPickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	// A live rename input owns every key until Enter/Esc — the web's own
+	// contract (pito--rename's input listener runs before the
+	// document-level #onKey, so arrow/d/n never reach row navigation while
+	// the field is focused).
+	if m.pickerRenaming != "" {
+		return m.onPickerRenameKey(msg)
+	}
 	switch msg.String() {
 	case "j", "down":
+		m.pickerDeleteArmed = 0 // moving the highlight disarms dd (web parity)
 		if m.cursor < len(m.rows)-1 {
 			m.cursor++
 		}
 		return m.maybeFetchMorePicker()
 	case "k", "up":
+		m.pickerDeleteArmed = 0
 		if m.cursor > 0 {
 			m.cursor--
 		}
@@ -744,6 +770,12 @@ func (m Model) onPickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.conv.DisplayName = row.title
 		return m, m.fetchChatCmd(row.uuid, false)
 	case "esc":
+		if m.pickerDeleteArmed > 0 {
+			// Escape disarms dd without closing the picker (web parity:
+			// resume_controller.js's #onKey "if (this.armedRow) disarm").
+			m.pickerDeleteArmed = 0
+			return m, nil
+		}
 		// Only a picker OVER an open conversation can close back to it
 		// (the /resume path); the startup picker has nowhere to go.
 		if m.conv.UUID == "" {
@@ -751,6 +783,170 @@ func (m Model) onPickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.mode = modeChat
 		return m, nil
+	case "n":
+		return m.openPickerRename()
+	case "d":
+		return m.onPickerDeleteKey()
+	}
+	return m, nil
+}
+
+// openPickerRename starts inline-rename on the highlighted row — the
+// picker's `n` key, mirroring the web's pito--rename #startRename (double
+// click there, `n` here since there's no mouse). Ignored for the "new
+// conversation" sentinel row, which has no uuid to rename.
+func (m Model) openPickerRename() (tea.Model, tea.Cmd) {
+	if len(m.rows) == 0 || m.cursor >= len(m.rows) {
+		return m, nil
+	}
+	row := m.rows[m.cursor]
+	if row.isNew {
+		return m, nil
+	}
+	m.pickerDeleteArmed = 0
+
+	ti := textinput.New()
+	ti.Prompt = ""
+	ti.SetValue(row.title)
+	ti.CursorEnd()
+	styles := ti.Styles()
+	styles.Cursor.Color = render.ColorAccent
+	ti.SetStyles(styles)
+	if w := m.contentWidth() - 4; w > 4 {
+		ti.SetWidth(w)
+	}
+	ti.Focus()
+
+	m.pickerRenaming = row.uuid
+	m.pickerRenameInput = ti
+	return m, textinput.Blink
+}
+
+// onPickerRenameKey drives the inline rename input: Enter submits (a
+// blank/whitespace value cancels without a network call, matching the
+// web's #commitRename), Esc cancels, everything else edits the field.
+func (m Model) onPickerRenameKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		uuid := m.pickerRenaming
+		newTitle := strings.TrimSpace(m.pickerRenameInput.Value())
+		m.pickerRenaming = ""
+		if newTitle == "" {
+			return m, nil
+		}
+		// Optimistic update — the web restyles the row before the PATCH
+		// lands too (pito--rename #commitRename).
+		for i := range m.rows {
+			if m.rows[i].uuid == uuid {
+				m.rows[i].title = newTitle
+			}
+		}
+		if m.conv.UUID == uuid {
+			m.conv.DisplayName = newTitle
+		}
+		return m, m.renameConversationCmd(uuid, newTitle)
+	case "esc":
+		m.pickerRenaming = ""
+		return m, nil
+	default:
+		var cmd tea.Cmd
+		m.pickerRenameInput, cmd = m.pickerRenameInput.Update(msg)
+		return m, cmd
+	}
+}
+
+// renameConversationCmd PATCHes the rename (api.Client.RenameConversation
+// — the same /chat/:uuid endpoint the web's inline rename hits).
+func (m Model) renameConversationCmd(uuid, title string) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		newTitle, err := client.RenameConversation(context.Background(), uuid, title)
+		return ConversationRenamedMsg{UUID: uuid, Title: newTitle, Err: err}
+	}
+}
+
+// onConversationRenamed absorbs the rename PATCH's reply. A failure is
+// left as a silent no-op past the auth check — like the web's
+// #commitRename ("leave the optimistic text in place... simple: just
+// keep what's shown") there is no earlier title cached locally to roll
+// back to.
+func (m Model) onConversationRenamed(msg ConversationRenamedMsg) (tea.Model, tea.Cmd) {
+	if msg.Err != nil {
+		if isUnauthorized(msg.Err) {
+			m.needsLogin = true
+		}
+		return m, nil
+	}
+	for i := range m.rows {
+		if m.rows[i].uuid == msg.UUID {
+			m.rows[i].title = msg.Title
+		}
+	}
+	if m.conv.UUID == msg.UUID {
+		m.conv.DisplayName = msg.Title
+	}
+	return m, nil
+}
+
+// onPickerDeleteKey handles the picker's `d` key — the web's vim-style dd
+// chord (resume_controller.js): a first `d` arms the highlighted row
+// (pickerDeleteArmTicks ~500ms, ticked down in onAnimTick, mirroring the
+// JS setTimeout), a second `d` within that window deletes it. The "new
+// conversation" sentinel row has nothing to delete.
+func (m Model) onPickerDeleteKey() (tea.Model, tea.Cmd) {
+	if len(m.rows) == 0 || m.cursor >= len(m.rows) {
+		return m, nil
+	}
+	row := m.rows[m.cursor]
+	if row.isNew {
+		return m, nil
+	}
+	if m.pickerDeleteArmed > 0 {
+		m.pickerDeleteArmed = 0
+		return m, m.deleteConversationCmd(row.uuid)
+	}
+	m.pickerDeleteArmed = pickerDeleteArmTicks
+	return m, m.animate()
+}
+
+// deleteConversationCmd DELETEs the conversation (api.Client.
+// DeleteConversation — the same /chat/:uuid endpoint the web's dd chord
+// hits).
+func (m Model) deleteConversationCmd(uuid string) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		err := client.DeleteConversation(context.Background(), uuid)
+		return ConversationDeletedMsg{UUID: uuid, Err: err}
+	}
+}
+
+// onConversationDeleted absorbs the delete DELETE's reply: on success the
+// row is dropped from the picker and, if it was the conversation the
+// picker was opened OVER, m.conv is cleared — the web's post-delete rule
+// (resume_controller.js #deleteConversation: "Leave the conversation if
+// it's the one open" navigates home; the tui's "home" is the picker
+// itself, already on screen, so clearing conv is the equivalent — it
+// drops the picker's Esc-back-to-chat affordance for a conversation that
+// no longer exists).
+func (m Model) onConversationDeleted(msg ConversationDeletedMsg) (tea.Model, tea.Cmd) {
+	if msg.Err != nil {
+		if isUnauthorized(msg.Err) {
+			m.needsLogin = true
+		}
+		m.pickerNotice = "could not delete that conversation"
+		return m, nil
+	}
+	for i, row := range m.rows {
+		if row.uuid == msg.UUID {
+			m.rows = append(m.rows[:i], m.rows[i+1:]...)
+			if m.cursor >= len(m.rows) && m.cursor > 0 {
+				m.cursor--
+			}
+			break
+		}
+	}
+	if m.conv.UUID == msg.UUID {
+		m.conv = api.Conversation{}
 	}
 	return m, nil
 }
@@ -1502,7 +1698,7 @@ func (m Model) animGateOpen() bool {
 	return len(m.shimmer) > 0 || m.notif.fetching || m.pickerFetching ||
 		m.entity.fetching || m.aiPicker.fetching ||
 		m.rippleAnim || m.unreadOdoAnim || len(m.shaking) > 0 || m.ghostTyping || m.thumbFading ||
-		m.toastTicks > 0 || m.dotPulseTicks > 0 || m.quitArmed > 0 || m.scrollEasing || m.splashActive() || m.footerAnimating() || m.tourActive() ||
+		m.toastTicks > 0 || m.dotPulseTicks > 0 || m.quitArmed > 0 || m.pickerDeleteArmed > 0 || m.scrollEasing || m.splashActive() || m.footerAnimating() || m.tourActive() ||
 		m.aiPromptLive()
 }
 
@@ -1586,6 +1782,11 @@ func (m Model) onAnimTick() (tea.Model, tea.Cmd) {
 	// The armed-quit window counts down (select.go's toast shape).
 	if m.quitArmed > 0 {
 		m.quitArmed--
+	}
+	// The picker's dd delete-arm window counts down the same way —
+	// resume_controller.js's 500ms auto-disarm setTimeout.
+	if m.pickerDeleteArmed > 0 {
+		m.pickerDeleteArmed--
 	}
 	// micro.go effect 4: the scroll-thumb's fade-out, once follow flips
 	// back to true (setFollow starts it).
@@ -1735,7 +1936,8 @@ func (m Model) viewContent() string {
 	if m.mode == modePicker {
 		// The picker is an overlay body — content, capped like every
 		// other surface (height/window math stays on the raw terminal).
-		body := pickerView(m.rows, m.cursor, m.contentWidth(), m.height, m.now(), m.truecolor, m.phase, m.pickerFetching, m.conv.UUID != "")
+		body := pickerView(m.rows, m.cursor, m.contentWidth(), m.height, m.now(), m.truecolor, m.phase, m.pickerFetching, m.conv.UUID != "",
+			m.pickerRenaming, m.pickerRenameInput.View(), m.pickerDeleteArmed > 0)
 		if m.pickerNotice != "" {
 			body += "\n" + statusStyle.Render("· "+m.pickerNotice)
 		}
@@ -2143,6 +2345,11 @@ const transcriptBeatDivisor = 2
 
 // quitArmTicks: how long the armed-quit window stays open (~2s).
 const quitArmTicks = int64(2 * time.Second / shimmerTick)
+
+// pickerDeleteArmTicks: how long the picker's dd delete-arm window stays
+// open — mirrors resume_controller.js's #arm exactly (500ms, the JS
+// setTimeout that auto-disarms a lone `d`).
+const pickerDeleteArmTicks = int64(500 * time.Millisecond / shimmerTick)
 
 // quitChip memoizes the constant ctrl+c hint per color mode — statusLine
 // runs every frame and the glossy Kbd chip is ~8 styled runes.

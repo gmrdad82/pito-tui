@@ -476,3 +476,100 @@ func TestJarAndBaseURLAccessors(t *testing.T) {
 		t.Error("BaseURL() must return the instance URL")
 	}
 }
+
+// RenameConversation/DeleteConversation hit the same /chat/:uuid endpoint
+// the web sidebar's inline rename (pito--rename) and dd chord
+// (pito--resume) use — conversations_controller.rb#update/#destroy.
+
+func TestRenameConversationPatchesTitle(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("PATCH /chat/abc", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Accept"); got != "application/json" {
+			t.Errorf("Accept = %q", got)
+		}
+		var body struct {
+			Title string `json:"title"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Title != "new title" {
+			t.Errorf("title = %q, want %q", body.Title, "new title")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"title":"new title"}`))
+	})
+	c := newClient(t, mux)
+
+	title, err := c.RenameConversation(t.Context(), "abc", "new title")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if title != "new title" {
+		t.Errorf("title = %q, want %q", title, "new title")
+	}
+}
+
+func TestRenameConversationBlankTitleIsInvalid(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("PATCH /chat/abc", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"error":"title can't be blank"}`))
+	})
+	c := newClient(t, mux)
+
+	_, err := c.RenameConversation(t.Context(), "abc", "")
+	if !errors.Is(err, ErrInvalidTitle) {
+		t.Fatalf("err = %v, want ErrInvalidTitle", err)
+	}
+}
+
+func TestRenameConversationUnknownUUID(t *testing.T) {
+	c := newClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	_, err := c.RenameConversation(t.Context(), "gone", "x")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestRenameConversationUnauthorized(t *testing.T) {
+	c := newClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	_, err := c.RenameConversation(t.Context(), "abc", "x")
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("err = %v, want ErrUnauthorized", err)
+	}
+}
+
+func TestDeleteConversationSendsDelete(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("DELETE /chat/abc", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	c := newClient(t, mux)
+
+	if err := c.DeleteConversation(t.Context(), "abc"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDeleteConversationUnknownUUID(t *testing.T) {
+	c := newClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	if err := c.DeleteConversation(t.Context(), "gone"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestDeleteConversationUnauthorized(t *testing.T) {
+	c := newClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	if err := c.DeleteConversation(t.Context(), "abc"); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("err = %v, want ErrUnauthorized", err)
+	}
+}

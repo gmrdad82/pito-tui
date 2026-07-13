@@ -562,6 +562,328 @@ func TestPickerEnterWithNoRows(t *testing.T) {
 	}
 }
 
+// ── n rename / dd delete — the picker's web-parity keys ─────────────────
+// (resume_controller.js's "n" and dd chord; conversations_controller.rb's
+// PATCH/DELETE /chat/:uuid).
+
+// resumeMux is a fresh mux serving GET /resume.json (resumeJSON: u1
+// "release prep" recent, u2 "thumbnail ideas" older), plus whatever the
+// caller registers on top — a fresh *http.ServeMux per test, since
+// chatServer's is returned as a bare http.Handler and can't be extended.
+func resumeMux(t *testing.T) *http.ServeMux {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /resume.json", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(resumeJSON))
+	})
+	return mux
+}
+
+func TestPickerDeleteChordArmsThenConfirms(t *testing.T) {
+	deletes := 0
+	mux := resumeMux(t)
+	mux.HandleFunc("DELETE /chat/u1", func(w http.ResponseWriter, r *http.Request) {
+		deletes++
+		w.WriteHeader(http.StatusNoContent)
+	})
+	m, _ := newTestModel(t, mux)
+	m = sized(m)
+	m = drive(m, m.fetchResumeCmd()())
+	m = drive(m, key("j")) // cursor -> u1 (recent)
+
+	// A lone `d` arms the row without deleting.
+	m = drive(m, key("d"))
+	if m.pickerDeleteArmed <= 0 {
+		t.Fatal("a first d must arm the highlighted row")
+	}
+	if deletes != 0 {
+		t.Fatal("a first d must not delete")
+	}
+
+	// A second `d` within the window confirms the delete.
+	m, cmd := driveCmd(m, key("d"))
+	if m.pickerDeleteArmed != 0 {
+		t.Error("the confirming d must disarm")
+	}
+	if cmd == nil {
+		t.Fatal("the second d within the window must fire the delete")
+	}
+	m = drive(m, cmd())
+	if deletes != 1 {
+		t.Errorf("DELETE calls = %d, want 1", deletes)
+	}
+	for _, row := range m.rows {
+		if row.uuid == "u1" {
+			t.Error("the deleted row must be removed from the picker")
+		}
+	}
+}
+
+func TestPickerDeleteChordAutoDisarmsAfterWindow(t *testing.T) {
+	mux := resumeMux(t)
+	mux.HandleFunc("DELETE /chat/u1", func(w http.ResponseWriter, r *http.Request) {
+		t.Error("must not delete once the arm window has expired")
+	})
+	m, _ := newTestModel(t, mux)
+	m = sized(m)
+	m = drive(m, m.fetchResumeCmd()())
+	m = drive(m, key("j"))
+
+	m = drive(m, key("d"))
+	if m.pickerDeleteArmed <= 0 {
+		t.Fatal("d must arm the row")
+	}
+	m = driveAnim(t, m, int(pickerDeleteArmTicks)+5)
+	if m.pickerDeleteArmed != 0 {
+		t.Fatal("the arm window must expire on its own, like resume_controller.js's 500ms setTimeout")
+	}
+
+	// A `d` after expiry is a FIRST press again, not a confirming second —
+	// it re-arms (the DELETE handler above fails the test if this instead
+	// fires a delete).
+	m = drive(m, key("d"))
+	if m.pickerDeleteArmed <= 0 {
+		t.Error("d after expiry must re-arm the row")
+	}
+}
+
+func TestPickerDeleteChordDisarmsOnMove(t *testing.T) {
+	mux := resumeMux(t)
+	mux.HandleFunc("DELETE /chat/u1", func(w http.ResponseWriter, r *http.Request) {
+		t.Error("must not delete after the highlight moved away (web parity)")
+	})
+	m, _ := newTestModel(t, mux)
+	m = sized(m)
+	m = drive(m, m.fetchResumeCmd()())
+	m = drive(m, key("j"))
+
+	m = drive(m, key("d"))
+	if m.pickerDeleteArmed <= 0 {
+		t.Fatal("d must arm the row")
+	}
+	m = drive(m, key("j")) // move onto u2 — disarms
+	if m.pickerDeleteArmed != 0 {
+		t.Error("moving the highlight must disarm dd")
+	}
+	m, cmd := driveCmd(m, key("d"))
+	if cmd != nil {
+		t.Error("d right after a move must re-arm, not delete")
+	}
+}
+
+func TestPickerDeleteChordDisarmsOnEscWithoutClosing(t *testing.T) {
+	mux := resumeMux(t)
+	// Opened over an existing conversation, so a bare Esc (nothing armed)
+	// would otherwise close the picker back to chat — the armed Esc must
+	// NOT take that path.
+	m, _ := newTestModel(t, mux, WithConversation("u1"))
+	m = sized(m)
+	m.mode = modePicker
+	m = drive(m, m.fetchResumeCmd()())
+	m = drive(m, key("j"))
+
+	m = drive(m, key("d"))
+	if m.pickerDeleteArmed <= 0 {
+		t.Fatal("d must arm the row")
+	}
+	m, _ = driveCmd(m, key("esc"))
+	if m.pickerDeleteArmed != 0 {
+		t.Error("esc must disarm the row (resume_controller.js: armedRow -> disarm)")
+	}
+	if m.mode != modePicker {
+		t.Error("esc while a row is armed must not close the picker")
+	}
+}
+
+func TestPickerDeleteIgnoredOnNewConversationRow(t *testing.T) {
+	mux := resumeMux(t)
+	m, _ := newTestModel(t, mux)
+	m = sized(m)
+	m = drive(m, m.fetchResumeCmd()()) // cursor rests on the "new conversation" row
+
+	m, cmd := driveCmd(m, key("d"))
+	if m.pickerDeleteArmed != 0 || cmd != nil {
+		t.Error("d on the new-conversation row must be a no-op — there is nothing to delete")
+	}
+}
+
+func TestPickerDeleteCurrentConversationClearsConv(t *testing.T) {
+	mux := resumeMux(t)
+	mux.HandleFunc("DELETE /chat/u1", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	m, _ := newTestModel(t, mux, WithConversation("u1"))
+	m = sized(m)
+	m.mode = modePicker
+	m = drive(m, m.fetchResumeCmd()())
+	m = drive(m, key("j")) // cursor -> u1, the conversation the picker is open over
+
+	m = drive(m, key("d"))
+	m, cmd := driveCmd(m, key("d"))
+	if cmd == nil {
+		t.Fatal("second d must fire the delete")
+	}
+	m = drive(m, cmd())
+	if m.conv.UUID != "" {
+		t.Error("deleting the active conversation must clear conv — the web's own post-delete rule (navigate home)")
+	}
+}
+
+func TestPickerDeleteOtherConversationKeepsCurrentConv(t *testing.T) {
+	mux := resumeMux(t)
+	mux.HandleFunc("DELETE /chat/u2", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	m, _ := newTestModel(t, mux, WithConversation("u1"))
+	m = sized(m)
+	m.mode = modePicker
+	m = drive(m, m.fetchResumeCmd()())
+	m = drive(m, key("j"), key("j")) // cursor -> u2 (older), not the active conversation
+
+	m = drive(m, key("d"))
+	m, cmd := driveCmd(m, key("d"))
+	if cmd == nil {
+		t.Fatal("second d must fire the delete")
+	}
+	m = drive(m, cmd())
+	if m.conv.UUID != "u1" {
+		t.Error("deleting a DIFFERENT row must leave the active conversation untouched")
+	}
+	if len(m.rows) != 2 { // new + u1 only, u2 removed
+		t.Errorf("rows = %d, want 2 (new-conversation + u1)", len(m.rows))
+	}
+}
+
+func TestPickerRenameSubmitPatchesAndUpdatesRow(t *testing.T) {
+	var gotTitle string
+	mux := resumeMux(t)
+	mux.HandleFunc("PATCH /chat/u1", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Title string `json:"title"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		gotTitle = body.Title
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"title":"` + body.Title + `"}`))
+	})
+	m, _ := newTestModel(t, mux)
+	m = sized(m)
+	m = drive(m, m.fetchResumeCmd()())
+	m = drive(m, key("j")) // cursor -> u1
+
+	m, cmd := driveCmd(m, key("n"))
+	if m.pickerRenaming != "u1" {
+		t.Fatal("n must open inline rename on the highlighted row")
+	}
+	if cmd == nil {
+		t.Error("opening rename must start the cursor blink")
+	}
+	if got := m.pickerRenameInput.Value(); got != "release prep" {
+		t.Errorf("rename input seed = %q, want %q", got, "release prep")
+	}
+
+	m.pickerRenameInput.SetValue("renamed chat")
+	m, cmd = driveCmd(m, key("enter"))
+	if m.pickerRenaming != "" {
+		t.Error("enter must close the rename input")
+	}
+	if m.rows[1].title != "renamed chat" {
+		t.Errorf("optimistic row title = %q, want %q", m.rows[1].title, "renamed chat")
+	}
+	if cmd == nil {
+		t.Fatal("enter must PATCH the rename")
+	}
+	m = drive(m, cmd())
+	if gotTitle != "renamed chat" {
+		t.Errorf("PATCH title = %q, want %q", gotTitle, "renamed chat")
+	}
+	if m.rows[1].title != "renamed chat" {
+		t.Errorf("row title after the PATCH lands = %q", m.rows[1].title)
+	}
+}
+
+func TestPickerRenameUpdatesConvDisplayNameWhenCurrent(t *testing.T) {
+	mux := resumeMux(t)
+	mux.HandleFunc("PATCH /chat/u1", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"title":"renamed chat"}`))
+	})
+	m, _ := newTestModel(t, mux, WithConversation("u1"))
+	m = sized(m)
+	m.mode = modePicker
+	m = drive(m, m.fetchResumeCmd()())
+	m = drive(m, key("j"))
+
+	m = drive(m, key("n"))
+	m.pickerRenameInput.SetValue("renamed chat")
+	m, cmd := driveCmd(m, key("enter"))
+	m = drive(m, cmd())
+	if m.conv.DisplayName != "renamed chat" {
+		t.Errorf("conv.DisplayName = %q, want %q", m.conv.DisplayName, "renamed chat")
+	}
+}
+
+func TestPickerRenameEscCancelsWithoutPatch(t *testing.T) {
+	mux := resumeMux(t)
+	mux.HandleFunc("PATCH /chat/u1", func(w http.ResponseWriter, r *http.Request) {
+		t.Error("esc must not PATCH")
+	})
+	m, _ := newTestModel(t, mux)
+	m = sized(m)
+	m = drive(m, m.fetchResumeCmd()())
+	m = drive(m, key("j"))
+
+	m = drive(m, key("n"))
+	m.pickerRenameInput.SetValue("scratch")
+	m, cmd := driveCmd(m, key("esc"))
+	if m.pickerRenaming != "" {
+		t.Error("esc must close the rename input")
+	}
+	if cmd != nil {
+		t.Error("esc must not fire a network call")
+	}
+	if m.rows[1].title != "release prep" {
+		t.Errorf("row title must be unchanged by a cancelled rename, got %q", m.rows[1].title)
+	}
+}
+
+func TestPickerRenameBlankSubmitCancelsWithoutPatch(t *testing.T) {
+	mux := resumeMux(t)
+	mux.HandleFunc("PATCH /chat/u1", func(w http.ResponseWriter, r *http.Request) {
+		t.Error("a blank title must not PATCH")
+	})
+	m, _ := newTestModel(t, mux)
+	m = sized(m)
+	m = drive(m, m.fetchResumeCmd()())
+	m = drive(m, key("j"))
+
+	m = drive(m, key("n"))
+	m.pickerRenameInput.SetValue("   ")
+	m, cmd := driveCmd(m, key("enter"))
+	if m.pickerRenaming != "" {
+		t.Error("enter on a blank value must close the rename input")
+	}
+	if cmd != nil {
+		t.Error("a blank title must not fire a network call (web's #commitRename parity)")
+	}
+	if m.rows[1].title != "release prep" {
+		t.Errorf("row title must be unchanged by a blank rename, got %q", m.rows[1].title)
+	}
+}
+
+func TestPickerRenameIgnoredOnNewConversationRow(t *testing.T) {
+	mux := resumeMux(t)
+	m, _ := newTestModel(t, mux)
+	m = sized(m)
+	m = drive(m, m.fetchResumeCmd()()) // cursor rests on the "new conversation" row
+
+	m, cmd := driveCmd(m, key("n"))
+	if m.pickerRenaming != "" || cmd != nil {
+		t.Error("n on the new-conversation row must be a no-op — there is nothing to rename")
+	}
+}
+
 func TestResumeErrorShowsMessage(t *testing.T) {
 	mux := http.NewServeMux() // no /resume.json route → 404
 	m, _ := newTestModel(t, mux)

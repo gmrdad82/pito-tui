@@ -17,7 +17,7 @@ func TestPickerSelectionUsesElevatedGrayNotZebra(t *testing.T) {
 		{isNew: true, title: "start a new conversation"},
 		{uuid: "abc", title: "second row", section: "recent"},
 	}
-	out := pickerView(rows, 1, 60, 20, time.Now(), true, 0, false, false)
+	out := pickerView(rows, 1, 60, 20, time.Now(), true, 0, false, false, "", "", false)
 	if strings.Contains(out, "48;2;27;20;43") { // #1B142B, the old ColorZebra
 		t.Errorf("picker selection must not use the old plum ColorZebra:\n%q", out)
 	}

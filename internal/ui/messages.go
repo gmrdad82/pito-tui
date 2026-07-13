@@ -60,3 +60,20 @@ type SuggestionsMsg struct {
 // startSky/onSkyTick) — independent of the fast animation gate so the
 // sky keeps moving at rest.
 type SkyTickMsg struct{}
+
+// ConversationRenamedMsg carries the picker's `n` rename PATCH's outcome
+// for the conversation identified by UUID (picker.go/model.go's inline
+// rename — mirrors the web's pito--rename #commitRename).
+type ConversationRenamedMsg struct {
+	UUID  string
+	Title string
+	Err   error
+}
+
+// ConversationDeletedMsg carries the picker's `dd` delete DELETE's outcome
+// for the conversation identified by UUID (mirrors the web's
+// pito--resume #deleteConversation).
+type ConversationDeletedMsg struct {
+	UUID string
+	Err  error
+}

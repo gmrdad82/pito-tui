@@ -366,6 +366,61 @@ func (c *Client) PatchScope(ctx context.Context, uuid, channel, period string) e
 	return nil
 }
 
+// RenameConversation PATCHes /chat/:uuid {title:} — the same endpoint the
+// web sidebar's inline rename uses (pito--rename's #commitRename,
+// Conversation::Rename server-side). Returns the server's canonical title
+// on success. A blank title is rejected 422 (ErrInvalidTitle); an unknown
+// uuid answers 404 (ErrNotFound).
+func (c *Client) RenameConversation(ctx context.Context, uuid, title string) (string, error) {
+	path := "/chat/" + url.PathEscape(uuid)
+	resp, body, err := c.do(ctx, http.MethodPatch, path, map[string]string{"title": title})
+	if err != nil {
+		return "", err
+	}
+	if err := c.checkAuth(resp); err != nil {
+		return "", err
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return "", fmt.Errorf("conversation %s: %w", uuid, ErrNotFound)
+	}
+	if resp.StatusCode == http.StatusUnprocessableEntity {
+		return "", ErrInvalidTitle
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("api: PATCH /chat/%s: %s", uuid, resp.Status)
+	}
+	var out struct {
+		Title string `json:"title"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return "", fmt.Errorf("api: decoding rename reply: %w", err)
+	}
+	return out.Title, nil
+}
+
+// DeleteConversation DELETEs /chat/:uuid — the same async-delete endpoint
+// the web sidebar's dd chord uses (Conversation::RequestDeletion
+// server-side: marks the conversation deleting and hands the slow cascade
+// to a background job). 204 on success; an unknown uuid answers 404
+// (ErrNotFound).
+func (c *Client) DeleteConversation(ctx context.Context, uuid string) error {
+	path := "/chat/" + url.PathEscape(uuid)
+	resp, _, err := c.do(ctx, http.MethodDelete, path, nil)
+	if err != nil {
+		return err
+	}
+	if err := c.checkAuth(resp); err != nil {
+		return err
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("conversation %s: %w", uuid, ErrNotFound)
+	}
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("api: DELETE /chat/%s: %s", uuid, resp.Status)
+	}
+	return nil
+}
+
 func (c *Client) Suggest(ctx context.Context, uuid, input string, cursor int) (*Suggestions, error) {
 	payload := map[string]any{"input": input, "cursor": cursor}
 	if uuid != "" {
