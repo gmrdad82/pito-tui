@@ -4,6 +4,13 @@ All notable changes to pito-tui are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); from 1.0.0 onward the
 project follows [Semantic Versioning](https://semver.org/).
 
+## [2.3.1] — 2026-07-13
+
+### Fixed
+
+- The footage probe's in-flight dots read from the left edge like every
+  other line, instead of floating mid-screen.
+
 ## [2.3.0] — 2026-07-13
 
 ### Added

@@ -409,7 +409,7 @@ func (m Model) footageProbingView() string {
 	if m.footage.skipped > 0 {
 		b.WriteString(pickerDimStyle.Render(fmt.Sprintf("  (%d skipped)", m.footage.skipped)))
 	}
-	if dots := loadingDots(m.phase, m.truecolor, width); dots != "" {
+	if dots := loadingDotsLeft(m.phase, m.truecolor); dots != "" {
 		b.WriteString("\n" + dots)
 	}
 	return b.String()

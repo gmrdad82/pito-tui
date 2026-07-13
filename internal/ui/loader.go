@@ -38,3 +38,14 @@ func loadingDots(phase float64, truecolor bool, width int) string {
 	}
 	return dots
 }
+
+// loadingDotsLeft is the same in-flight marker without the centering pad —
+// panels that read strictly from the left edge (the footage probe) use it
+// so their progress never floats mid-screen (owner 2026-07-13).
+func loadingDotsLeft(phase float64, truecolor bool) string {
+	dots := loaderDots
+	if truecolor {
+		return render.PitoShimmer.Colorize(dots, phase)
+	}
+	return loaderDotsStyle.Render(dots)
+}
