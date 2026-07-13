@@ -8,24 +8,24 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/gmrdad82/pito-tui/internal/api"
+	"github.com/gmrdad82/pito-tui/internal/ui/render"
 )
 
-func TestScrollNavTextInterpolatesLikeTheWeb(t *testing.T) {
-	// The web's #format contract: %{count}, %{direction}, then
-	// {singular|plural} resolving on count == 1.
+func TestScrollNavTextInterpolatesCount(t *testing.T) {
+	// Owner contract 2026-07-13: one fixed string per side, %{count} the
+	// only token — the 50-variant %{direction}/{singular|plural} dance is
+	// retired.
 	for _, tc := range []struct {
-		variant string
-		count   int
-		dir     string
-		want    string
+		format string
+		count  int
+		want   string
 	}{
-		{"%{count} %{direction}", 7, "above", "7 above"},
-		{"%{count} {message|messages} %{direction}", 1, "below", "1 message below"},
-		{"%{count} {message|messages} %{direction}", 3, "above", "3 messages above"},
-		{"%{direction}: %{count} {message|messages}", 2, "below", "below: 2 messages"},
+		{"%{count} msgs before", 7, "7 msgs before"},
+		{"%{count} msgs after", 1, "1 msgs after"},
+		{"%{count} msgs after", 0, "0 msgs after"},
 	} {
-		if got := scrollNavText(tc.variant, tc.count, tc.dir); got != tc.want {
-			t.Errorf("scrollNavText(%q, %d, %s) = %q, want %q", tc.variant, tc.count, tc.dir, got, tc.want)
+		if got := scrollNavText(tc.format, tc.count); got != tc.want {
+			t.Errorf("scrollNavText(%q, %d) = %q, want %q", tc.format, tc.count, got, tc.want)
 		}
 	}
 }
@@ -78,8 +78,8 @@ func TestScrollNavPillsRenderAndHide(t *testing.T) {
 	if !strings.Contains(plain, "ctrl+end") || !strings.Contains(plain, "▼") {
 		t.Fatalf("bottom pill must carry the token and the server's glyph: %q", plain)
 	}
-	if !strings.Contains(plain, "below") {
-		t.Fatalf("bottom pill must interpolate direction below: %q", plain)
+	if !strings.Contains(plain, "msgs after") {
+		t.Fatalf("bottom pill must carry pito's fixed after-copy: %q", plain)
 	}
 
 	// The pills float over the rendered conversation frame.
@@ -96,7 +96,7 @@ func TestScrollNavPillsRenderAndHide(t *testing.T) {
 	}
 	m.suggest = nil
 
-	// Mid-scroll shows both, with distinct variants when the pool allows.
+	// Mid-scroll shows both.
 	m.sc.SetYOffset(m.sc.TotalLineCount() / 2)
 	top, bottom = m.scrollNavPills()
 	if top == "" || bottom == "" {
@@ -104,6 +104,55 @@ func TestScrollNavPillsRenderAndHide(t *testing.T) {
 	}
 	if !strings.Contains(ansi.Strip(top), "ctrl+home") || !strings.Contains(ansi.Strip(top), "▲") {
 		t.Fatalf("top pill anatomy wrong: %q", ansi.Strip(top))
+	}
+	if !strings.Contains(ansi.Strip(top), "msgs before") {
+		t.Fatalf("top pill must carry pito's fixed before-copy: %q", ansi.Strip(top))
+	}
+}
+
+// TestScrollNavPillsMatchContract locks the owner's 2026-07-13 contract:
+// copy text, kbd token, glyph, in that order; the copy words render in
+// the default (white) foreground — NOT pickerDimStyle — while the kbd
+// token keeps render.KbdBare's own styling and the glyph stays dim.
+func TestScrollNavPillsMatchContract(t *testing.T) {
+	m, _ := newTestModel(t, nil, WithConversation("u-1"))
+	m = sized(m)
+	seedTurns(&m, 40)
+	m.sc.SetYOffset(m.sc.TotalLineCount() / 2)
+
+	above, below := m.transcript.TurnsOutside(m.contentWidth(), m.sc.YOffset(), m.sc.VisibleLineCount())
+	if above == 0 || below == 0 {
+		t.Fatal("mid-scroll fixture must have turns on both sides")
+	}
+
+	top, bottom := m.scrollNavPills()
+	nav := render.PitoCopy.ScrollbackNav
+
+	wantTop := scrollNavText(nav.Before, above) + render.KbdBare("ctrl+home", m.truecolor) + pickerDimStyle.Render(nav.JumpToStart)
+	if top != wantTop {
+		t.Fatalf("top pill = %q, want %q", top, wantTop)
+	}
+	wantBottom := scrollNavText(nav.After, below) + render.KbdBare("ctrl+end", m.truecolor) + pickerDimStyle.Render(nav.JumpToEnd)
+	if bottom != wantBottom {
+		t.Fatalf("bottom pill = %q, want %q", bottom, wantBottom)
+	}
+
+	// The copy words are unstyled (default/white foreground): they sit
+	// verbatim, with no escape sequence, at the head of the pill.
+	wantWords := scrollNavText(nav.Before, above)
+	if !strings.HasPrefix(top, wantWords) {
+		t.Fatalf("copy words must render unstyled at the pill's head: got %q, want prefix %q", top, wantWords)
+	}
+	if strings.Contains(top, pickerDimStyle.Render(wantWords)) {
+		t.Fatalf("copy words must NOT carry the dim style: %q", top)
+	}
+
+	// The stripped line reads exactly the owner's contract shape.
+	if got, want := ansi.Strip(top), wantWords+" ctrl+home ▲"; got != want {
+		t.Fatalf("top pill stripped = %q, want %q", got, want)
+	}
+	if got, want := ansi.Strip(bottom), scrollNavText(nav.After, below)+" ctrl+end ▼"; got != want {
+		t.Fatalf("bottom pill stripped = %q, want %q", got, want)
 	}
 }
 

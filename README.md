@@ -134,10 +134,23 @@ Sounds play through `paplay` or `mpv` on Linux and the built-in
 | `j` / `k` | scroll one line (when the prompt is empty) |
 | `ctrl-d` / `ctrl-u` | scroll half a page |
 | `g` / `G` | top / bottom (G re-enables follow) |
+| `ctrl-k` | commands |
+| `ctrl-f` | update footage |
 | `ctrl-c` | quit |
 
 Everything else you type goes into the prompt — including slash commands,
 which are sent to the server as-is.
+
+### Footage, measured where the files live
+
+`ctrl-f` is the reason the TUI earns a spot next to the web chatbox: your
+recordings are on this machine, so this is where they get measured. Pick a
+game, browse to your footage folders (select files with `space`, whole
+folders with `a`, across as many folders as the game needs — the running
+tally follows you), confirm, and the TUI ffprobes every file, rounds each
+up to the half hour, and sends one `update game footage <id> <hours>` to
+your instance. Requires `ffmpeg` (for `ffprobe`) on PATH; the flow tells
+you if it's missing.
 
 ## Development
 

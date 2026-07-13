@@ -52,18 +52,19 @@ type snapshot struct {
 	Palette     palette     `json:"palette"`
 	AiPicker    aiPicker    `json:"ai_picker"`
 	// ScrollbackNav: the floating scroll-position pills
-	// (en.pito.copy.scrollback_nav) — the 50-variant count templates
-	// (%{count}/%{direction} + {singular|plural} braces, resolved
-	// client-side exactly like the web's scroll_nav_controller) and the
-	// two one-variant jump glyphs.
+	// (en.pito.copy.scrollback_nav) — one fixed string per side
+	// (%{count} the only token, owner 2026-07-13: the 50-variant pool
+	// retired — pills read identically everywhere, web + tui) and the
+	// two jump glyphs.
 	ScrollbackNav scrollbackNav `json:"scrollback_nav"`
 	Shell         shell         `json:"shell"`
 }
 
 type scrollbackNav struct {
-	Count       []string `json:"count"`
-	JumpToStart string   `json:"jump_to_start"`
-	JumpToEnd   string   `json:"jump_to_end"`
+	Before      string `json:"before"`
+	After       string `json:"after"`
+	JumpToStart string `json:"jump_to_start"`
+	JumpToEnd   string `json:"jump_to_end"`
 }
 
 // startScreen: the boot tip line (en.pito.copy.start_screen.tips +
@@ -308,7 +309,8 @@ func extract(raw []byte, srcPath string) (snapshot, error) {
 	clipboard := stringSeq(mapValue(mapValue(copyNode, "tui"), "clipboard"))
 	tips := stringSeq(walk(copyNode, "start_screen", "tips"))
 	nav := scrollbackNav{
-		Count:       stringSeq(walk(copyNode, "scrollback_nav", "count")),
+		Before:      scalar(walk(copyNode, "scrollback_nav", "before")),
+		After:       scalar(walk(copyNode, "scrollback_nav", "after")),
 		JumpToStart: scalar(walk(copyNode, "scrollback_nav", "jump_to_start")),
 		JumpToEnd:   scalar(walk(copyNode, "scrollback_nav", "jump_to_end")),
 	}

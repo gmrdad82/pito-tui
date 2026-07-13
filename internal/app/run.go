@@ -69,6 +69,15 @@ Point pito-tui at your install:
 		return err
 	}
 
+	// ctrl+f footage flow: the last-used folder persists across runs in its
+	// own small state file (config.FootagePath, jar.go's own write-through
+	// JSON pattern) — the ui package never touches disk itself.
+	footagePath, err := config.FootagePath()
+	if err != nil {
+		return err
+	}
+	lastFootageFolder := config.LoadFootageFolder(footagePath)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -118,7 +127,14 @@ Point pito-tui at your install:
 		go func() { _ = cab.Run(ctx) }()
 	}
 
-	modelOpts := []ui.Option{ui.WithSounds(player), ui.WithGlamourStyle(glamourStyle), ui.WithTruecolor(truecolor)}
+	modelOpts := []ui.Option{
+		ui.WithSounds(player),
+		ui.WithGlamourStyle(glamourStyle),
+		ui.WithTruecolor(truecolor),
+		ui.WithFootageFolder(lastFootageFolder, func(folder string) error {
+			return config.SaveFootageFolder(footagePath, folder)
+		}),
+	}
 	switch {
 	case !authed:
 		// Login is the app's own grammar: the user types /login <code>

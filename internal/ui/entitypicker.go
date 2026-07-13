@@ -42,6 +42,16 @@ type entityPicker struct {
 	fetching bool
 	query    string
 	err      string
+	// footage marks a session opened by the ctrl+f footage flow
+	// (footage.go's openFootageGamePicker) rather than the `show game`
+	// grammar: the header reads "footage" instead of the noun, a hint line
+	// under the rule says why the picker is open ("update footage — pick
+	// the game" — owner order 2026-07-13, this used to reopen looking like
+	// a plain show-game picker), and enter advances the flow to the folder
+	// step (remembering the picked game) instead of sending
+	// "show game <id>" — see onEntityPickerKey's enter case and
+	// footage.go's onFootageGamePicked.
+	footage bool
 }
 
 // EntityPickerFetchedMsg carries one page of the picker feed.
@@ -169,6 +179,12 @@ func (m Model) onEntityPickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		row := rows[min(m.entity.cursor, len(rows)-1)]
+		if m.entity.footage {
+			// ctrl+f footage flow: picking a game never sends `show game`
+			// — it advances the SAME modal to the folder step, remembering
+			// the game id/title (footage.go's onFootageGamePicked).
+			return m.onFootageGamePicked(row.ID, row.Title)
+		}
 		text := fmt.Sprintf("show %s %d", m.entity.command, row.ID)
 		m.mode = modeChat
 		m.entity = entityPicker{}
@@ -193,6 +209,13 @@ func (m Model) onEntityPickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// footageHintStyle paints the footage session's "why is this open" hint —
+// ColorCyan, the same informational hue notifUnreadStyle uses for an
+// unread count (notifications.go): a cue worth noticing, not a warning
+// (ColorWarn) or the picked value itself (ColorAccent, footage.go's
+// breadcrumb).
+var footageHintStyle = lipgloss.NewStyle().Foreground(render.ColorCyan)
+
 // entityPickerView renders the overlay: brand header with the right-edge
 // Esc chip, the query line, the windowed rows (title left, id — and the
 // channel handle for vids — dim right), the shimmer-dots loader while a
@@ -201,8 +224,14 @@ func (m Model) entityPickerView() string {
 	p := m.entity
 	width := m.contentWidth()
 
+	title := p.noun
+	if p.footage {
+		// ctrl+f titles the reused game picker "footage", not "games" —
+		// the owner's step-2 contract (footage.go).
+		title = "footage"
+	}
 	var b strings.Builder
-	head := pickerBadgeStyle.Render("pito") + " " + render.Brand(p.noun, m.truecolor)
+	head := pickerBadgeStyle.Render("pito") + " " + render.Brand(title, m.truecolor)
 	esc := render.Kbd("Esc", m.truecolor)
 	if pad := width - lipgloss.Width(head) - lipgloss.Width(esc) - 1; pad > 0 {
 		head += strings.Repeat(" ", pad) + esc
@@ -213,6 +242,14 @@ func (m Model) entityPickerView() string {
 		rule = 4
 	}
 	b.WriteString(pickerDimStyle.Render(strings.Repeat("─", rule)) + "\n")
+	if p.footage {
+		// Owner order 2026-07-13: the reused show-game picker must SAY
+		// why it's open — it used to reopen looking like a plain
+		// show-game picker with no explanation. ColorCyan is the house
+		// "pay attention, this is informational" hue (notifUnreadStyle's
+		// unread count), reused rather than picking a new one.
+		b.WriteString(footageHintStyle.Render("update footage — pick the game") + "\n")
+	}
 	if p.query == "" {
 		b.WriteString("› " + pickerDimStyle.Render(render.PitoCopy.Palette.SearchPlaceholder) + "\n")
 	} else {
@@ -252,8 +289,13 @@ func (m Model) entityPickerView() string {
 		lines = append(lines, notifErrStyle.Render("  "+p.err))
 	}
 
-	// Window like the notifications panel: title(3) + help(2) margins.
-	visible := m.height - 5
+	// Window like the notifications panel: title(3) + help(2) margins
+	// (+1 more when the footage hint line above is showing).
+	chrome := 5
+	if p.footage {
+		chrome++
+	}
+	visible := m.height - chrome
 	if visible < 3 {
 		visible = 3
 	}

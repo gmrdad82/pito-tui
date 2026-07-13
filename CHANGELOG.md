@@ -4,6 +4,35 @@ All notable changes to pito-tui are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); from 1.0.0 onward the
 project follows [Semantic Versioning](https://semver.org/).
 
+## [2.3.0] — 2026-07-13
+
+### Added
+
+- **ctrl+f "update footage"** — the mini status's own hint now does
+  something: ffprobe on PATH gates the flow (missing binary opens a
+  warning overlay naming the distro package to install, any key
+  dismisses); the existing show-game picker reopens retitled "footage"
+  and, instead of sending `show game`, hands the pick to a FolderPicker
+  seeded at the last folder you confirmed (persisted across runs,
+  `$HOME` the first time); confirming probes every selected file with
+  `ffprobe -show_entries format=duration` one at a time — a live "N/M
+  probed" line, each file rounded up to the next half hour, the total
+  ceiled to a whole hour (pito's `footage_hours` is integer) — then
+  sends `update game footage <game> <hours>` through the ordinary send
+  path, same as any typed command. Unreadable files count zero and are
+  called out in a notice rather than aborting the batch; esc backs out
+  cleanly from the folder or probing step. The picked game stays
+  visible as a persistent breadcrumb through the folder and probing
+  steps, and the reused game picker now says why it's open.
+
+### Changed
+
+- **Scroll-nav pills read one clear line now** — "N msgs before" /
+  "N msgs after" replace the 50-variant random-pick pool with pito's
+  single fixed copy string per side, shared verbatim with the web. The
+  copy words render in the default (white) foreground instead of the
+  muted dim style; the kbd token and jump glyph keep their own look.
+
 ## [2.2.0] — 2026-07-13
 
 ### Added

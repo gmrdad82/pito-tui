@@ -2,26 +2,24 @@
 // pito's Pito::Shell::ScrollNavComponent + pito--scroll-nav (owner
 // 2026-07-13: "I need these too… implementation and look I leave it up
 // to you"). Two pills float over the conversation's first and last
-// visible lines: each shows one of the 50 server-authored count
-// variants (render.PitoCopy.ScrollbackNav, %{count}/%{direction} +
-// {singular|plural} braces resolved exactly like the web's #format),
-// the kbd token, and the server's jump glyph (▲ / ▼). Rules mirrored
-// from the web controller: a pill exists iff at least one turn sits
-// FULLY outside the viewport on that side; both hide while a palette
-// overlay is open (the suggest menu here). ctrl+home jumps to the top;
-// ctrl+end re-engages follow through the house glide (the web
+// visible lines: each shows one fixed, server-authored copy line
+// (render.PitoCopy.ScrollbackNav.{Before,After}, %{count} interpolated
+// client-side), the kbd token, and the server's jump glyph (▲ / ▼).
+// Rules mirrored from the web controller: a pill exists iff at least one
+// turn sits FULLY outside the viewport on that side; both hide while a
+// palette overlay is open (the suggest menu here). ctrl+home jumps to
+// the top; ctrl+end re-engages follow through the house glide (the web
 // smooth-scrolls; easeTowardBottom is our smooth).
 //
-// One deliberate deviation, documented for the record: the web picks a
-// random variant per show-cycle. A Bubble Tea View must stay pure, so
-// the variant is picked by HASH of conversation uuid + side — fixed per
-// conversation per side. Same authored pool, same interpolation; only
-// the rotation cadence is calmer.
+// Owner contract 2026-07-13: the 50-variant random-pick pool is retired
+// — one clear string per side, identical everywhere (web + tui), so the
+// deliberate hash-pick deviation this file used to document no longer
+// applies. The copy WORDS render in the default (white) foreground, not
+// the muted/dim style; only the kbd token and the glyph keep their own
+// styling.
 package ui
 
 import (
-	"hash/fnv"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -31,73 +29,38 @@ import (
 	"github.com/gmrdad82/pito-tui/internal/ui/render"
 )
 
-// scrollNavBraceRe is the web's {singular|plural} token, verbatim
-// (/\{([^|{}]*)\|([^{}]*)\}/g in scroll_nav_controller.js).
-var scrollNavBraceRe = regexp.MustCompile(`\{([^|{}]*)\|([^{}]*)\}`)
-
-// scrollNavText interpolates one count variant — %{count}, %{direction}
-// ("above"/"below", the controller's own constants), then the braces:
-// singular when count is exactly 1, else plural.
-func scrollNavText(variant string, count int, direction string) string {
-	s := strings.ReplaceAll(variant, "%{count}", strconv.Itoa(count))
-	s = strings.ReplaceAll(s, "%{direction}", direction)
-	return scrollNavBraceRe.ReplaceAllStringFunc(s, func(m string) string {
-		parts := scrollNavBraceRe.FindStringSubmatch(m)
-		if count == 1 {
-			return parts[1]
-		}
-		return parts[2]
-	})
+// scrollNavText interpolates the one token a fixed pill string carries,
+// %{count}.
+func scrollNavText(format string, count int) string {
+	return strings.ReplaceAll(format, "%{count}", strconv.Itoa(count))
 }
 
-// scrollNavVariant picks the pill's variant index: an FNV hash of the
-// conversation uuid + side, so the pick is stable while the pill lives
-// and differs between the two sides (the web guarantees top ≠ bottom by
-// re-rolling; the +1 salt below guarantees it by construction when the
-// pool has more than one entry).
-func scrollNavVariant(uuid, side string, n int) int {
-	if n <= 0 {
-		return 0
-	}
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(uuid + "/" + side))
-	idx := int(h.Sum32()) % n
-	if idx < 0 {
-		idx += n
-	}
-	return idx
-}
-
-// scrollNavPill renders one pill: count text (dim), the kbd token, the
-// server's jump glyph. Every word but the token is pito-authored.
-func scrollNavPill(variant string, count int, direction, key, glyph string, truecolor bool) string {
-	return pickerDimStyle.Render(scrollNavText(variant, count, direction)) + " " +
-		render.KbdBare(key, truecolor) + " " + pickerDimStyle.Render(glyph)
+// scrollNavPill renders one pill: the copy text in the default (white)
+// foreground — deliberately NOT pickerDimStyle — then the kbd token,
+// then the server's jump glyph in the dim style. Order per the owner's
+// contract: copy text, kbd token, glyph. KbdBare already pads both of
+// its own sides with a single space, so no extra spacing is added here.
+func scrollNavPill(text, key, glyph string, truecolor bool) string {
+	return text + render.KbdBare(key, truecolor) + pickerDimStyle.Render(glyph)
 }
 
 // scrollNavPills computes both pills for the current viewport ("" =
 // hidden). Hidden entirely while the suggest palette overlays the
 // conversation's bottom lines (the web hides its pills while the Ctrl+K
-// palette / sidebar are open — same rule, our overlay).
+// palette / sidebar are open — same rule, our overlay). COPY LAW: an
+// older pito ref without a side's string degrades that pill to absent,
+// never a fabricated word.
 func (m Model) scrollNavPills() (top, bottom string) {
-	nav := render.PitoCopy.ScrollbackNav
-	if len(nav.Count) == 0 || m.suggest != nil {
+	if m.suggest != nil {
 		return "", ""
 	}
+	nav := render.PitoCopy.ScrollbackNav
 	above, below := m.transcript.TurnsOutside(m.contentWidth(), m.sc.YOffset(), m.sc.VisibleLineCount())
-	n := len(nav.Count)
-	if above > 0 {
-		idx := scrollNavVariant(m.conv.UUID, "top", n)
-		top = scrollNavPill(nav.Count[idx], above, "above", "ctrl+home", nav.JumpToStart, m.truecolor)
+	if above > 0 && nav.Before != "" {
+		top = scrollNavPill(scrollNavText(nav.Before, above), "ctrl+home", nav.JumpToStart, m.truecolor)
 	}
-	if below > 0 {
-		// +1 salt: never the top pill's variant (web rule) as long as
-		// the pool holds at least two entries.
-		idx := scrollNavVariant(m.conv.UUID, "bottom", n)
-		if top != "" && idx == scrollNavVariant(m.conv.UUID, "top", n) {
-			idx = (idx + 1) % n
-		}
-		bottom = scrollNavPill(nav.Count[idx], below, "below", "ctrl+end", nav.JumpToEnd, m.truecolor)
+	if below > 0 && nav.After != "" {
+		bottom = scrollNavPill(scrollNavText(nav.After, below), "ctrl+end", nav.JumpToEnd, m.truecolor)
 	}
 	return top, bottom
 }

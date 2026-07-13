@@ -2,3 +2,7 @@
 actionlint = "latest"
 go = "latest"
 goreleaser = "latest"
+
+[tasks.build]
+description = "Compile ./pito-tui from the working tree"
+run = "go build -o pito-tui ./cmd/pito-tui"

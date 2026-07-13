@@ -32,6 +32,14 @@ const (
 	modeCommandPalette
 	modeEntityPicker
 	modeAiPicker
+	// modeFootage covers the ctrl+f footage flow's folder + probing steps
+	// (footage.go) — the game-picking step rides modeEntityPicker with
+	// entityPicker.footage=true instead of a step of its own, so
+	// entitypicker.go's fetch/filter/render machinery drives it unchanged.
+	modeFootage
+	// modeWarn is the generic full-screen warning/error overlay (footage.go's
+	// ffprobe-missing gate is its only caller today) — any key dismisses.
+	modeWarn
 )
 
 const maxNotices = 3
@@ -198,6 +206,17 @@ type Model struct {
 	entity entityPicker
 	// /config ai model picker (aipicker.go, owner 2026-07-12).
 	aiPicker aiPickerPanel
+	// ctrl+f "update footage" flow (footage.go, owner 2026-07-13): folder +
+	// probing state, the exec seam for ffprobe, and the persisted last-used
+	// folder (WithFootageFolder — the app layer resolves/saves the disk
+	// file, this is just the in-memory value + callback).
+	footage           footageFlow
+	footageExec       footageExec
+	footageFolder     string
+	saveFootageFolder func(string) error
+	// warn is the generic full-screen warning/error overlay's state
+	// (footage.go's ffprobe-missing gate today).
+	warn warnPanel
 	// Mouse text selection + copied-toast (select.go, owner 2026-07-12).
 	selecting              bool
 	selAnchorX, selAnchorY int
@@ -384,6 +403,7 @@ func NewModel(client *api.Client, connect ConnectFunc, opts ...Option) Model {
 		scopePeriod:  "7d",
 		splashOn:     true,
 		skyOn:        true,
+		footageExec:  realFootageExec{},
 	}
 	m.transcript = NewTranscript(nil)
 	for _, opt := range opts {
@@ -541,6 +561,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onAiPickerFetched(msg)
 	case AiSettingsPatchedMsg:
 		return m.onAiSettingsPatched(msg)
+	case FootageProbedMsg:
+		return m.onFootageProbed(msg)
 	case VersionFetchedMsg:
 		if msg.Err == nil && msg.Tag != "" {
 			m.serverTag = msg.Tag
@@ -592,6 +614,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) onResize(msg tea.WindowSizeMsg) Model {
 	m.width, m.height = msg.Width, msg.Height
+	if m.mode == modeFootage && m.footage.step == footageStepFolder {
+		// FolderPicker sizes itself off its OWN width/height fields (its
+		// View doc comment) — it needs the same WindowSizeMsg Model itself
+		// just consumed, not a derived value.
+		fp, _ := m.footage.folder.Update(msg)
+		m.footage.folder = fp
+	}
 	opts := []render.Option{}
 	if m.plainRender {
 		opts = append(opts, render.WithPlain())
@@ -677,6 +706,10 @@ func (m Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.onEntityPickerKey(msg)
 	case modeAiPicker:
 		return m.onAiPickerKey(msg)
+	case modeFootage:
+		return m.onFootageKey(msg)
+	case modeWarn:
+		return m.onWarnKey(msg)
 	}
 	return m.onChatKey(msg)
 }
@@ -757,6 +790,15 @@ func (m Model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// The web's global command palette (command_palette_controller.js)
 		// — chat mode only here: the picker is its own full-screen list.
 		return m.openCtrlK()
+	case "ctrl+f":
+		// The ctrl+f "update footage" flow (footage.go) — mirrors the
+		// action hint's own auth gate (actionHints hides the hint entirely
+		// for an unauthenticated session; here the key itself is a no-op
+		// rather than opening a flow that ends in a 401).
+		if m.needsLogin {
+			return m, nil
+		}
+		return m.openFootageGate()
 	case "shift+tab":
 		// Channel cycler — only while its hint is live (web parity).
 		if hintMode(m.input.Value()) == "channel" && len(m.channels) > 0 {
@@ -1714,6 +1756,12 @@ func (m Model) viewContent() string {
 	if m.mode == modeAiPicker {
 		return m.aiPickerView()
 	}
+	if m.mode == modeFootage {
+		return m.footageView()
+	}
+	if m.mode == modeWarn {
+		return m.warnView()
+	}
 
 	// The suggestions palette paints OVER the conversation's bottom
 	// lines (owner 2026-07-12: "autocomplete shifts the conversation up
@@ -2055,6 +2103,30 @@ func (m Model) statusLine() string {
 		// chip is constant and lipgloss renders are not free at 60fps.
 		left = quitChip(m.truecolor)
 	}
+	if !m.needsLogin {
+		// Action affordances cluster at the right's own tail end — owner
+		// ruling 2026-07-13: "action affordances cluster right, mirroring
+		// pito web's ctrl+k placement; the exit affordance stays
+		// separated." pito's mini_status_component.html.erb appends its
+		// ctrl+k hint to the SAME right-aligned row as the auth dot/
+		// notifications (both gated on @state, authenticated only) — this
+		// mirrors that placement and that gate. Plain statusStyle middot,
+		// deliberately OUTSIDE joinWithRippleSeparators/pieces above: the
+		// ripple is a live-data reaction to a conversation.update landing
+		// on the cable (ripple.go), and these two hints never react to
+		// one — a static tail, not another animated piece.
+		//
+		// Graceful truncation (the right cluster's own, per the brief):
+		// the hints are the FIRST thing to drop as the bar narrows — left
+		// (the quit chip, or the armed "again to quit" warning) always
+		// wins the room over decorative hints. Try the line WITH hints
+		// first; fall back to the hint-less line if that doesn't fit
+		// alongside left, exactly reusing the pad math below.
+		withHints := line + statusStyle.Render(" · ") + actionHints(m.truecolor)
+		if pad := m.contentWidth() - lipgloss.Width(left) - lipgloss.Width(withHints) - 1; pad > 0 {
+			line = withHints
+		}
+	}
 	if pad := m.contentWidth() - lipgloss.Width(left) - lipgloss.Width(line) - 1; pad > 0 {
 		return left + strings.Repeat(" ", pad) + line
 	}
@@ -2085,6 +2157,33 @@ func quitChip(truecolor bool) string {
 		quitChipCache[idx] = render.Kbd("ctrl+c", truecolor) + " " + statusStyle.Render("Quit")
 	}
 	return quitChipCache[idx]
+}
+
+// actionHintsCache memoizes the constant ctrl+k/ctrl+f cluster per color
+// mode — statusLine runs every frame and rebuilding two styled kbd chips
+// from scratch on each tick is exactly the cost quitChipCache already
+// exists to dodge.
+var actionHintsCache [2]string
+
+// actionHints is the right cluster's own action-affordance tail: "ctrl+k
+// commands · ctrl+f update footage" (owner ruling 2026-07-13). Each hint
+// is KbdBare (no bed) + a space + the dim label — the aipicker footer's
+// own shape (aipicker.go's "↑/↓ choose · enter select/connect · …") and
+// scrollnav.go's scrollNavPill, not quitChip's bedded Kbd: this cluster
+// rides the status line's own plain ground, not a tinted tile, matching
+// how every OTHER hint row in this repo (not just the lone quit chip)
+// renders its chips. ctrl+f itself opens the footage flow — see footage.go.
+func actionHints(truecolor bool) string {
+	idx := 0
+	if truecolor {
+		idx = 1
+	}
+	if actionHintsCache[idx] == "" {
+		actionHintsCache[idx] = render.KbdBare("ctrl+f", truecolor) + " " + statusStyle.Render("update footage") +
+			statusStyle.Render(" · ") +
+			render.KbdBare("ctrl+k", truecolor) + " " + statusStyle.Render("commands")
+	}
+	return actionHintsCache[idx]
 }
 
 // resolvedServerTag is the tag after the status dot: the literal "dev"

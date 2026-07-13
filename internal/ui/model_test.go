@@ -1251,11 +1251,36 @@ func TestContextMeterAndMiniStatusFlow(t *testing.T) {
 			t.Errorf("%q must be gone from the status bar:\n%s", gone, view)
 		}
 	}
-	// Unauthenticated sessions read as pito's own anonymous word.
+	// Action affordances cluster right (owner ruling 2026-07-13): ctrl+k
+	// commands · ctrl+f update footage tail the right side, AFTER the
+	// dot/tag/unread pieces, while ctrl+c Quit stays alone on the left.
+	line := ansi.Strip(m.statusLine())
+	for _, want := range []string{"ctrl+k", "commands", "ctrl+f", "update footage"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("status line missing action hint %q:\n%s", want, line)
+		}
+	}
+	if i := strings.Index(line, "⚑ 28"); i == -1 || i > strings.Index(line, "ctrl+k") {
+		t.Errorf("action hints must trail the dot/tag/unread cluster, not lead it:\n%s", line)
+	}
+	// ctrl+c (Quit) sits ALONE on the left, ahead of the whole right
+	// cluster — a single occurrence, positioned before ctrl+k/ctrl+f.
+	if n := strings.Count(line, "ctrl+c"); n != 1 {
+		t.Errorf("ctrl+c must appear exactly once (left, alone), got %d:\n%s", n, line)
+	}
+	if strings.Index(line, "ctrl+c") > strings.Index(line, "ctrl+k") {
+		t.Errorf("ctrl+c (left) must come before the right cluster's ctrl+k:\n%s", line)
+	}
+	// Unauthenticated sessions read as pito's own anonymous word, and the
+	// action-hint cluster hides — mirrors pito web's mini_status_component
+	// gating its own ctrl+k hint on @state (authenticated only).
 	loggedOut := m
 	loggedOut.needsLogin = true
 	if !strings.Contains(loggedOut.viewContent(), "tarnished") {
 		t.Errorf("unauthenticated status must read pito's anonymous word:\n%s", loggedOut.viewContent())
+	}
+	if loggedOutLine := ansi.Strip(loggedOut.statusLine()); strings.Contains(loggedOutLine, "ctrl+k") || strings.Contains(loggedOutLine, "ctrl+f") {
+		t.Errorf("action hints must hide for an unauthenticated session:\n%s", loggedOutLine)
 	}
 
 	// conversation.update patches both live.
@@ -1658,6 +1683,13 @@ func TestCtrlCArmsThenQuits(t *testing.T) {
 	}
 	if !strings.Contains(ansi.Strip(m.viewContent()), "again to quit") {
 		t.Fatal("the armed window must say so on the status row")
+	}
+	// Graceful truncation (owner ruling 2026-07-13): the right cluster's
+	// own ctrl+k/ctrl+f hints are the FIRST thing to drop as the bar
+	// narrows — at 80 cols there isn't room for both the armed "again to
+	// quit" warning AND the hints, and the warning always wins.
+	if armedLine := ansi.Strip(m.statusLine()); strings.Contains(armedLine, "ctrl+k") {
+		t.Errorf("action hints must drop before the armed quit warning gets clipped:\n%s", armedLine)
 	}
 	next, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	m = next.(Model)
