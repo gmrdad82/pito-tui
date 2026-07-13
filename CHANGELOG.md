@@ -4,6 +4,26 @@ All notable changes to pito-tui are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); from 1.0.0 onward the
 project follows [Semantic Versioning](https://semver.org/).
 
+## [2.5.0] — 2026-07-14
+
+### Added
+
+- **`--resume` picks up where you left off, like claude does** — quitting
+  with the ctrl+c double-tap now prints a parting line once the TUI has
+  torn down: `To resume this conversation: pito-tui --resume "<name>"`
+  (falls back to the uuid for a still-untitled conversation, and mirrors
+  `--instance` into the suggested command when this run itself was
+  started with one). `pito-tui --resume <uuid-or-name>` opens straight
+  into that conversation instead of the default fresh chat — a uuid-shaped
+  argument skips resolution entirely, anything else resolves by exact
+  title (case-insensitive) against the same `/resume.json` the picker
+  itself walks, and an ambiguous or missing name fails fast on stderr with
+  the close candidates listed rather than guessing.
+- **Grammar resync: `vids` filter vocabulary gains `private`** —
+  `internal/grammar/grammar.json` regenerated from pito's `tools.yml`
+  (capabilities.filters.vids), joining `published`/`unlisted`/`scheduled`
+  (scope `private_unscheduled`).
+
 ## [2.4.0] — 2026-07-14
 
 ### Added

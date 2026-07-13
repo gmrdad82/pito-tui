@@ -28,6 +28,7 @@ type Options struct {
 	InstanceURL  *string // nil → not set on the CLI
 	Sounds       *bool   // nil → not set on the CLI
 	Conversation string  // positional argument, "" → picker
+	Resume       string  // --resume <uuid-or-name>, "" → not requested
 	Tour         bool    // --tour: play the self-driving walkthrough, then hand back control
 	TourAI       bool    // --tour-ai: include the @ai step (spends the AI provider's budget) — no-op without Tour
 	Stdout       io.Writer
@@ -84,6 +85,14 @@ Point pito-tui at your install:
 	authed, err := Preflight(ctx, client)
 	if err != nil {
 		return fmt.Errorf("%w\n(switch backends with --instance <url> or `pito-tui config server=<url>`)", err)
+	}
+
+	// --resume <uuid-or-name> (owner 2026-07-14, "like claude does"):
+	// resolved once, up front, so a bad name fails fast with a clean
+	// error instead of silently landing on the fresh-chat default.
+	resumeUUID, err := resolveResumeArg(ctx, client, opts.Resume, authed)
+	if err != nil {
+		return err
 	}
 
 	player := sound.New(cfg.InstanceURL, cfg.Sounds)
@@ -149,6 +158,10 @@ Point pito-tui at your install:
 		// interaction walkthrough against a brand-new conversation — see
 		// ui.TourScript/ui.WithTour.
 		modelOpts = append(modelOpts, ui.WithTour(ui.TourScript(opts.TourAI)))
+	case resumeUUID != "":
+		// --resume, already resolved to a uuid above — an explicit flag
+		// wins over the persisted config.Conversation default.
+		modelOpts = append(modelOpts, ui.WithConversation(resumeUUID))
 	case cfg.Conversation != "":
 		modelOpts = append(modelOpts, ui.WithConversation(cfg.Conversation))
 	default:
@@ -163,8 +176,13 @@ Point pito-tui at your install:
 	// AltScreen moved from a NewProgram option to a declarative field on
 	// the model's View() (tea.View.AltScreen) in v2 — see ui.Model.View.
 	program = tea.NewProgram(model)
-	_, err = program.Run()
-	return err
+	finalModel, runErr := program.Run()
+	// Post-quit hint (owner 2026-07-14, "like claude does"): Bubble Tea
+	// has released the terminal by the time program.Run() returns, so
+	// this is the one place in Run() safe to print to — never earlier,
+	// never from inside the Model/Program themselves.
+	printResumeHint(opts, finalModel, runErr)
+	return runErr
 }
 
 // Preflight distinguishes "reachable but not logged in" (the TUI starts

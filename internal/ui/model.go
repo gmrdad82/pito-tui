@@ -437,6 +437,21 @@ func NewModel(client *api.Client, connect ConnectFunc, opts ...Option) Model {
 	return m
 }
 
+// ResumeHint exposes the active conversation's identity for the app
+// layer's post-quit "resume this conversation" hint (owner 2026-07-14,
+// "like claude does"): app.Run prints it once program.Run() returns —
+// Bubble Tea owns the terminal until then, so nothing in this package ever
+// prints it itself. ok is false when there is nothing to resume — a
+// brand-new conversation (WithNewConversation/the default boot) that never
+// got its first send still carries a blank uuid, and the unauthenticated
+// /login banner (WithLoginRequired) never sets one either.
+func (m Model) ResumeHint() (uuid, label string, ok bool) {
+	if m.conv.UUID == "" {
+		return "", "", false
+	}
+	return m.conv.UUID, m.conv.Label(), true
+}
+
 func (m Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{textinput.Blink}
 	switch {

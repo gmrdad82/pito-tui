@@ -1469,6 +1469,14 @@
           ],
           "scope": "scheduled",
           "desc": "pito.copy.help.filters.vids.scheduled"
+        },
+        {
+          "name": "private",
+          "tokens": [
+            "private"
+          ],
+          "scope": "private_unscheduled",
+          "desc": "pito.copy.help.filters.vids.private"
         }
       ]
     }

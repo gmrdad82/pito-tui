@@ -204,6 +204,40 @@ func TestPickerSelectionOpensConversation(t *testing.T) {
 	}
 }
 
+func TestResumeHintExposesActiveConversation(t *testing.T) {
+	m, _ := newTestModel(t, chatServer(t))
+	m = sized(m)
+	m, _ = driveCmd(m, nil)
+	resumeMsg := m.fetchResumeCmd()()
+	m = drive(m, resumeMsg)
+	m = drive(m, key("j"))
+	m, cmd := driveCmd(m, key("enter"))
+	m = drive(m, cmd())
+
+	uuid, label, ok := m.ResumeHint()
+	if !ok || uuid != "u1" || label != "release prep" {
+		t.Errorf("ResumeHint() = %q, %q, %v, want \"u1\", \"release prep\", true", uuid, label, ok)
+	}
+}
+
+func TestResumeHintEmptyForFreshUnsentConversation(t *testing.T) {
+	// WithNewConversation opens a blank-uuid chat: nothing exists server-
+	// side until the first send, so there is nothing to resume yet.
+	m, _ := newTestModel(t, http.NewServeMux(), WithNewConversation())
+
+	if _, _, ok := m.ResumeHint(); ok {
+		t.Error("ResumeHint() ok = true before any message created the conversation")
+	}
+}
+
+func TestResumeHintEmptyWhenLoginRequired(t *testing.T) {
+	m, _ := newTestModel(t, http.NewServeMux(), WithLoginRequired())
+
+	if _, _, ok := m.ResumeHint(); ok {
+		t.Error("ResumeHint() ok = true on an unauthenticated session")
+	}
+}
+
 func TestNewConversationDeferredUUIDFlow(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /chat", func(w http.ResponseWriter, r *http.Request) {
