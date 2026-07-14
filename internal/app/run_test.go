@@ -54,7 +54,8 @@ func TestPreflightUnauthenticatedStartsInAppLogin(t *testing.T) {
 	}
 }
 
-func TestPreflightUnreachableInstance(t *testing.T) {
+func TestPreflightServerAnswered5xx(t *testing.T) {
+	// A proxy/tunnel fronting a dead PITO: the request completes, badly.
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /resume.json", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
@@ -62,8 +63,26 @@ func TestPreflightUnreachableInstance(t *testing.T) {
 	client, _ := newTestClient(t, mux)
 
 	_, err := Preflight(t.Context(), client)
-	if err == nil || !strings.Contains(err.Error(), "cannot reach") {
-		t.Errorf("err = %v, want a reachability error", err)
+	if err == nil || !strings.Contains(err.Error(), "answered 502") ||
+		!strings.Contains(err.Error(), "pito logs") {
+		t.Errorf("err = %v, want the answered-but-down message", err)
+	}
+}
+
+func TestPreflightNothingAnswering(t *testing.T) {
+	// A dead address: the transport itself fails (connection refused).
+	srv := httptest.NewServer(http.NotFoundHandler())
+	deadURL := srv.URL
+	srv.Close()
+	client, err := api.New(deadURL, filepath.Join(t.TempDir(), "cookies.json"))
+	if err != nil {
+		t.Fatalf("api.New: %v", err)
+	}
+
+	_, err = Preflight(t.Context(), client)
+	if err == nil || !strings.Contains(err.Error(), "no answer from the server") ||
+		!strings.Contains(err.Error(), "is it up?") {
+		t.Errorf("err = %v, want the nothing-answering message", err)
 	}
 }
 

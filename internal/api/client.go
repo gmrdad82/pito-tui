@@ -140,7 +140,9 @@ func (c *Client) FetchResume(ctx context.Context, after string, limit int) (*Res
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("api: GET /resume.json: %s", resp.Status)
+		// Typed so Preflight can tell "PITO answered badly" (this) from
+		// "nothing answered" (transport error) — same string as before.
+		return nil, &StatusError{Method: "GET", Path: "/resume.json", Code: resp.StatusCode, Status: resp.Status}
 	}
 	var list ResumeList
 	if err := json.Unmarshal(body, &list); err != nil {

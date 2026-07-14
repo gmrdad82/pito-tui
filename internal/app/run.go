@@ -102,9 +102,12 @@ Point pito-tui at your install:
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Preflight's messages are self-contained per failure state (owner
+	// 2026-07-14: no "switch backends" framing — self-hosted means there is
+	// no elsewhere; the remedy is almost always "start your box").
 	authed, err := Preflight(ctx, client)
 	if err != nil {
-		return fmt.Errorf("%w\n(switch backends with --instance <url> or `pito-tui config server=<url>`)", err)
+		return err
 	}
 
 	// --resume <uuid-or-name> (owner 2026-07-14, "like claude does"):
@@ -211,12 +214,22 @@ Point pito-tui at your install:
 // (an error worth stopping for).
 func Preflight(ctx context.Context, client *api.Client) (authed bool, err error) {
 	_, err = client.FetchResume(ctx, "", 0)
+	var se *api.StatusError
 	switch {
 	case err == nil:
 		return true, nil
 	case errors.Is(err, api.ErrUnauthorized):
 		return false, nil
+	case errors.As(err, &se):
+		// The server ANSWERED, badly — a proxy/tunnel fronting a dead PITO
+		// (the classic 502). Owner-operator voice: name the fix commands.
+		return false, fmt.Errorf(
+			"%s answered %d — something is listening, but PITO isn't.\nIf that's your box: `pito logs` will say why, `pito up -d` brings it back",
+			client.BaseURL().Host, se.Code)
 	default:
-		return false, fmt.Errorf("cannot reach %s: %w", client.BaseURL().Host, err)
+		// Nothing answered at all: DNS, refused connection, or timeout.
+		// (Owner 2026-07-14: "the server", not the host echo.)
+		return false, errors.New(
+			"no answer from the server — nothing is listening there.\nCheck the address and your network; if that's your box, is it up?")
 	}
 }

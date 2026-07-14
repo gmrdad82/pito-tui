@@ -4,6 +4,18 @@ All notable changes to pito-tui are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); from 1.0.0 onward the
 project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **Backend failures speak owner now** — a server that answers badly (the
+  classic 502 from a tunnel fronting a stopped PITO) gets its own message
+  naming the fix (`pito logs` / `pito up -d`), distinct from a server
+  that doesn't answer at all (check the address, the network, the box).
+  The old one-size "cannot reach … (switch backends …)" line — transport
+  guts and all — is gone: self-hosted means there is no elsewhere to
+  switch to.
+
 ## [2.6.0] — 2026-07-14
 
 ### Added

@@ -1,6 +1,23 @@
 package api
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
+
+// StatusError is a non-2xx answer from a server that WAS reachable — the
+// transport worked, PITO didn't. Preflight tells this apart from dial
+// failures so the owner hears "your box is down", not "check your network".
+type StatusError struct {
+	Method string
+	Path   string
+	Code   int
+	Status string
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("api: %s %s: %s", e.Method, e.Path, e.Status)
+}
 
 var (
 	// ErrUnauthorized covers 401s and login-page redirects — the session
