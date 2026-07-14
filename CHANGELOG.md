@@ -4,6 +4,19 @@ All notable changes to pito-tui are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); from 1.0.0 onward the
 project follows [Semantic Versioning](https://semver.org/).
 
+## [2.7.0] — 2026-07-15
+
+### Added
+
+- **Import a game, without leaving the terminal** — `import <title>` (or
+  bare `import`, or `/games import`, or the ctrl+k palette) opens a picker
+  that searches IGDB as you type: the terminal's first as-you-type remote
+  search, debounced so IGDB isn't hammered. Remakes and remasters carry
+  their notes, games already in your library say so (picking one re-syncs
+  instead of duplicating), and Enter starts the import — the conversation
+  then narrates it exactly like the web: the imported announce, then the
+  done card. `import videos` still means what it always meant.
+
 ## [2.6.1] — 2026-07-14
 
 ### Changed

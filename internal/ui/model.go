@@ -32,6 +32,10 @@ const (
 	modeCommandPalette
 	modeEntityPicker
 	modeAiPicker
+	// modeImport is the import-game picker (importpicker.go): remote IGDB
+	// search as you type, Enter fires the import and the scrollback
+	// narrates the rest.
+	modeImport
 	// modeFootage covers the ctrl+f footage flow's folder + probing steps
 	// (footage.go) — the game-picking step rides modeEntityPicker with
 	// entityPicker.footage=true instead of a step of its own, so
@@ -217,6 +221,8 @@ type Model struct {
 	ctrlK ctrlKPanel
 	// show game / show vid picker (entitypicker.go, owner 2026-07-12).
 	entity entityPicker
+	// import-game picker (importpicker.go, owner 2026-07-14).
+	importP importPicker
 	// /config ai model picker (aipicker.go, owner 2026-07-12).
 	aiPicker aiPickerPanel
 	// ctrl+f "update footage" flow (footage.go, owner 2026-07-13): folder +
@@ -593,6 +599,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onAiPickerFetched(msg)
 	case AiSettingsPatchedMsg:
 		return m.onAiSettingsPatched(msg)
+	case ImportSearchTickMsg:
+		return m.onImportSearchTick(msg)
+	case ImportSearchedMsg:
+		return m.onImportSearched(msg)
+	case GameImportedMsg:
+		return m.onGameImported(msg)
 	case FootageProbedMsg:
 		return m.onFootageProbed(msg)
 	case VersionFetchedMsg:
@@ -738,6 +750,8 @@ func (m Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.onEntityPickerKey(msg)
 	case modeAiPicker:
 		return m.onAiPickerKey(msg)
+	case modeImport:
+		return m.onImportKey(msg)
 	case modeFootage:
 		return m.onFootageKey(msg)
 	case modeWarn:
@@ -1054,6 +1068,14 @@ func (m Model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.input.Reset()
 			m.suggest = nil
 			return m.openAiPicker()
+		}
+		if prefill, ok := importTrigger(text); ok {
+			// `import [game] [title]` / `/games import` open the web's
+			// games-import sidebar — the TUI opens ITS picker
+			// (importpicker.go). `import videos` stays a server verb.
+			m.input.Reset()
+			m.suggest = nil
+			return m.openImportPicker(prefill)
 		}
 		if strings.EqualFold(text, "/notifications") {
 			// Client-side grammar, like /login: intercepted before it ever
@@ -1972,6 +1994,9 @@ func (m Model) viewContent() string {
 	}
 	if m.mode == modeAiPicker {
 		return m.aiPickerView()
+	}
+	if m.mode == modeImport {
+		return m.importPickerView()
 	}
 	if m.mode == modeFootage {
 		return m.footageView()

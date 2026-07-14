@@ -51,6 +51,7 @@ func ctrlKCatalog(authenticated bool) []ctrlKSection {
 		{titleKey: "youtube", items: []ctrlKItem{
 			{labelKey: "connect", insert: "/connect"},
 			{labelKey: "disconnect", insert: "/disconnect <@handle>"},
+			{labelKey: "import_game", insert: "import game"},
 		}},
 		{titleKey: "config", items: []ctrlKItem{
 			{labelKey: "config_ai", insert: "/config ai"},

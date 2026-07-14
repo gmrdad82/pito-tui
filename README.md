@@ -152,6 +152,18 @@ up to the half hour, and sends one `update game footage <id> <hours>` to
 your instance. Requires `ffmpeg` (for `ffprobe`) on PATH; the flow tells
 you if it's missing.
 
+### Import a game
+
+Type `import`, `import game`, or `import <title>` (or `/games import
+[title]`) in the chatbox — or pick **import game** from `ctrl-k` — to
+open the import picker. Keep typing and results stream in from IGDB as
+you rest; remakes and remasters get a note, and hits already in your
+library are marked (picking one re-syncs it instead of duplicating).
+`enter` starts the import and hands off to the conversation, which
+narrates it in the scrollback (an announce, then a done card); `esc`
+backs out. Requires IGDB credentials configured server-side (`/config
+igdb`).
+
 ## Development
 
 Go 1.26+ (pinned via [mise](https://mise.jdx.dev) in `mise.toml`).
