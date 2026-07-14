@@ -12,3 +12,10 @@ var (
 func String() string {
 	return Version
 }
+
+// IsRelease reports whether this binary was stamped by a release build
+// (goreleaser ldflags set Version). Source builds stay "dev" — release-only
+// behavior (self-update hints, telemetry) gates on this.
+func IsRelease() bool {
+	return Version != "dev"
+}

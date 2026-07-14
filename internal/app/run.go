@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -19,6 +20,7 @@ import (
 	"github.com/gmrdad82/pito-tui/internal/cable"
 	"github.com/gmrdad82/pito-tui/internal/config"
 	"github.com/gmrdad82/pito-tui/internal/sound"
+	"github.com/gmrdad82/pito-tui/internal/telemetry"
 	"github.com/gmrdad82/pito-tui/internal/ui"
 )
 
@@ -61,6 +63,23 @@ Point pito-tui at your install:
   pito-tui --instance https://pito.example.com      (this run only)`, cfgPath)
 	}
 
+	// Telemetry (AppSignal via OTLP): inert unless this is a RELEASE build
+	// with a configured [telemetry] table — see internal/telemetry. Shutdown
+	// is declared BEFORE the panic capture so LIFO ordering runs the capture
+	// (report + flush + re-panic) first, and the final flush covers clean
+	// exits. Bubble Tea already restores the terminal before re-panicking
+	// out of its loop, so re-panicking here keeps the default crash output.
+	// Limitation: a panic on a non-Tea goroutine (e.g. cable) kills the
+	// process without unwinding this stack and is not captured.
+	reporter := telemetry.Init(cfg.Telemetry)
+	defer reporter.Shutdown()
+	defer func() {
+		if rec := recover(); rec != nil {
+			reporter.ReportPanic(rec, debug.Stack())
+			panic(rec)
+		}
+	}()
+
 	dir, err := config.Dir()
 	if err != nil {
 		return err
@@ -69,6 +88,7 @@ Point pito-tui at your install:
 	if err != nil {
 		return err
 	}
+	client.WrapTransport(reporter.Transport)
 
 	// ctrl+f footage flow: the last-used folder persists across runs in its
 	// own small state file (config.FootagePath, jar.go's own write-through

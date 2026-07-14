@@ -4,6 +4,20 @@ All notable changes to pito-tui are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); from 1.0.0 onward the
 project follows [Semantic Versioning](https://semver.org/).
 
+## [2.6.0] — 2026-07-14
+
+### Added
+
+- **Optional AppSignal telemetry, release builds only** — a new
+  `[telemetry]` table in config.toml (collector `endpoint` + Push API
+  `key`, `enabled = false` to opt out) ships API timings and crashes to
+  AppSignal over OpenTelemetry. The gate is absolute: source builds,
+  unconfigured installs, and opted-out installs send nothing — no
+  goroutines, no network. Spans carry method, path, and status only; never
+  bodies, queries, or cookies. A crash reports and flushes before the
+  panic continues, and exit flushes are bounded so ctrl+c never hangs on a
+  slow collector.
+
 ## [2.5.0] — 2026-07-14
 
 ### Added
@@ -331,7 +345,7 @@ YouTube-safe mutation ran the gauntlet on dev.
 - **Chatbox hands, web parity** — `Shift+R` at an empty prompt prefills
   the newest live reply handle (several → picker, none → types
   through); `Shift+Tab` cycles the channel scope while a `list
-  vids/games` hint is live; `Ctrl+Space` cycles the analytics period
+vids/games` hint is live; `Ctrl+Space` cycles the analytics period
   while an `analyze` hint is live (the web's Shift+Space is invisible
   to terminals). Scope rides the send only while its hint shows, and
   persists via the conversation PATCH — exactly the web's rules.
@@ -360,7 +374,7 @@ YouTube-safe mutation ran the gauntlet on dev.
 
 - The full YouTube-safe mutation round ran live against dev with a
   disposable IGDB import: link/unlink, `update game
-  price/platform/footage`, card replies, delete + reindex confirmation
+price/platform/footage`, card replies, delete + reindex confirmation
   flows (confirm AND cancel), `/rename`, `/config` getters + reversible
   setters, `/disconnect` (cancel), `/logout` → `/login`. Game imports
   are web-only for JSON clients by server design — the TUI renders the
@@ -411,19 +425,19 @@ Every screen from the revisit, the server's new eyes, and the shine.
   contribute their alt text ("PlayStation Switch Xbox Steam") because
   that is data, not imagery.
 - **The game's enhanced segments** — `show game … with similar,
-  channels, linked-videos` (and the segment verbs) render terminal-native:
-  *similar* as recommendation rows — `#id Title` beside a label-less
-  score bar, brackets aligned down the strip; *channels* as the coverage
+channels, linked-videos` (and the segment verbs) render terminal-native:
+  _similar_ as recommendation rows — `#id Title` beside a label-less
+  score bar, brackets aligned down the strip; _channels_ as the coverage
   block (one solid colored share bar per channel, redrawn from the
   distribution legend's own data, caption below) plus the fit-score
   roster (handle from the avatar's alt, score bar per row);
-  *linked-videos* was already a `Video::List` payload and rides the
+  _linked-videos_ was already a `Video::List` payload and rides the
   shared list viewer — table, zebra, and the full mutate reply surface
   (with/without/sort) included. The async channels fill waits quietly
   ("mapping the territory…") instead of leaking the web's braille
   canvas, and fills in on replace/resync.
 - **At-a-glance, everywhere** — `show channel/vid/game … with
-  at-a-glance` (and the glance verb) renders the web's panel
+at-a-glance` (and the glance verb) renders the web's panel
   terminal-native: five metric cells, each a 2-row braille sparkline —
   the web's own BrailleAreaChart rows lifted verbatim from the payload,
   42 columns, identical curve by construction — over a legend that
@@ -551,8 +565,8 @@ First release — fresh meat.
 - **No default server, by design** — pito is self-hosted, so the
   client ships pointing at nothing and no install is ever suggested.
   Unconfigured, it stops gracefully with the way in: `pito-tui config
-  server=<url>` (persists, bare hosts get `https://`) or `--instance
-  <url>` for a single run. `pito-tui config` shows the current server;
+server=<url>` (persists, bare hosts get `https://`) or `--instance
+<url>` for a single run. `pito-tui config` shows the current server;
   `pito-tui version` says what you're running. Cookies and sound caches
   are keyed per backend, so switching instances never crosses sessions
   or cues.

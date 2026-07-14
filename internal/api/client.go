@@ -49,6 +49,13 @@ func New(instanceURL, jarPath string) (*Client, error) {
 	}, nil
 }
 
+// WrapTransport replaces the HTTP transport with wrap(current). App startup
+// uses it to add release-only telemetry instrumentation; an inert wrap
+// returns its argument untouched, so applying it unconditionally is safe.
+func (c *Client) WrapTransport(wrap func(http.RoundTripper) http.RoundTripper) {
+	c.hc.Transport = wrap(c.hc.Transport)
+}
+
 // Jar exposes the shared cookie jar for the websocket dialer.
 func (c *Client) Jar() *PersistentJar { return c.jar }
 

@@ -160,6 +160,111 @@ func TestSaveRoundTripsAndStaysEditable(t *testing.T) {
 	}
 }
 
+func TestLoadOldConfigWithoutTelemetryTable(t *testing.T) {
+	cfg, err := Load(write(t, `
+instance_url = "https://pito.example.com"
+sounds = false
+`))
+	if err != nil {
+		t.Fatalf("config file without [telemetry] must still load: %v", err)
+	}
+	want := Telemetry{Enabled: true, Endpoint: "", Key: ""}
+	if cfg.Telemetry != want {
+		t.Errorf("Telemetry = %+v, want %+v", cfg.Telemetry, want)
+	}
+	if cfg.Telemetry.Active() {
+		t.Error("Active() must be false with no endpoint/key configured")
+	}
+}
+
+func TestLoadReadsTelemetryValues(t *testing.T) {
+	path := write(t, `
+instance_url = "https://pito.example.com"
+
+[telemetry]
+endpoint = "https://collector.example"
+key = "abc123"
+enabled = true
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Telemetry.Endpoint != "https://collector.example" {
+		t.Errorf("Telemetry.Endpoint = %q", cfg.Telemetry.Endpoint)
+	}
+	if cfg.Telemetry.Key != "abc123" {
+		t.Errorf("Telemetry.Key = %q", cfg.Telemetry.Key)
+	}
+	if !cfg.Telemetry.Enabled {
+		t.Error("Telemetry.Enabled = false, want true")
+	}
+	if !cfg.Telemetry.Active() {
+		t.Error("Active() must be true with endpoint, key, and enabled all set")
+	}
+}
+
+func TestTelemetryActive(t *testing.T) {
+	cases := []struct {
+		name string
+		t    Telemetry
+		want bool
+	}{
+		{"zero value", Telemetry{}, false},
+		{"endpoint only", Telemetry{Endpoint: "https://collector.example"}, false},
+		{"key only", Telemetry{Key: "abc123"}, false},
+		{"both but disabled", Telemetry{Endpoint: "https://collector.example", Key: "abc123", Enabled: false}, false},
+		{"both and enabled", Telemetry{Endpoint: "https://collector.example", Key: "abc123", Enabled: true}, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.t.Active(); got != c.want {
+				t.Errorf("Active() = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+func TestSaveTelemetryRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	saved := Config{
+		InstanceURL: "https://dev.pitomd.com",
+		Telemetry:   Telemetry{Endpoint: "https://collector.example", Key: "k", Enabled: true},
+	}
+	if err := Save(path, saved); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Telemetry != saved.Telemetry {
+		t.Errorf("Telemetry round trip = %+v, want %+v", loaded.Telemetry, saved.Telemetry)
+	}
+}
+
+func TestSaveEmptyTelemetryWritesCommentedStub(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := Save(path, Config{InstanceURL: "https://dev.pitomd.com"}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "# [telemetry]") {
+		t.Error("saved config with no endpoint/key must keep the [telemetry] table commented out")
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Telemetry{Enabled: true}
+	if loaded.Telemetry != want {
+		t.Errorf("Telemetry = %+v, want default %+v", loaded.Telemetry, want)
+	}
+}
+
 func TestNormalizeInstanceURL(t *testing.T) {
 	good := map[string]string{
 		"dev.pitomd.com":            "https://dev.pitomd.com",

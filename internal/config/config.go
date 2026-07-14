@@ -21,6 +21,30 @@ type Config struct {
 	// Conversation optionally pins a default conversation uuid so the
 	// picker is skipped. The positional CLI argument wins over it.
 	Conversation string `toml:"conversation"`
+	// Telemetry configures optional AppSignal (OpenTelemetry) reporting.
+	// It only ever activates on RELEASE builds with both endpoint and key
+	// set (internal/telemetry gates on version.IsRelease()); source builds
+	// and unconfigured installs send nothing, ever.
+	Telemetry Telemetry `toml:"telemetry"`
+}
+
+// Telemetry is the [telemetry] table. Zero value = disabled: activation
+// needs Endpoint AND Key non-empty AND Enabled true (Enabled is an opt-out
+// for a configured install, defaulted true in defaults()).
+type Telemetry struct {
+	// Endpoint is the AppSignal hosted collector base URL (from the
+	// AppSignal UI's OpenTelemetry setup page).
+	Endpoint string `toml:"endpoint"`
+	// Key is the AppSignal Push API key (App settings → Push & deploy).
+	Key string `toml:"key"`
+	// Enabled set to false silences telemetry even when configured.
+	Enabled bool `toml:"enabled"`
+}
+
+// Active reports whether this config asks for telemetry at all — the
+// build-type gate (release vs dev) lives in internal/telemetry, not here.
+func (t Telemetry) Active() bool {
+	return t.Enabled && t.Endpoint != "" && t.Key != ""
 }
 
 func defaults() Config {
@@ -29,6 +53,9 @@ func defaults() Config {
 	// unconfigured — the app stops with instructions instead.
 	return Config{
 		Sounds: true,
+		// Opt-out default: harmless while endpoint/key are empty, and a
+		// configured install works without also hunting for a switch.
+		Telemetry: Telemetry{Enabled: true},
 	}
 }
 
@@ -67,6 +94,11 @@ func Save(path string, cfg Config) error {
 	if cfg.Conversation != "" {
 		conversation = fmt.Sprintf("conversation = %q", cfg.Conversation)
 	}
+	telemetry := "# [telemetry]\n# endpoint = \"\"\n# key = \"\"\n# enabled = true"
+	if cfg.Telemetry.Endpoint != "" || cfg.Telemetry.Key != "" {
+		telemetry = fmt.Sprintf("[telemetry]\nendpoint = %q\nkey = %q\nenabled = %v",
+			cfg.Telemetry.Endpoint, cfg.Telemetry.Key, cfg.Telemetry.Enabled)
+	}
 	body := fmt.Sprintf(`# pito-tui configuration.
 
 # The PITO backend this client talks to. Change it here, or with
@@ -79,7 +111,13 @@ sounds = %v
 # Optional: a default conversation uuid to open directly (skips the
 # picker). The positional CLI argument wins over it.
 %s
-`, cfg.InstanceURL, cfg.Sounds, conversation)
+
+# Optional AppSignal error/performance reporting — RELEASE builds only,
+# and only when both values below are set (source builds never send).
+# endpoint: your hosted collector URL; key: the Push API key — both from
+# the AppSignal UI. enabled = false opts out without deleting them.
+%s
+`, cfg.InstanceURL, cfg.Sounds, conversation, telemetry)
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, []byte(body), 0o600); err != nil {
 		return fmt.Errorf("config: writing %s: %w", path, err)
