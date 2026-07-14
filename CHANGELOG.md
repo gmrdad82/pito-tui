@@ -4,7 +4,7 @@ All notable changes to pito-tui are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); from 1.0.0 onward the
 project follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.6.1] — 2026-07-14
 
 ### Changed
 
