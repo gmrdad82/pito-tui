@@ -10,7 +10,8 @@
 
 ## The log law (non-negotiable; mechanically enforced)
 
-The working docs under `~/Dev/dev-notes/pito-tui/` (fully outside this repo — not
+The working docs in the local notes directory (per-person and optional; fully
+outside this repo — not
 even gitignored-in-tree, just a sibling directory on disk) are the **single
 source of truth** — every tracker, ask-to-pito, tier plan, and decision the
 owner raised lives there (`tui-needs.md`, `tiers.md`, `verbs-inventory.md`,
@@ -25,7 +26,7 @@ in `.gitignore`, local-only, never checked in) as a `## ⛔ UNPROCESSED` block.
 
 1. Read `.claude/INBOX.md`.
 2. **Drain** each `⛔ UNPROCESSED` block into the right working doc under
-   `~/Dev/dev-notes/pito-tui/` — turn EVERY item (todo, bug, feedback, question,
+   the local notes directory — turn EVERY item (todo, bug, feedback, question,
    decision) into an explicit task/line; split compound messages; lose
    nothing. Start a new doc there if nothing existing fits.
 3. Rewrite the block heading in place to
@@ -117,7 +118,7 @@ committed — `.gitignore` keeps the rest of `.claude/` local):
 
 ## Plan discipline (lean)
 
-Working docs under `~/Dev/dev-notes/pito-tui/` track the work they describe — not
+Working docs in the local notes directory track the work they describe — not
 freeform prose, not the throwaway plan-mode scratch buffer. They live fully
 outside the repo (moved there from an in-repo `docs/claude/` on 2026-07-15,
 commit `469e055`), so there is nothing to stage or gitignore for them — only
