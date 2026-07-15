@@ -20,7 +20,7 @@ cover.out
 !.claude/settings.json
 
 # Local-only agent/working docs — never checked in.
-/docs/claude/
+/.claude/INBOX.md
 
 # Capture artifacts (scripts/capture.sh)
 /tmp/
