@@ -7,7 +7,7 @@ package app
 //
 //	go test -tags live -run TestLiveSmoke -v ./internal/app/
 //
-// Environment: PITO_INSTANCE (default https://dev.pitomd.com), PITO_OTP
+// Environment: PITO_INSTANCE (default: a dev instance), PITO_OTP
 // (default 123456 — the dev instance's fixed test code). Uses the real
 // cookie jar at ~/.config/pito-tui/cookies.json, exactly like the binary.
 

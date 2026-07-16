@@ -23,6 +23,9 @@ func TestScrollNavTextInterpolatesCount(t *testing.T) {
 		{"%{count} msgs before", 7, "7 msgs before"},
 		{"%{count} msgs after", 1, "1 msgs after"},
 		{"%{count} msgs after", 0, "0 msgs after"},
+		{"%{count} msgs before", 10, "10 msgs before"},
+		{"%{count} msgs before", 11, "10+ msgs before"},
+		{"%{count} msgs after", 133, "10+ msgs after"},
 	} {
 		if got := scrollNavText(tc.format, tc.count); got != tc.want {
 			t.Errorf("scrollNavText(%q, %d) = %q, want %q", tc.format, tc.count, got, tc.want)

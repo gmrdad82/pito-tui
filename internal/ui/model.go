@@ -44,6 +44,10 @@ const (
 	// modeWarn is the generic full-screen warning/error overlay (footage.go's
 	// ffprobe-missing gate is its only caller today) — any key dismisses.
 	modeWarn
+	// modeHitPicker is the conversation-search jump overlay (hitpicker.go,
+	// pito-tui 3.0.0 U2.3): "J" at an empty prompt opens it when the newest
+	// event carries conversation_hits.
+	modeHitPicker
 )
 
 const maxNotices = 3
@@ -101,6 +105,15 @@ type Model struct {
 	skyOn      bool
 	skyPhase   float64
 	skyTicking bool
+	// fpsOn/fpsTicking/fps drive F9's top-left "NN fps" chip
+	// (fpsoverlay.go): fpsOn is the toggle itself; fps is nil whenever
+	// it's off (zero work, no allocations) and a fresh *fpsCounter the
+	// instant it flips on; fpsTicking mirrors skyTicking's shape — the
+	// one authoritative flag the tick loop itself (never the toggle)
+	// clears, so there is never more than one live chain rescheduling.
+	fpsOn      bool
+	fpsTicking bool
+	fps        *fpsCounter
 	// rippleTick/rippleAnim drive the status-bar ripple's own 600ms
 	// window (ripple.go effect 1) — see beginRipple/rippleActive.
 	rippleTick int64
@@ -236,6 +249,8 @@ type Model struct {
 	// warn is the generic full-screen warning/error overlay's state
 	// (footage.go's ffprobe-missing gate today).
 	warn warnPanel
+	// hitPick is the conversation-search jump overlay's state (hitpicker.go).
+	hitPick hitPicker
 	// Mouse text selection + copied-toast (select.go, owner 2026-07-12).
 	selecting              bool
 	selAnchorX, selAnchorY int
@@ -247,7 +262,7 @@ type Model struct {
 	meterCtx               *api.ContextMeter // server-computed context (render only)
 	// serverTag is the SERVER build's identity for the mini status —
 	// pito's fat-cut 2026-07-12: the status reads "dot %{tag}", the
-	// nickname/"me" concept is gone. dev.pitomd.com/localhost read as
+	// nickname/"me" concept is gone. The dev instance/localhost read as
 	// the literal "dev" without asking; other hosts fetch GET /version
 	// (the web's cable-health endpoint) after auth and on reconnect.
 	serverTag string
@@ -484,10 +499,16 @@ func (m Model) fetchChatCmd(uuid string, resync bool) tea.Cmd {
 	}
 }
 
+// fetchResumeCmd's limit is the picker's own visible row capacity —
+// pickerView windows the list to `height - 4` (title + help chrome, see
+// its "Window the list" comment), run through viewportRows the same way
+// notificationsFetchCmd does; that floor already exceeds pickerView's own
+// 3-row minimum, so it alone decides the fetch size on tiny terminals.
 func (m Model) fetchResumeCmd() tea.Cmd {
 	client := m.client
+	limit := viewportRows(m.height - 4)
 	return func() tea.Msg {
-		list, err := client.FetchResume(context.Background(), "", 0)
+		list, err := client.FetchResume(context.Background(), "", limit)
 		return ResumeFetchedMsg{List: list, Err: err}
 	}
 }
@@ -495,11 +516,12 @@ func (m Model) fetchResumeCmd() tea.Cmd {
 // fetchResumeMoreCmd GETs the picker's next page (tui-needs ask 9a) at
 // the given cursor. Mirrors notificationsFetchCmd's shape; More marks
 // the reply for onResume's append-not-replace branch, matching
-// ChatFetchedMsg's Resync.
+// ChatFetchedMsg's Resync. limit mirrors fetchResumeCmd's viewport sizing.
 func (m Model) fetchResumeMoreCmd(after string) tea.Cmd {
 	client := m.client
+	limit := viewportRows(m.height - 4)
 	return func() tea.Msg {
-		list, err := client.FetchResume(context.Background(), after, 0)
+		list, err := client.FetchResume(context.Background(), after, limit)
 		return ResumeFetchedMsg{List: list, More: true, Err: err}
 	}
 }
@@ -628,6 +650,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onAnimTick()
 	case SkyTickMsg:
 		return m.onSkyTick()
+	case FPSTickMsg:
+		return m.onFPSTick()
 	case SuggestionsMsg:
 		if msg.Seq == m.suggestSeq && m.input.Value() != "" {
 			m.suggest = msg.S
@@ -756,6 +780,8 @@ func (m Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.onFootageKey(msg)
 	case modeWarn:
 		return m.onWarnKey(msg)
+	case modeHitPicker:
+		return m.onHitPickerKey(msg)
 	}
 	return m.onChatKey(msg)
 }
@@ -1024,6 +1050,17 @@ func (m Model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.openFootageGate()
+	case "ctrl+/", "ctrl+_":
+		// Web parity (owner order 2026-07-15, 3.0.0 U1.4): pito web binds
+		// ctrl+/ to inject the notifications list into the sidebar — the
+		// TUI opens ITS notifications overlay, the exact same path the
+		// typed /notifications command takes (onNotificationsKey closes it
+		// on the same key, making this a toggle). "ctrl+_" is the legacy
+		// alias: terminals without kitty disambiguation deliver ctrl+/ as
+		// 0x1F (US), which the decoder names ctrl+_; kitty-capable ones
+		// report the literal ctrl+/. A companion task puts "ctrl+/ N ⚑"
+		// on the status bar.
+		return m.openNotifications()
 	case "shift+tab":
 		// Channel cycler — only while its hint is live (web parity).
 		if hintMode(m.input.Value()) == "channel" && len(m.channels) > 0 {
@@ -1180,6 +1217,20 @@ func (m Model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.setFollow(true)
 		m.scrollEasing = true
 		return m, m.animate()
+	case "f9":
+		// Cross-repo parity (owner order): F9 toggles the top-left
+		// "NN fps" chip everywhere (pito web, pitomd, the tui) — same key,
+		// same behavior. Flipping either way resets the sliding window:
+		// turning on starts counting from a clean slate, turning off drops
+		// the in-flight samples rather than let them go stale for a future
+		// re-arm (fpsoverlay.go).
+		m.fpsOn = !m.fpsOn
+		m.fps = nil
+		if m.fpsOn {
+			m.fps = &fpsCounter{}
+			return m, m.startFPSTick()
+		}
+		return m, nil
 	}
 
 	if msg.String() == "ctrl+space" {
@@ -1224,6 +1275,15 @@ func (m Model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.beginGhostType("") // this menu carries no ghost hint of its own
 				m.refreshViewport()
 				return m, nil
+			}
+		case "J":
+			// Shift+J at an empty prompt: the conversation-search jump
+			// affordance (hitpicker.go, pito-tui 3.0.0 U2.3) — live only
+			// when the newest rendered event carries conversation_hits (a
+			// `search conversations …` reply); otherwise the "J" types
+			// through below, same no-match fallthrough as "R" above.
+			if hits, ok := m.hitsFromLatestEvent(); ok {
+				return m.openHitPicker(hits)
 			}
 		}
 		// The v1 vim scroll letters (j/k/g/G at an empty prompt) are GONE
@@ -2004,6 +2064,9 @@ func (m Model) viewContent() string {
 	if m.mode == modeWarn {
 		return m.warnView()
 	}
+	if m.mode == modeHitPicker {
+		return m.hitPickerView()
+	}
 
 	// The suggestions palette paints OVER the conversation's bottom
 	// lines (owner 2026-07-12: "autocomplete shifts the conversation up
@@ -2018,6 +2081,14 @@ func (m Model) viewContent() string {
 		// scrollnav.go: the floating "N messages above/below" pills with
 		// their ctrl+home/ctrl+end jump tokens (web's scroll-nav).
 		vpBody = paintScrollNavOverlay(vpBody, top, bottom, m.contentWidth())
+	}
+	if m.fpsOn {
+		// fpsoverlay.go: F9's top-left "NN fps" chip — guarded here so an
+		// untoggled chip costs nothing (no stamp, no allocation). The
+		// stamp happens at THIS exact point, the one seam every real paint
+		// of the chat viewport passes through, so the count measures
+		// actual renders rather than a synthetic clock.
+		vpBody = paintFPSOverlay(vpBody, fpsChipText(m.fps.stamp(m.now())), m.contentWidth())
 	}
 	sections := []string{vpBody}
 	if footer := m.keymapFooterView(); footer != "" {
@@ -2321,7 +2392,17 @@ func (m Model) statusLine() string {
 			style = lipgloss.NewStyle().Foreground(render.ColorWarn)
 		}
 		// ⚑ (owner ruling 2026-07-12): the ✉ envelope tofu'd in his font.
-		pieces = append(pieces, style.Render("⚑ "+strconv.Itoa(display)))
+		// ctrl+/ N ⚑ (owner order 2026-07-15, 3.0.0 U1.3): ctrl+/ now
+		// toggles the notifications overlay (onChatKey, U1.4) — the
+		// keybinding hint fronts the same count+flag piece so the slot
+		// reads as its own affordance, not just a passive counter. Single-
+		// space composition matches actionHints' own KbdPlain + " " +
+		// label fix (U1.2): KbdPlain owns no self-padding, so the piece
+		// wires its own spaces rather than fighting Kbd/KbdBare's built-in
+		// ones. The chip keeps its own gradient regardless of unread
+		// count — only the count/flag half swaps to warn, exactly as the
+		// bare piece did before it grew the hint.
+		pieces = append(pieces, render.KbdPlain("ctrl+/", m.truecolor)+" "+style.Render(strconv.Itoa(display)+" ⚑"))
 	}
 
 	line := m.joinWithRippleSeparators(pieces)
@@ -2412,29 +2493,36 @@ func quitChip(truecolor bool) string {
 // exists to dodge.
 var actionHintsCache [2]string
 
-// actionHints is the right cluster's own action-affordance tail: "ctrl+k
-// commands · ctrl+f update footage" (owner ruling 2026-07-13). Each hint
-// is KbdBare (no bed) + a space + the dim label — the aipicker footer's
-// own shape (aipicker.go's "↑/↓ choose · enter select/connect · …") and
-// scrollnav.go's scrollNavPill, not quitChip's bedded Kbd: this cluster
-// rides the status line's own plain ground, not a tinted tile, matching
-// how every OTHER hint row in this repo (not just the lone quit chip)
-// renders its chips. ctrl+f itself opens the footage flow — see footage.go.
+// actionHints is the right cluster's own action-affordance tail: "ctrl+f
+// footage · ctrl+k commands" (owner ruling 2026-07-13; single-space
+// composition fixed 2026-07-15, pito-tui 3.0.0 task U1.2). Each hint is
+// KbdPlain (no self-padding) + one explicit space + the dim label — KbdBare
+// and Kbd both pad a space per side on their own, which doubled up against
+// this cluster's own " " and " · " joins; KbdPlain exists precisely so a
+// caller that owns its own spacing (this one) doesn't fight the chip's.
+// The label "footage" is a plain Go literal, not a copygen key — there is
+// no footage entry in pito_copy.json yet, so this awaits a pito-side copy
+// key of its own rather than reusing/splitting an unrelated one. Otherwise
+// unchanged: the aipicker footer's own shape (aipicker.go's "↑/↓ choose ·
+// enter select/connect · …") and scrollnav.go's scrollNavPill, not
+// quitChip's bedded Kbd — this cluster rides the status line's own plain
+// ground, not a tinted tile. ctrl+f itself opens the footage flow — see
+// footage.go.
 func actionHints(truecolor bool) string {
 	idx := 0
 	if truecolor {
 		idx = 1
 	}
 	if actionHintsCache[idx] == "" {
-		actionHintsCache[idx] = render.KbdBare("ctrl+f", truecolor) + " " + statusStyle.Render("update footage") +
+		actionHintsCache[idx] = render.KbdPlain("ctrl+f", truecolor) + " " + statusStyle.Render("footage") +
 			statusStyle.Render(" · ") +
-			render.KbdBare("ctrl+k", truecolor) + " " + statusStyle.Render("commands")
+			render.KbdPlain("ctrl+k", truecolor) + " " + statusStyle.Render("commands")
 	}
 	return actionHintsCache[idx]
 }
 
 // resolvedServerTag is the tag after the status dot: the literal "dev"
-// for dev.pitomd.com/localhost (pito's own Rails-env rule, mirrored by
+// for the dev instance/localhost (pito's own Rails-env rule, mirrored by
 // host since the TUI can't see the env), otherwise whatever GET /version
 // reported (empty until it lands — the dot stands alone).
 func (m Model) resolvedServerTag() string {
@@ -2448,7 +2536,7 @@ func (m Model) resolvedServerTag() string {
 }
 
 // isDevHost mirrors pito's Rails-env rule by the only signal the TUI
-// has: dev.pitomd.com and local hosts ARE development.
+// has: the dev instance and local hosts ARE development.
 func isDevHost(host string) bool {
 	return host == "dev.pitomd.com" || host == "localhost" || host == "127.0.0.1" || host == "::1"
 }

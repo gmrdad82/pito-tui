@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"strconv"
 	"time"
 )
 
@@ -88,6 +89,136 @@ func DecodeAiPayload(raw json.RawMessage) (AiPayload, error) {
 	var p AiPayload
 	err := json.Unmarshal(raw, &p)
 	return p, err
+}
+
+// ConversationHit is one row of a kind "system" event's conversation-search
+// hits card — the REAL contract, the generic list-card shape
+// (table_heading/table_rows, the same mechanism `ls vids/games` use)
+// Pito::MessageBuilder::Conversation::Hits builds (pito
+// lib/pito/message_builder/conversation/hits.rb; wired from
+// Pito::Chat::Handlers::SearchConversations#ok, a `search conversations
+// for/like …` reply). This REPLACES a top-level `conversation_hits` array
+// this type used to decode — a contract the server deleted before this
+// client shipped the code that read it (pito-tui 3.0.1 fix); no server
+// build ever sent that shape.
+//
+// A row belongs to a hits card, not some other list card that also happens
+// to be kind "system" with table_rows (e.g. an `ls games` reply), by
+// carrying row-level `data: {anchor_event_id, conversation_uuid}` —
+// hits.rb's #row_for is the ONLY builder that stamps data at the ROW level
+// (every other list card's `data` lives on individual cells, for the
+// click-to-prefill affordance) — see DecodeSystemPayload for where that
+// discriminator is applied.
+//
+// ConversationID is gone: every route that opens a conversation
+// (GET /chat/:uuid.json, Conversation#to_param, and the `/resume` slash
+// command — config/pito/tools.yml `resume:`) is uuid-keyed, so
+// ConversationUUID alone is enough to resolve a hit for real. See the
+// TUI's jump affordance (internal/ui/hitpicker.go) for how a
+// cross-conversation hit is handled now that there's a uuid to act on.
+type ConversationHit struct {
+	ConversationUUID string
+	AnchorEventID    int64
+	Title            string
+	// Score is the 0-100 similarity bar cell (a semantic `like` hit's
+	// second cell — hits.rb's #like_cells, the same {score:} cell shape
+	// ScoreBarComponent renders for similar-games/channel-recommendation
+	// cards) — nil for a lexical `for`/bare hit.
+	Score *int
+	// OccurrenceCount is the match-count cell (a lexical `for`/bare hit's
+	// second cell — hits.rb's #for_cells, a plain {text:} cell parsed back
+	// to an int here) — nil for a semantic `like` hit. A card's hits share
+	// ONE mode (hits.rb's like_mode?: every hit in one `call` carries the
+	// same non-nil field), so exactly one of Score/OccurrenceCount is ever
+	// non-nil per hit — never both, never neither.
+	OccurrenceCount *int
+}
+
+// SystemPayload decodes the parts of a kind "system" event's payload the
+// hit picker needs beyond the generic table_heading/table_rows render
+// (render.go's textPayload already covers the on-screen table — this is a
+// second, independent decode for a different purpose, the house's existing
+// parallel-decode pattern; transcript.go's LiveHandles does the same with
+// reply_handle/reply_consumed). Hits is empty for every system event that
+// isn't a search-conversations reply — an old server, a plain list card,
+// or anything else that doesn't carry the row-level data contract — so
+// callers never special-case "missing" vs "not a hits card":
+// hitsFromLatestEvent's gate (hitpicker.go) is simply len(Hits) == 0.
+type SystemPayload struct {
+	Hits []ConversationHit
+}
+
+// hitsPayloadWire is the raw table_rows shape (hits.rb's #row_for output,
+// serialized), decoded once and filtered into the friendlier
+// ConversationHit slice by DecodeSystemPayload. Unexported: callers only
+// ever want SystemPayload.Hits.
+type hitsPayloadWire struct {
+	TableRows []hitRowWire `json:"table_rows"`
+}
+
+// hitRowWire mirrors one table_rows entry exactly: Cells[0] is the
+// clickable conversation-name cell (only its `text` matters here — the
+// `class`/`data` prefill-token fields drive the WEB's click-to-type
+// affordance and are irrelevant to a client that submits the equivalent
+// `/resume` command itself, see hitpicker.go#resumeHit), Cells[1] is the
+// mode-dependent value cell (see hitCellWire), and Data is the row-level
+// anchor_event_id/conversation_uuid contract hits.rb's comment calls out
+// as "do not drop" — it's what tells this row apart from any other list
+// card's table_rows (DecodeSystemPayload's discriminator).
+type hitRowWire struct {
+	Cells []hitCellWire `json:"cells"`
+	Data  struct {
+		AnchorEventID    int64  `json:"anchor_event_id"`
+		ConversationUUID string `json:"conversation_uuid"`
+	} `json:"data"`
+}
+
+// hitCellWire covers both shapes a hits row's second cell takes: the
+// like-mode score bar ({score:}) and the for-mode occurrence count
+// ({text:}). Score is a pointer so its PRESENCE, not its value, is what
+// tells the two modes apart — a genuine 0 score must still decode as
+// "like mode", never fall through to a bogus occurrence count.
+type hitCellWire struct {
+	Text  string `json:"text"`
+	Score *int   `json:"score"`
+}
+
+// DecodeSystemPayload decodes a "system" event's payload for its hits, if
+// any (see SystemPayload's doc comment for the row-level discriminator
+// that separates a real hits card from any other table_rows-bearing list
+// card). A row missing the row-level data contract, or with fewer than two
+// cells, is simply skipped — not a hits row, not an error. Errors only
+// when the payload isn't a JSON object at all, or a table_rows entry isn't
+// shaped like a row object (e.g. a bare string) — a clean error return,
+// never a panic, exactly as before this rewrite; hitsFromLatestEvent
+// already treats any error as "no hits".
+func DecodeSystemPayload(raw json.RawMessage) (SystemPayload, error) {
+	var wire hitsPayloadWire
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		return SystemPayload{}, err
+	}
+
+	hits := make([]ConversationHit, 0, len(wire.TableRows))
+	for _, row := range wire.TableRows {
+		if row.Data.ConversationUUID == "" || row.Data.AnchorEventID == 0 || len(row.Cells) < 2 {
+			continue // not a hits row — no row-level data contract, or too few cells
+		}
+		hit := ConversationHit{
+			ConversationUUID: row.Data.ConversationUUID,
+			AnchorEventID:    row.Data.AnchorEventID,
+			Title:            row.Cells[0].Text,
+		}
+		switch {
+		case row.Cells[1].Score != nil:
+			hit.Score = row.Cells[1].Score
+		case row.Cells[1].Text != "":
+			if n, err := strconv.Atoi(row.Cells[1].Text); err == nil {
+				hit.OccurrenceCount = &n
+			}
+		}
+		hits = append(hits, hit)
+	}
+	return SystemPayload{Hits: hits}, nil
 }
 
 type Conversation struct {

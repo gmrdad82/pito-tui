@@ -407,6 +407,268 @@ func TestDecodeAiPayload(t *testing.T) {
 	}
 }
 
+// TestDecodeSystemPayload is the table-driven contract test for kind
+// "system"'s hits card (search_conversations' reply, pito-tui 3.0.1 fix —
+// see hitpicker.go). The fixtures below are the REAL contract:
+// table_heading/table_rows, mirroring
+// Pito::MessageBuilder::Conversation::Hits (pito
+// lib/pito/message_builder/conversation/hits.rb) exactly as its own spec
+// (spec/lib/pito/message_builder/conversation/hits_spec.rb) pins the
+// shape — a like-mode row's cells `[{text, class, data}, {score}]` plus
+// row-level `data: {anchor_event_id, conversation_uuid}`; a for-mode row's
+// second cell `{text, class}` (an occurrence count, no score). Mirrors
+// TestDecodeAiPayload's table shape: hits present decode to the full
+// slice; hits absent — an old server, or any system event that isn't a
+// hits card — decode to an empty slice rather than erroring
+// (hitsFromLatestEvent, hitpicker.go, only opens the picker when this
+// comes back non-empty); and nothing here ever panics, even a payload
+// shaped so wrong it has to surface as a decode error.
+func TestDecodeSystemPayload(t *testing.T) {
+	cases := []struct {
+		name  string
+		body  string
+		check func(t *testing.T, p SystemPayload, err error)
+	}{
+		{
+			name: "like-mode hits present (score cells)",
+			body: `{
+				"body": "2 conversations found.",
+				"html": true,
+				"table_heading": ["Conversation", "Score"],
+				"table_rows": [
+					{
+						"cells": [
+							{
+								"text": "Hades II thoughts",
+								"class": "pito-action-shimmer pito-shimmer-d5 pito-cell-title",
+								"data": {
+									"controller": "pito--chat-prefill",
+									"action": "click->pito--chat-prefill#fill",
+									"pito--chat-prefill-text-value": "/resume conv-uuid-1",
+									"pito--chat-prefill-submit-value": "true"
+								}
+							},
+							{"score": 87}
+						],
+						"data": {"anchor_event_id": 501, "conversation_uuid": "conv-uuid-1"}
+					},
+					{
+						"cells": [
+							{
+								"text": "Hades II vs Hades I",
+								"class": "pito-action-shimmer pito-shimmer-d2 pito-cell-title",
+								"data": {
+									"controller": "pito--chat-prefill",
+									"action": "click->pito--chat-prefill#fill",
+									"pito--chat-prefill-text-value": "/resume conv-uuid-2",
+									"pito--chat-prefill-submit-value": "true"
+								}
+							},
+							{"score": 42}
+						],
+						"data": {"anchor_event_id": 999, "conversation_uuid": "conv-uuid-2"}
+					}
+				],
+				"list_footer": "Reply with a hit's row number."
+			}`,
+			check: func(t *testing.T, p SystemPayload, err error) {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if len(p.Hits) != 2 {
+					t.Fatalf("hits = %d, want 2", len(p.Hits))
+				}
+				first := p.Hits[0]
+				if first.ConversationUUID != "conv-uuid-1" || first.AnchorEventID != 501 || first.Title != "Hades II thoughts" {
+					t.Errorf("hit 0 = %+v", first)
+				}
+				if first.Score == nil || *first.Score != 87 {
+					t.Errorf("hit 0 score = %v, want 87", first.Score)
+				}
+				if first.OccurrenceCount != nil {
+					t.Errorf("hit 0 occurrence_count = %v, want nil (like mode)", *first.OccurrenceCount)
+				}
+				second := p.Hits[1]
+				if second.ConversationUUID != "conv-uuid-2" || second.AnchorEventID != 999 || second.Title != "Hades II vs Hades I" {
+					t.Errorf("hit 1 = %+v", second)
+				}
+				if second.Score == nil || *second.Score != 42 {
+					t.Errorf("hit 1 score = %v, want 42", second.Score)
+				}
+			},
+		},
+		{
+			name: "for-mode hits present (occurrence-count cells)",
+			body: `{
+				"body": "1 conversation found.",
+				"html": true,
+				"table_heading": ["Conversation", "Occurrences"],
+				"table_rows": [
+					{
+						"cells": [
+							{
+								"text": "Hades II thoughts",
+								"class": "pito-action-shimmer pito-shimmer-d5 pito-cell-title",
+								"data": {
+									"controller": "pito--chat-prefill",
+									"action": "click->pito--chat-prefill#fill",
+									"pito--chat-prefill-text-value": "/resume conv-uuid-1 501",
+									"pito--chat-prefill-submit-value": "true"
+								}
+							},
+							{"text": "3", "class": "tabular-nums text-right whitespace-nowrap"}
+						],
+						"data": {"anchor_event_id": 501, "conversation_uuid": "conv-uuid-1"}
+					}
+				],
+				"list_footer": "Reply with a hit's row number."
+			}`,
+			check: func(t *testing.T, p SystemPayload, err error) {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if len(p.Hits) != 1 {
+					t.Fatalf("hits = %d, want 1", len(p.Hits))
+				}
+				hit := p.Hits[0]
+				if hit.ConversationUUID != "conv-uuid-1" || hit.AnchorEventID != 501 || hit.Title != "Hades II thoughts" {
+					t.Errorf("hit = %+v", hit)
+				}
+				if hit.OccurrenceCount == nil || *hit.OccurrenceCount != 3 {
+					t.Errorf("occurrence_count = %v, want 3", hit.OccurrenceCount)
+				}
+				if hit.Score != nil {
+					t.Errorf("score = %v, want nil (for mode)", *hit.Score)
+				}
+			},
+		},
+		{
+			name: "hits absent — an old server or a non-hits system event",
+			body: `{"text": "pong"}`,
+			check: func(t *testing.T, p SystemPayload, err error) {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if len(p.Hits) != 0 {
+					t.Errorf("hits = %+v, want empty", p.Hits)
+				}
+			},
+		},
+		{
+			name: "hits explicitly empty",
+			body: `{"body": "no matches", "html": true, "table_heading": ["Conversation", "Score"], "table_rows": []}`,
+			check: func(t *testing.T, p SystemPayload, err error) {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if len(p.Hits) != 0 {
+					t.Errorf("hits = %+v, want empty", p.Hits)
+				}
+			},
+		},
+		{
+			// A plain list card (e.g. `ls games`) is ALSO kind "system" with
+			// table_rows, and its cells carry the SAME cell-level `data`
+			// prefill token a hits row's name cell does — but hits.rb is
+			// the only builder that ALSO stamps row-level `data`
+			// (anchor_event_id + conversation_uuid). Without that row-level
+			// contract this must NOT be mistaken for a hits card — the
+			// exact bug class this rewrite exists to prevent (a client that
+			// trusted the row shape alone, not the row-level data, could
+			// misfire the picker on any list reply).
+			name: "a plain list card's table_rows (no row-level data) never counts as hits",
+			body: `{
+				"body": "8 vids.",
+				"html": true,
+				"table_heading": ["#", "Title"],
+				"table_rows": [
+					{
+						"cells": [
+							{
+								"text": "#18",
+								"class": "pito-action-shimmer pito-shimmer-d7 tabular-nums text-right whitespace-nowrap",
+								"data": {
+									"controller": "pito--chat-prefill",
+									"action": "click->pito--chat-prefill#fill",
+									"pito--chat-prefill-text-value": "show vid #18",
+									"pito--chat-prefill-submit-value": "true"
+								}
+							},
+							{"text": "Ghosts 'n Goblins Resurrection : Knight", "class": "text-fg pito-cell-title"}
+						]
+					}
+				]
+			}`,
+			check: func(t *testing.T, p SystemPayload, err error) {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if len(p.Hits) != 0 {
+					t.Errorf("hits = %+v, want empty (this is a list card, not a hits card)", p.Hits)
+				}
+			},
+		},
+		{
+			name: "tolerant of unknown top-level fields",
+			body: `{
+				"table_heading": ["Conversation", "Score"],
+				"table_rows": [
+					{
+						"cells": [{"text": "t"}, {"score": 10}],
+						"data": {"anchor_event_id": 501, "conversation_uuid": "u"}
+					}
+				],
+				"future_field": true
+			}`,
+			check: func(t *testing.T, p SystemPayload, err error) {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if len(p.Hits) != 1 {
+					t.Fatalf("hits = %d, want 1", len(p.Hits))
+				}
+			},
+		},
+		{
+			// hitRowWire carries no custom UnmarshalJSON (unlike AiBlock),
+			// so a table_rows entry shaped wrong for the row's own fields
+			// does surface as a decode error here — the point of this case
+			// is only that it does so cleanly (an error return), never a
+			// panic. The caller already treats any error as "no hits"
+			// (hitsFromLatestEvent), so a malformed row degrades to the J
+			// key falling through, same as an absent list.
+			name: "malformed table_rows entries error without panicking",
+			body: `{
+				"table_rows": [
+					{"cells": [{"text": "ok row"}, {"score": 1}], "data": {"anchor_event_id": 501, "conversation_uuid": "u"}},
+					"just a string, not a row object"
+				]
+			}`,
+			check: func(t *testing.T, p SystemPayload, err error) {
+				if err == nil {
+					t.Fatal("want a decode error for a malformed table_rows array, got nil")
+				}
+			},
+		},
+		{
+			name: "payload not an object at all",
+			body: `"just a string"`,
+			check: func(t *testing.T, p SystemPayload, err error) {
+				if err == nil {
+					t.Fatal("want a decode error for a non-object payload, got nil")
+				}
+			},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p, err := DecodeSystemPayload(json.RawMessage(c.body))
+			c.check(t, p, err)
+		})
+	}
+}
+
 // TestKindAiDecodesAsEvent pins kind "ai" flowing through the generic Event
 // envelope like any other kind — DecodeAiPayload then takes over on the
 // raw payload bytes.

@@ -19,7 +19,7 @@
 // PROVISIONAL (2026-07-11): pito 2.0.0 is mid-release — tools.yml exists
 // only in the owner's staged tree, so the ref is temporarily WORKTREE.
 // RE-PIN to the pito 2.0.0 tag (and regenerate) at the owner's launch
-// ping, BEFORE shipping v1.3.0 (plan W1.1, docs/claude/2.0.0.md).
+// ping, BEFORE shipping v1.3.0 (plan W1.1, pito's 2.0.0 planning notes).
 package grammar
 
 //go:generate env PITO_REF=v2.0.0 go run github.com/gmrdad82/pito-tui/tools/toolsgen

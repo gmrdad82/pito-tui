@@ -23,6 +23,16 @@ var (
 	// ColorCyan mirrors the web's text-cyan (#22d3ee): detail-block keys
 	// on confirmation cards and pito-token references (2.0.0).
 	ColorCyan = lipgloss.Color("44")
+	// ColorOrange mirrors the web's text-orange accent — the 256-color
+	// approximation of ai_charts.go's aiThemeOrange truecolor RGB
+	// {0xff, 0x9e, 0x64}, same split as every other accent here.
+	ColorOrange = lipgloss.Color("215")
+	// ColorPito is the pito brand blue (#5170ff) for text-pito spans —
+	// the same literal hex aipicker.go's aiBrandBlue and ai_charts.go's
+	// aiThemeBlue (--brand-pito) already use; truecolor-only like
+	// CharmPurple below, since it's an exact brand color rather than an
+	// ANSI-256 approximation.
+	ColorPito = lipgloss.Color("#5170ff")
 	// ColorSubject is the 256-color stand-in for the 2.0.0 subject-shimmer
 	// base (pink — mix(red, purple), owner 2026-07-12) on non-truecolor
 	// terminals.

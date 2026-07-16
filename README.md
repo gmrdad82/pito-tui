@@ -180,3 +180,10 @@ then goreleaser publishes static binaries (linux+darwin, amd64+arm64), a
 ## License
 
 AGPL-3.0 — same as PITO.
+
+---
+
+Built alongside the channel that needed it — @gmrdad82.
+
+<!-- prettier-ignore -->
+<p align="center"><a href="https://www.youtube.com/@gmrdad82"><img src="docs/avatars/@gmrdad82.png" width="80" alt="@gmrdad82"></a></p>

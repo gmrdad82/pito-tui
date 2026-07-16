@@ -61,6 +61,12 @@ type SuggestionsMsg struct {
 // sky keeps moving at rest.
 type SkyTickMsg struct{}
 
+// FPSTickMsg drives F9's frame-counter chip loop (fpsoverlay.go's
+// startFPSTick/onFPSTick) — a ~100ms nudge that keeps the viewport
+// repainting (and so the chip live) at idle; only runs while the chip
+// is toggled on.
+type FPSTickMsg struct{}
+
 // ConversationRenamedMsg carries the picker's `n` rename PATCH's outcome
 // for the conversation identified by UUID (picker.go/model.go's inline
 // rename — mirrors the web's pito--rename #commitRename).

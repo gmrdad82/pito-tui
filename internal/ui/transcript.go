@@ -253,6 +253,38 @@ func (t *Transcript) TurnLineRange(turnID int64) (start, end int, ok bool) {
 	return 0, 0, false
 }
 
+// EventLineRange reports [start, end) line positions of the turn that owns
+// eventID within the joined transcript, ok=false when the event id is
+// unknown (resolving it via byEvent) or its turn isn't rendered yet — the
+// jump-to-first-mention primitive for conversation search (pito-tui 3.0.0
+// U2.1): a hit card carries an anchor event id, and this turns it into a
+// scroll offset for SetYOffset.
+func (t *Transcript) EventLineRange(eventID int64) (start, end int, ok bool) {
+	pos, known := t.byEvent[eventID]
+	if !known {
+		return 0, 0, false
+	}
+	return t.TurnLineRange(pos.turn.ID)
+}
+
+// LatestEvent returns the most recently appended event — the last event of
+// the last turn — ok=false when the transcript is empty. The
+// conversation-hits jump affordance's gate (hitpicker.go): only the NEWEST
+// rendered event's payload is checked for conversation_hits, mirroring
+// LiveHandles' "the newest turn wins" rule but at event granularity — a
+// hits card is always the sole event of its own turn, so the last turn's
+// last event is exactly the card, when there is one.
+func (t *Transcript) LatestEvent() (api.Event, bool) {
+	if len(t.turns) == 0 {
+		return api.Event{}, false
+	}
+	turn := t.turns[len(t.turns)-1]
+	if len(turn.Events) == 0 {
+		return api.Event{}, false
+	}
+	return turn.Events[len(turn.Events)-1], true
+}
+
 // TurnsOutside counts turns FULLY above and FULLY below the viewport
 // window [yoff, yoff+height) — the scroll-nav pills' numbers (the web's
 // scroll_nav_controller counts [data-scrollback-message] rects the same

@@ -1599,7 +1599,11 @@ func TestContextMeterAndMiniStatusFlow(t *testing.T) {
 	// pito fat-cut 2026-07-12: the identity after the dot is the SERVER
 	// tag alone — the httptest host is 127.0.0.1, a dev host, so "dev";
 	// the nickname, host, and state word are all gone.
-	if !strings.Contains(view, "dev") || !strings.Contains(view, "⚑ 28") {
+	// ctrl+/ and the count+flag piece are two separate style.Render calls
+	// (statusLine, model.go) — ANSI-strip before matching the joined
+	// text, or the reset/color-start codes between them break the
+	// substring.
+	if !strings.Contains(view, "dev") || !strings.Contains(ansi.Strip(view), "ctrl+/ 28 ⚑") {
 		t.Errorf("mini status missing tag/unread:\n%s", view)
 	}
 	for _, gone := range []string{"connected", "gmrdad82@", "127.0.0.1"} {
@@ -1607,16 +1611,16 @@ func TestContextMeterAndMiniStatusFlow(t *testing.T) {
 			t.Errorf("%q must be gone from the status bar:\n%s", gone, view)
 		}
 	}
-	// Action affordances cluster right (owner ruling 2026-07-13): ctrl+k
-	// commands · ctrl+f update footage tail the right side, AFTER the
+	// Action affordances cluster right (owner ruling 2026-07-13): ctrl+f
+	// footage · ctrl+k commands tail the right side, AFTER the
 	// dot/tag/unread pieces, while ctrl+c Quit stays alone on the left.
 	line := ansi.Strip(m.statusLine())
-	for _, want := range []string{"ctrl+k", "commands", "ctrl+f", "update footage"} {
+	for _, want := range []string{"ctrl+k", "commands", "ctrl+f", "footage"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("status line missing action hint %q:\n%s", want, line)
 		}
 	}
-	if i := strings.Index(line, "⚑ 28"); i == -1 || i > strings.Index(line, "ctrl+k") {
+	if i := strings.Index(line, "ctrl+/ 28 ⚑"); i == -1 || i > strings.Index(line, "ctrl+k") {
 		t.Errorf("action hints must trail the dot/tag/unread cluster, not lead it:\n%s", line)
 	}
 	// ctrl+c (Quit) sits ALONE on the left, ahead of the whole right
@@ -1649,7 +1653,7 @@ func TestContextMeterAndMiniStatusFlow(t *testing.T) {
 	if m.meterCtx.Pct != 43 || m.unread != 3 {
 		t.Fatalf("conversation.update not applied: %+v unread=%d", m.meterCtx, m.unread)
 	}
-	if view := m.viewContent(); !strings.Contains(view, "43%") || !strings.Contains(view, "⚑ 3") {
+	if view := m.viewContent(); !strings.Contains(view, "43%") || !strings.Contains(ansi.Strip(view), "ctrl+/ 3 ⚑") {
 		t.Errorf("patched values not rendered:\n%s", view)
 	}
 }
@@ -2031,7 +2035,17 @@ func TestFollowGlidesOnSmallGrowthSnapsOnBackfill(t *testing.T) {
 // shows the warning, second quits, any other key stands down.
 func TestCtrlCArmsThenQuits(t *testing.T) {
 	m, _ := newTestModel(t, http.NotFoundHandler(), WithConversation("u-1"))
-	m = sized(m)
+	// 76 cols, not the usual 80 (pito-tui 3.0.0, U1.2/U1.3 single-space +
+	// "footage" label shrink): statusLine's own graceful-truncation gate
+	// is `contentWidth - width(left) - width(withHints) - 1 > 0` (model.go,
+	// statusLine). Empirically sizing this exact model (armed left =
+	// "ctrl+c" chip + "again to quit"; right = dot/tag/"ctrl+/ 0 ⚑" +
+	// " · " + "ctrl+f footage · ctrl+k commands") across widths 60..82
+	// shows the hints cluster present at width>=77 and gone at width<=76
+	// — the tighter bar shed the doubled spacing and "update "→"" label
+	// trim, so 80 cols now legitimately fits both; 76 is the tightest
+	// width that still exercises the drop this test exists to prove.
+	m = drive(m, tea.WindowSizeMsg{Width: 76, Height: 24})
 	next, _ := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	m = next.(Model)
 	if m.quitArmed == 0 {
@@ -2042,7 +2056,7 @@ func TestCtrlCArmsThenQuits(t *testing.T) {
 	}
 	// Graceful truncation (owner ruling 2026-07-13): the right cluster's
 	// own ctrl+k/ctrl+f hints are the FIRST thing to drop as the bar
-	// narrows — at 80 cols there isn't room for both the armed "again to
+	// narrows — at 76 cols there isn't room for both the armed "again to
 	// quit" warning AND the hints, and the warning always wins.
 	if armedLine := ansi.Strip(m.statusLine()); strings.Contains(armedLine, "ctrl+k") {
 		t.Errorf("action hints must drop before the armed quit warning gets clipped:\n%s", armedLine)
@@ -2664,5 +2678,29 @@ func TestViewportWidthPixelsFollowTheCappedColumn(t *testing.T) {
 			t.Errorf("width %d: viewport_width = %v, want %v (contentWidth()*8 = %d*8)", width, body["viewport_width"], want, wantWidth)
 		}
 		srv.Close()
+	}
+}
+
+// TestResumeFetchSendsViewportDerivedLimit pins viewportRows' composition
+// at the resume call site (fetchResumeCmd, owner 2026-07-15,
+// viewport-driven paging): the outgoing GET /resume.json limit is
+// viewportRows(m.height - 4), not a fixed page size — see fetchResumeCmd's
+// doc comment.
+func TestResumeFetchSendsViewportDerivedLimit(t *testing.T) {
+	var gotLimit string
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /resume.json", func(w http.ResponseWriter, r *http.Request) {
+		gotLimit = r.URL.Query().Get("limit")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(resumeJSON))
+	})
+	m, _ := newTestModel(t, mux)
+	m = drive(m, tea.WindowSizeMsg{Width: 80, Height: 30})
+
+	m = drive(m, m.fetchResumeCmd()())
+
+	want := itoa(viewportRows(m.height - 4))
+	if gotLimit != want {
+		t.Errorf("limit = %q, want %q (viewportRows(%d - 4))", gotLimit, want, m.height)
 	}
 }

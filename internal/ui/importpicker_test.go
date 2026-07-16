@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/gmrdad82/pito-tui/internal/api"
@@ -365,5 +366,36 @@ func TestImportPickerServerErrorEnvelopeRenders(t *testing.T) {
 	view := ansi.Strip(m.importPickerView())
 	if !strings.Contains(view, "IGDB credentials missing") {
 		t.Fatalf("the server's error envelope must render in the panel, not crash:\n%s", view)
+	}
+}
+
+// TestImportSearchSendsViewportDerivedLimit pins viewportRows' composition
+// at the import-search call site (importSearchCmd, owner 2026-07-15,
+// viewport-driven paging): the outgoing POST /games/search limit is
+// viewportRows(m.height - 6) — see importSearchCmd's doc comment.
+func TestImportSearchSendsViewportDerivedLimit(t *testing.T) {
+	var gotLimit string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/games/search", func(w http.ResponseWriter, r *http.Request) {
+		gotLimit = r.URL.Query().Get("limit")
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"hits":[]}`)
+	})
+	m, _ := newTestModel(t, mux, WithConversation("u-1"))
+	m = drive(m, tea.WindowSizeMsg{Width: 80, Height: 30})
+
+	// A prefilled trigger searches immediately (no debounce) — same seam
+	// TestImportPickerOpenWithPrefillSearchesImmediately drives.
+	m.input.SetValue("import Hollow Knight")
+	next, cmd := m.Update(key("enter"))
+	m = next.(Model)
+	if m.mode != modeImport || cmd == nil {
+		t.Fatal("opening with a prefill must return an immediate-search command")
+	}
+	m = runCmd(m, cmd)
+
+	want := itoa(viewportRows(m.height - 6))
+	if gotLimit != want {
+		t.Errorf("limit = %q, want %q (viewportRows(%d - 6))", gotLimit, want, m.height)
 	}
 }

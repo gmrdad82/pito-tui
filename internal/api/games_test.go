@@ -47,7 +47,7 @@ func TestSearchIGDBHappyPath(t *testing.T) {
 	})
 	client := gamesClient(t, mux)
 
-	result, err := client.SearchIGDB(t.Context(), "hollow")
+	result, err := client.SearchIGDB(t.Context(), "hollow", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestSearchIGDBErrorEnvelopeIsNotAGoError(t *testing.T) {
 	})
 	client := gamesClient(t, mux)
 
-	result, err := client.SearchIGDB(t.Context(), "hollow")
+	result, err := client.SearchIGDB(t.Context(), "hollow", 0)
 	if err != nil {
 		t.Fatalf("degraded answer must not be a Go error, got %v", err)
 	}
@@ -93,7 +93,7 @@ func TestSearchIGDBUnauthorized(t *testing.T) {
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
 
-	_, err := client.SearchIGDB(t.Context(), "hollow")
+	_, err := client.SearchIGDB(t.Context(), "hollow", 0)
 	if !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("err = %v, want ErrUnauthorized", err)
 	}
@@ -104,7 +104,7 @@ func TestSearchIGDBNon200IsStatusError(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 
-	_, err := client.SearchIGDB(t.Context(), "hollow")
+	_, err := client.SearchIGDB(t.Context(), "hollow", 0)
 	var statusErr *StatusError
 	if !errors.As(err, &statusErr) {
 		t.Fatalf("err = %v, want *StatusError", err)
@@ -166,5 +166,50 @@ func TestImportGameUnauthorized(t *testing.T) {
 	err := client.ImportGame(t.Context(), 7, "Celeste", "abc-123")
 	if !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("err = %v, want ErrUnauthorized", err)
+	}
+}
+
+// TestSearchIGDBPositiveLimitSetsQueryParam pins the other half of
+// SearchIGDB's limit contract (viewport-driven paging, owner 2026-07-15):
+// a positive limit rides the query string verbatim.
+func TestSearchIGDBPositiveLimitSetsQueryParam(t *testing.T) {
+	var gotLimit string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/games/search", func(w http.ResponseWriter, r *http.Request) {
+		gotLimit = r.URL.Query().Get("limit")
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"hits":[]}`)
+	})
+	client := gamesClient(t, mux)
+
+	if _, err := client.SearchIGDB(t.Context(), "hollow", 24); err != nil {
+		t.Fatal(err)
+	}
+	if gotLimit != "24" {
+		t.Errorf("limit = %q, want %q", gotLimit, "24")
+	}
+}
+
+// TestSearchIGDBNonPositiveLimitOmitsQueryParam pins the <=0 fallback
+// documented on SearchIGDB: the param is omitted entirely rather than
+// sent as 0 or negative, so the server falls back to the tool's
+// configured default.
+func TestSearchIGDBNonPositiveLimitOmitsQueryParam(t *testing.T) {
+	for _, limit := range []int{0, -1} {
+		t.Run(fmt.Sprintf("limit=%d", limit), func(t *testing.T) {
+			mux := http.NewServeMux()
+			mux.HandleFunc("/games/search", func(w http.ResponseWriter, r *http.Request) {
+				if _, present := r.URL.Query()["limit"]; present {
+					t.Errorf("limit query param present (%q), want omitted for limit=%d", r.URL.RawQuery, limit)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, `{"hits":[]}`)
+			})
+			client := gamesClient(t, mux)
+
+			if _, err := client.SearchIGDB(t.Context(), "hollow", limit); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }

@@ -148,3 +148,43 @@ func TestMergeIsIdempotentAndDetectsChanges(t *testing.T) {
 		t.Errorf("merge lost data: %q", view)
 	}
 }
+
+func TestEventLineRangeMatchesOwningTurn(t *testing.T) {
+	c := &countingRenderer{}
+	tr := NewTranscript(c.render)
+	tr.Append(ev(1, 1, "echo", `{}`))
+	tr.Append(ev(2, 2, "echo", `{}`))
+	tr.Append(ev(3, 3, "echo", `{}`))
+	tr.View(80) // render so every turn's line cache is current
+
+	wantStart, wantEnd, wantOK := tr.TurnLineRange(2)
+	if !wantOK {
+		t.Fatal("TurnLineRange(2) must be ok once rendered")
+	}
+	gotStart, gotEnd, gotOK := tr.EventLineRange(2) // event 2 belongs to the middle turn
+	if !gotOK || gotStart != wantStart || gotEnd != wantEnd {
+		t.Errorf("EventLineRange(2) = (%d, %d, %v), want (%d, %d, true) matching TurnLineRange(2)",
+			gotStart, gotEnd, gotOK, wantStart, wantEnd)
+	}
+}
+
+func TestEventLineRangeUnknownEventIsNotOK(t *testing.T) {
+	c := &countingRenderer{}
+	tr := NewTranscript(c.render)
+	tr.Append(ev(1, 1, "echo", `{}`))
+	tr.View(80)
+
+	if _, _, ok := tr.EventLineRange(999); ok {
+		t.Error("EventLineRange for an unknown event id must be ok=false")
+	}
+}
+
+func TestEventLineRangeUnrenderedTurnIsNotOK(t *testing.T) {
+	c := &countingRenderer{}
+	tr := NewTranscript(c.render)
+	tr.Append(ev(1, 1, "echo", `{}`)) // never rendered at any width — turn stays dirty
+
+	if _, _, ok := tr.EventLineRange(1); ok {
+		t.Error("EventLineRange for an unrendered (dirty) turn must be ok=false, inheriting TurnLineRange's contract")
+	}
+}

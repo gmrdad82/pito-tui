@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/gmrdad82/pito-tui/internal/api"
 	"github.com/gmrdad82/pito-tui/internal/cable"
@@ -270,7 +271,11 @@ func TestUnreadOdometerNonTruecolorInstantSwap(t *testing.T) {
 	if m.unread != 3 || m.displayUnread() != 3 {
 		t.Errorf("non-truecolor must swap instantly: unread=%d display=%d", m.unread, m.displayUnread())
 	}
-	if !strings.Contains(m.viewContent(), "⚑ 3") {
+	// ctrl+/ and the count+flag piece are two separate style.Render calls
+	// (statusLine, model.go) — ANSI-strip before matching, the same
+	// contiguous-text-across-two-chips gotcha the status-line tests
+	// elsewhere already work around (ansi.Strip(m.statusLine())).
+	if !strings.Contains(ansi.Strip(m.viewContent()), "ctrl+/ 3 ⚑") {
 		t.Errorf("status line must show the final value immediately:\n%s", m.viewContent())
 	}
 }

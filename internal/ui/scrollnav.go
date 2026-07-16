@@ -30,9 +30,14 @@ import (
 )
 
 // scrollNavText interpolates the one token a fixed pill string carries,
-// %{count}.
+// %{count}. Counts 1–10 render exactly; above ten, the short form "10+"
+// (owner 2026-07-15) — the web controller's #format clamps identically.
 func scrollNavText(format string, count int) string {
-	return strings.ReplaceAll(format, "%{count}", strconv.Itoa(count))
+	shown := strconv.Itoa(count)
+	if count > 10 {
+		shown = "10+"
+	}
+	return strings.ReplaceAll(format, "%{count}", shown)
 }
 
 // scrollNavPill renders one pill: the copy text in the default (white)

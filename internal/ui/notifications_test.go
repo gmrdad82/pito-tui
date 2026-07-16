@@ -97,6 +97,46 @@ func TestNotificationsSlashIntercept(t *testing.T) {
 	}
 }
 
+// TestCtrlSlashOpensNotificationsOverlay covers web parity (owner order
+// 2026-07-15, 3.0.0 U1.4): ctrl+/ (onChatKey) takes the exact same path
+// as the typed /notifications command — modeNotifications, a fresh
+// panel, the first-page fetch already in flight. The legacy alias
+// ctrl+_ (0x1F, delivered by terminals without kitty disambiguation) is
+// covered too since onChatKey wires both to the same case.
+func TestCtrlSlashOpensNotificationsOverlay(t *testing.T) {
+	for _, combo := range []tea.KeyPressMsg{
+		{Code: '/', Mod: tea.ModCtrl},
+		{Code: '_', Mod: tea.ModCtrl},
+	} {
+		m, _ := newTestModel(t, notifMux(jsonHandler(`{"rows":[],"next_cursor":null}`)), WithConversation("u1"))
+		m = sized(m)
+		next, cmd := m.Update(combo)
+		m = next.(Model)
+		if m.mode != modeNotifications {
+			t.Fatalf("%v: mode = %v, want modeNotifications", combo, m.mode)
+		}
+		if !m.notif.fetching {
+			t.Errorf("%v: opening must start the first fetch", combo)
+		}
+		if cmd == nil {
+			t.Errorf("%v: opening must return a command", combo)
+		}
+	}
+}
+
+// TestStatusBarShowsCtrlSlashHintAtZeroUnread pins the new "ctrl+/ N ⚑"
+// status-bar piece (owner order 2026-07-15, 3.0.0 U1.3) for the common
+// steady state: authenticated, nothing unread. ANSI-stripped because
+// "ctrl+/" and "0 ⚑" are two separate style.Render calls in statusLine —
+// the reset/color-start codes between them break a raw substring match.
+func TestStatusBarShowsCtrlSlashHintAtZeroUnread(t *testing.T) {
+	m, _ := newTestModel(t, http.NotFoundHandler(), WithConversation("u-1"))
+	m = sized(m)
+	if view := ansi.Strip(m.viewContent()); !strings.Contains(view, "ctrl+/ 0 ⚑") {
+		t.Errorf("status bar must show ctrl+/ 0 ⚑ when authenticated with no unread:\n%s", view)
+	}
+}
+
 // TestNotificationsPaginationAndDuplicateGuard drives the full two-page
 // flow: page 1 lands short of the cursor reaching bottom (no eager
 // fetch), scrolling to the last loaded row fires page 2 exactly once
@@ -479,5 +519,105 @@ func TestNotificationRowsFlattenInlineHTML(t *testing.T) {
 	}, 60, fixedNow, false)
 	if strings.Contains(got, "<strong>") || !strings.Contains(got, "Elden Ring synced") {
 		t.Errorf("tags leaked or text lost: %q", got)
+	}
+}
+
+// TestViewportRowsFloorsAndPassesThrough pins viewportRows' own contract
+// (owner 2026-07-15, viewport-driven paging): a tiny pane floors at 10
+// rather than pulling single-row pages, while anything at or above the
+// floor passes through untouched.
+func TestViewportRowsFloorsAndPassesThrough(t *testing.T) {
+	if got := viewportRows(3); got != 10 {
+		t.Errorf("viewportRows(3) = %d, want 10 (floor)", got)
+	}
+	if got := viewportRows(24); got != 24 {
+		t.Errorf("viewportRows(24) = %d, want 24 (passthrough)", got)
+	}
+}
+
+// TestNotificationsFetchSendsViewportDerivedLimit pins viewportRows'
+// composition at the notifications call site (notificationsFetchCmd): the
+// outgoing GET /notifications.json limit is viewportRows(notifPageStep(m.height)),
+// not a fixed page size.
+func TestNotificationsFetchSendsViewportDerivedLimit(t *testing.T) {
+	var gotLimit string
+	mux := notifMux(func(w http.ResponseWriter, r *http.Request) {
+		gotLimit = r.URL.Query().Get("limit")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"rows":[],"next_cursor":null}`))
+	})
+	m, _ := newTestModel(t, mux, WithConversation("u1"))
+	m = drive(m, tea.WindowSizeMsg{Width: 80, Height: 30})
+
+	m = drive(m, m.notificationsFetchCmd(m.notif.next)())
+
+	want := itoa(viewportRows(notifPageStep(m.height)))
+	if gotLimit != want {
+		t.Errorf("limit = %q, want %q (viewportRows(notifPageStep(%d)))", gotLimit, want, m.height)
+	}
+}
+
+// TestNotificationsResizeBetweenPagesChangesLimit covers viewport-driven
+// paging across a resize (owner 2026-07-15): the panel loads page 1 at
+// one terminal height, the owner resizes before scrolling to the last
+// row, and the page-2 fetch this triggers must carry the NEW height's
+// limit. Cursor continuity (the after= param) is already pinned by
+// TestNotificationsPaginationAndDuplicateGuard — this test only cares
+// that the limit tracks the live viewport across the resize.
+func TestNotificationsResizeBetweenPagesChangesLimit(t *testing.T) {
+	var limits []string
+	mux := notifMux(func(w http.ResponseWriter, r *http.Request) {
+		limits = append(limits, r.URL.Query().Get("limit"))
+		before := r.URL.Query().Get("after")
+		w.Header().Set("Content-Type", "application/json")
+		if before == "" {
+			_, _ = w.Write([]byte(`{"rows":[
+				{"id":1,"message":"first", "read":false,"created_at":"2026-07-04T11:00:00Z"},
+				{"id":2,"message":"second","read":true, "created_at":"2026-07-03T11:00:00Z"}
+			],"next_cursor":"c2"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"rows":[
+			{"id":3,"message":"third","read":false,"created_at":"2026-07-02T11:00:00Z"}
+		],"next_cursor":null}`))
+	})
+	m, _ := newTestModel(t, mux, WithConversation("u1"))
+	m = drive(m, tea.WindowSizeMsg{Width: 80, Height: 30})
+
+	m.input.SetValue("/notifications")
+	m, cmd := driveCmd(m, key("enter"))
+	if m.mode != modeNotifications || cmd == nil {
+		t.Fatal("enter must open the panel and schedule page 1")
+	}
+	m = drive(m, m.notificationsFetchCmd(m.notif.next)())
+	if len(m.notif.rows) != 2 {
+		t.Fatalf("page 1 not absorbed: rows=%d", len(m.notif.rows))
+	}
+
+	// Resize BEFORE the page-2 trigger — the new height must own page 2's limit.
+	m = drive(m, tea.WindowSizeMsg{Width: 80, Height: 12})
+
+	m, cmd = driveCmd(m, key("j")) // reaches the last loaded row, fires page 2
+	if !m.notif.fetching || cmd == nil {
+		t.Fatal("moving to the last row after a resize must still trigger page 2")
+	}
+	m = drive(m, m.notificationsFetchCmd(m.notif.next)())
+	if len(m.notif.rows) != 3 {
+		t.Fatalf("page 2 not absorbed: rows=%d", len(m.notif.rows))
+	}
+
+	if len(limits) != 2 {
+		t.Fatalf("limits captured = %v, want 2 requests", limits)
+	}
+	wantFirst := itoa(viewportRows(notifPageStep(30)))
+	wantSecond := itoa(viewportRows(notifPageStep(12)))
+	if limits[0] != wantFirst {
+		t.Errorf("page 1 limit = %q, want %q (height 30)", limits[0], wantFirst)
+	}
+	if limits[1] != wantSecond {
+		t.Errorf("page 2 limit = %q, want %q (height 12 after resize)", limits[1], wantSecond)
+	}
+	if limits[0] == limits[1] {
+		t.Fatal("resize must actually change the requested limit between pages")
 	}
 }

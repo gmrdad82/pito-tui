@@ -56,10 +56,14 @@ func (p notificationsPanel) needsFetch() bool {
 }
 
 // notificationsFetchCmd GETs one page starting at before ("" for page 1).
+// The page size is the panel's own visible row capacity (notifPageStep,
+// the same formula notificationsPanelView windows against) run through
+// viewportRows — viewport-driven paging, see that doc comment.
 func (m Model) notificationsFetchCmd(before string) tea.Cmd {
 	client := m.client
+	limit := viewportRows(notifPageStep(m.height))
 	return func() tea.Msg {
-		page, err := client.FetchNotifications(context.Background(), before, 50)
+		page, err := client.FetchNotifications(context.Background(), before, limit)
 		return NotificationsFetchedMsg{Page: page, Err: err}
 	}
 }
@@ -159,11 +163,26 @@ func notifPageStep(height int) int {
 	return step
 }
 
+// viewportRows turns a panel's actual visible row capacity into the page
+// size sent as FetchNotifications/FetchResume's limit — viewport-driven
+// paging (owner 2026-07-15): a tall terminal pulls a full screenful in one
+// round trip instead of settling for a fixed 50, while the floor of 10
+// protects tiny panes from single-row fetch loops. The server clamps to
+// the tool's max_page_size regardless of what's requested; older or other
+// clients that keep sending no limit at all still get the tools.yml
+// default, unaffected by this.
+func viewportRows(listHeight int) int {
+	return max(listHeight, 10)
+}
+
 func (m Model) onNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "esc", "q":
+	case "esc", "q", "ctrl+/", "ctrl+_":
 		// Slide back down first — the mode only actually switches once
-		// the closing spring settles (spring.go's stepOverlays).
+		// the closing spring settles (spring.go's stepOverlays). ctrl+/
+		// (and its legacy-terminal alias ctrl+_, see onChatKey) is the
+		// opener toggling itself back off — house pattern for overlay
+		// keys (ctrlk.go's "esc", "ctrl+k" does the same for ctrl+k).
 		m.mode = modeChat
 		m.notif = notificationsPanel{}
 		return m, nil

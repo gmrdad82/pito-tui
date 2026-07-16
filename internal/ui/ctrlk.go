@@ -52,17 +52,28 @@ func ctrlKCatalog(authenticated bool) []ctrlKSection {
 			{labelKey: "connect", insert: "/connect"},
 			{labelKey: "disconnect", insert: "/disconnect <@handle>"},
 			{labelKey: "import_game", insert: "import game"},
+			// search_games_for / search_games_like: label keys just landed
+			// in pito's palette locale — until the copygen mirror is
+			// re-pinned against pito 3.0.0 (queued final task), they're
+			// absent from render.PitoCopy and degrade to the insert text
+			// (ctrlKLabel's COPY LAW fallback). Deliberate, not a bug.
+			{labelKey: "search_games_for", insert: "search games for "},
+			{labelKey: "search_games_like", insert: "search games like "},
 		}},
 		{titleKey: "config", items: []ctrlKItem{
 			{labelKey: "config_ai", insert: "/config ai"},
 			{labelKey: "config_google", insert: "/config google"},
-			{labelKey: "config_voyage", insert: "/config voyage"},
 			{labelKey: "config_igdb", insert: "/config igdb"},
 			{labelKey: "config_webhook", insert: "/config webhook"},
 		}},
 		{titleKey: "conversations", items: []ctrlKItem{
 			{labelKey: "new", insert: "/new"},
 			{labelKey: "resume", insert: "/resume"},
+			// search_conversations_for / search_conversations_like: same
+			// pending copygen re-pin as the youtube section's search_games_*
+			// pair above — see that comment.
+			{labelKey: "search_conversations_for", insert: "search conversations for "},
+			{labelKey: "search_conversations_like", insert: "search conversations like "},
 		}},
 		{titleKey: "general", items: []ctrlKItem{
 			{labelKey: "help", insert: "/help"},

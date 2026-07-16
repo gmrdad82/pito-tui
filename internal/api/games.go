@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strconv"
 )
 
 // IgdbHit is one /games/search result row. Field names are pinned by the
@@ -32,9 +34,19 @@ type IgdbSearch struct {
 	ErrorMessage string
 }
 
-// SearchIGDB POSTs {query} to /games/search.
-func (c *Client) SearchIGDB(ctx context.Context, query string) (*IgdbSearch, error) {
-	resp, body, err := c.do(ctx, http.MethodPost, "/games/search", map[string]string{"query": query})
+// SearchIGDB POSTs {query} to /games/search. limit is the picker's own
+// visible row capacity — viewport-driven paging (owner 2026-07-15, the same
+// ruling behind FetchNotifications/FetchResume's limit param), sent as the
+// `limit` query param when > 0; <= 0 omits it entirely and the server falls
+// back to the tool's configured default.
+func (c *Client) SearchIGDB(ctx context.Context, query string, limit int) (*IgdbSearch, error) {
+	path := "/games/search"
+	if limit > 0 {
+		q := url.Values{}
+		q.Set("limit", strconv.Itoa(limit))
+		path += "?" + q.Encode()
+	}
+	resp, body, err := c.do(ctx, http.MethodPost, path, map[string]string{"query": query})
 	if err != nil {
 		return nil, err
 	}

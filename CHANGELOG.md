@@ -4,6 +4,80 @@ All notable changes to pito-tui are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); from 1.0.0 onward the
 project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+## [3.0.0] — 2026-07-16
+
+### Added
+
+- **ctrl+/ toggles notifications, web parity** — opens the exact overlay
+  the typed `/notifications` command does (`ctrl+_` works too — the
+  legacy alias terminals without kitty disambiguation deliver ctrl+/ as,
+  0x1F); pressing it again while the overlay is open closes it, the same
+  toggle shape ctrl+k already has. The status bar's unread chip now
+  fronts the hint itself, reading `ctrl+/ N ⚑`, so the affordance is
+  visible before you ever reach for it.
+- **Jump straight to a conversation-search hit** — Shift+J at an empty
+  prompt, right after a `search conversations for/like …` reply, opens a
+  numbered overlay of its hits: digits 1-9, ↑/↓, enter jumps, esc closes.
+  A hit already in the loaded transcript scrolls straight to its anchor
+  and drops follow mode; a hit from another conversation shows as
+  "(elsewhere)" and submits `/resume <uuid>` — the same command a click on
+  the web's conversation-name cell types+submits — instead of jumping
+  locally.
+- **Four more ctrl+k entries** — `search games for` / `search games
+  like` join the youtube section, `search conversations for` / `search
+  conversations like` join conversations. Labels land with the next
+  copygen re-pin against pito's palette locale; until then they fall
+  back to their insert text, the same COPY LAW fallback every other
+  ctrl+k label already has.
+- **F9 toggles a live frame-rate chip** — a small "NN fps" readout pinned
+  to the viewport's top-left corner, the same key and shape as pito web
+  and pitomd (cross-repo parity). The rate is measured, not simulated: a
+  self-rescheduling ~100ms tick keeps the chip breathing at a ~10fps
+  floor while idle (Bubble Tea only repaints on Update, so a genuinely
+  idle terminal would otherwise read as frozen at 0), and that same loop
+  reports whatever true rate a busier moment — typing, scrolling, a
+  streaming reply — actually achieves.
+
+### Changed
+
+- **Notifications, `/resume`, and import-game search pull a full
+  screenful now, not a fixed 50** — each panel's own visible row
+  capacity becomes the page size it requests, floored at 10 so a tiny
+  terminal never falls back to single-row fetches. The server still
+  clamps to each tool's configured maximum, so nothing new can be
+  over-fetched, and resizing between pages changes the very next page's
+  size to match.
+- **Status bar's action hints lose their doubled space** — `ctrl+f
+  footage · ctrl+k commands` replaces `ctrl+f update footage · ctrl+k
+  commands`: a new `KbdPlain` chip renderer owns no self-padding of its
+  own, instead of `KbdBare`, which was already padding a space the
+  caller was also adding.
+- **Scroll pills stop counting past ten** — the ctrl+home / ctrl+end
+  pills now read "10+ msgs before/after" once more than ten messages sit
+  out of view; counts one through ten stay exact. Mirrors the web app.
+
+### Fixed
+
+- **Rich message HTML renders as terminal styling, not raw tags** — chat
+  bodies carrying the server's colored `<span class="text-…">` spans,
+  `<pre>` ASCII/braille art, and `<br>` (e.g. the disconnect confirmation's
+  shrug art) used to print the literal markup on screen. They now convert
+  to terminal color (the `text-*` classes), preserve `<pre>`
+  whitespace/newlines, strip other tags, and unescape entities.
+- **The conversation-search hit picker's server contract, corrected before
+  ship** — `internal/api/events.go` decoded a top-level `conversation_hits`
+  array the server had already deleted by the time this client's code was
+  written, so the picker could never open (Shift+J just typed "J"). The
+  real reply (`search_conversations`, pito's
+  `lib/pito/message_builder/conversation/hits.rb`) is the generic
+  table_heading/table_rows list card every other list uses, each row
+  carrying `conversation_uuid` + `anchor_event_id`. The picker now decodes
+  that shape directly, shows the score/occurrence value in place of the
+  never-real snippet column, and a cross-conversation hit submits
+  `/resume <uuid>` for real instead of a "not wired yet" notice.
+
 ## [2.7.0] — 2026-07-15
 
 ### Added

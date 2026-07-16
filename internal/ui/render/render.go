@@ -339,6 +339,20 @@ func (r *R) replyAffordance(handle string) string {
 	return r.accent(handle) + KbdBare("shift+r", r.truecolor)
 }
 
+// shimmerRunes writes keys to b one rune at a time, each rune styled by
+// styleAt(t) where t walks the same 0.15..0.5 mid-band sample of
+// PitoShimmer — bright enough to gleam on a plum bed or bare ground, never
+// wrapping back to the dim base stop. The single gradient-math source Kbd,
+// KbdBare, and KbdPlain all sample from, so the "frozen gleam, not an
+// animated one" look can't drift between the three chip shapes.
+func shimmerRunes(b *strings.Builder, keys string, styleAt func(t float64) lipgloss.Style) {
+	runes := []rune(keys)
+	for i, ru := range runes {
+		t := 0.15 + 0.35*float64(i)/float64(max(len(runes)-1, 1))
+		b.WriteString(styleAt(t).Render(string(ru)))
+	}
+}
+
 // Kbd renders one keyboard chip — the shared shape for every keybinding
 // hint (reply affordance, the chatbox cycler hints, the modal Esc
 // chips, the status row's quit hint). Exported for the ui package's
@@ -357,11 +371,9 @@ func KbdBare(keys string, truecolor bool) string {
 	}
 	var b strings.Builder
 	b.WriteString(" ")
-	runes := []rune(keys)
-	for i, ru := range runes {
-		t := 0.15 + 0.35*float64(i)/float64(max(len(runes)-1, 1))
-		b.WriteString(lipgloss.NewStyle().Foreground(hex(PitoShimmer.At(t))).Render(string(ru)))
-	}
+	shimmerRunes(&b, keys, func(t float64) lipgloss.Style {
+		return lipgloss.NewStyle().Foreground(hex(PitoShimmer.At(t)))
+	})
 	b.WriteString(" ")
 	return b.String()
 }
@@ -373,15 +385,31 @@ func Kbd(keys string, truecolor bool) string {
 	bed := lipgloss.NewStyle().Background(ColorZebra)
 	var b strings.Builder
 	b.WriteString(bed.Render(" "))
-	runes := []rune(keys)
-	for i, ru := range runes {
-		// Sample the ramp across the chip once, mid-band colors only
-		// (0.15..0.5): bright enough to gleam on the plum bed, never
-		// wrapping back to the dim base stop.
-		t := 0.15 + 0.35*float64(i)/float64(max(len(runes)-1, 1))
-		b.WriteString(bed.Foreground(hex(PitoShimmer.At(t))).Render(string(ru)))
-	}
+	shimmerRunes(&b, keys, func(t float64) lipgloss.Style {
+		return bed.Foreground(hex(PitoShimmer.At(t)))
+	})
 	b.WriteString(bed.Render(" "))
+	return b.String()
+}
+
+// KbdPlain is KbdBare with the outer padding stripped: no leading/trailing
+// literal space, no padded bed cell on either side — just the bare
+// brand-ramp glyphs. Kbd and KbdBare both self-pad one space per side
+// (" "+keys+" " in the non-truecolor branch; padded bed cells in the
+// truecolor ones), which is the right shape for a chip dropped mid-
+// sentence but doubles up wherever the caller ALSO supplies its own
+// separator space — the status bar's doubled spacing this fixes
+// (pito-tui 3.0.0 task U1.1, owner 2026-07-15). Kbd/KbdBare keep their
+// padded shape as-is (goldens pin them); callers that own their own
+// spacing want KbdPlain instead.
+func KbdPlain(keys string, truecolor bool) string {
+	if !truecolor {
+		return lipgloss.NewStyle().Foreground(ColorDim).Render(keys)
+	}
+	var b strings.Builder
+	shimmerRunes(&b, keys, func(t float64) lipgloss.Style {
+		return lipgloss.NewStyle().Foreground(hex(PitoShimmer.At(t)))
+	})
 	return b.String()
 }
 
@@ -577,7 +605,7 @@ func (r *R) bodyText(ev api.Event) string {
 			} else if glance, ok := parseGlance(p.Body); ok {
 				headline = r.glancePanel(glance)
 			} else {
-				headline = r.paintShimmer(htmlToText(p.Body))
+				headline = r.paintShimmer(RenderMessageHTML(p.Body))
 			}
 		}
 	case p.Body != "":
@@ -672,8 +700,18 @@ func classStyle(class string) lipgloss.Style {
 		return st.Foreground(ColorWarn)
 	case strings.Contains(class, "text-cyan"):
 		return st.Foreground(ColorCyan)
-	case strings.Contains(class, "text-fg-dim"), strings.Contains(class, "text-fg-faded"):
+	case strings.Contains(class, "text-orange"):
+		return st.Foreground(ColorOrange)
+	case strings.Contains(class, "text-pito"):
+		return st.Foreground(ColorPito)
+	case strings.Contains(class, "text-fg-dim"):
+		// Checked ahead of any bare "text-fg" match (none exists today,
+		// but strings.Contains would otherwise let a future one mis-match
+		// this more specific class first) — same specific-before-general
+		// rule text-fg-faded below follows.
 		return st.Foreground(ColorDim)
+	case strings.Contains(class, "text-fg-faded"):
+		return st.Foreground(ColorFaint)
 	default:
 		return st
 	}
@@ -960,6 +998,14 @@ func (r *R) confirmation(ev api.Event) string {
 	}
 	if p.Resolved && p.OutcomeText != "" {
 		body = p.OutcomeText
+		if strings.Contains(body, "<") {
+			// The web sometimes renders outcome_text with inline pito-token
+			// spans (e.g. the channel handle in a disconnect card) — same
+			// leak the pending body just above guards against. A plain-text
+			// outcome ("Called off.") carries no "<" and skips this
+			// entirely, so it renders byte-for-byte unchanged.
+			body = r.paintShimmer(RenderMessageHTML(body))
+		}
 	}
 	content := r.stamp(ev) + lipgloss.NewStyle().Foreground(ColorWarn).Bold(true).Render("? ") + body
 	// Stats detail beneath the body, shown only while pending — the web's

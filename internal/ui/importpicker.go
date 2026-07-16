@@ -99,10 +99,18 @@ func (m Model) openImportPicker(prefill string) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(m.importSearchCmd(prefill, m.importP.gen), m.animate())
 }
 
+// importSearchCmd's limit is the picker's own visible row capacity —
+// importPickerView windows its hit list to `m.height - chrome` (chrome == 6:
+// title + rule + hint + query + help margins, see its "chrome := 6" line),
+// run through viewportRows the same way notificationsFetchCmd/fetchResumeCmd
+// do — viewport-driven paging (owner 2026-07-15). viewportRows' floor of 10
+// already exceeds the view's own 3-row minimum, so it alone decides the
+// fetch size on tiny terminals.
 func (m Model) importSearchCmd(query string, gen int) tea.Cmd {
 	client := m.client
+	limit := viewportRows(m.height - 6)
 	return func() tea.Msg {
-		res, err := client.SearchIGDB(context.Background(), query)
+		res, err := client.SearchIGDB(context.Background(), query, limit)
 		return ImportSearchedMsg{Gen: gen, Res: res, Err: err}
 	}
 }

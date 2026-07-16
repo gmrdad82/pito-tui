@@ -21,7 +21,9 @@ func FlattenHTML(fragment string) string { return htmlToText(fragment) }
 // htmlToText flattens prerendered HTML payloads ({body, html: true}) to
 // plain text: text nodes joined, block elements becoming line breaks. The
 // server renders these for the web scrollback; the TUI keeps the words and
-// drops the markup.
+// drops the markup. Its every-other-caller contract (tables/kv/detail
+// parsers across the package) stays exactly as-is — see RenderMessageHTML
+// below for the color-preserving sibling used by message bodies.
 func htmlToText(fragment string) string {
 	nodes, err := html.ParseFragment(strings.NewReader(fragment), nil)
 	if err != nil {
@@ -31,8 +33,41 @@ func htmlToText(fragment string) string {
 	for _, n := range nodes {
 		walkText(n, &b)
 	}
-	// Collapse runs of blank lines left behind by nested blocks.
-	lines := strings.Split(b.String(), "\n")
+	return collapseBlankLines(b.String())
+}
+
+// RenderMessageHTML is htmlToText's color-preserving sibling: system and
+// confirmation message bodies that never earned a structured card
+// (parseDetailCard/parseShinies/parseSimilarStrip/parseGameChannels/
+// parseGlance all fail to match) still carry the web's inline
+// `text-*` span colors and `<pre>` ASCII/braille art — plain htmlToText
+// discards both, leaking literal tags or flattening art to gray runes.
+// Shares walkTextCore with htmlToText (color=false there, true here) so
+// every other structural behavior — block newlines, section-header
+// markers, label/value grids, badges, svg alt text — stays identical;
+// only bare `<span class="text-X">` runs additionally get painted, `<br>`
+// becomes a newline (already true via blockTags), `<pre>` renders
+// verbatim-with-color (the fixed preText), and x/net/html unescapes
+// entities as it parses. Wired at render.go's default message-body branch
+// and the confirmation outcome text.
+func RenderMessageHTML(fragment string) string {
+	nodes, err := html.ParseFragment(strings.NewReader(fragment), nil)
+	if err != nil {
+		return strings.TrimSpace(fragment)
+	}
+	var b strings.Builder
+	for _, n := range nodes {
+		walkTextCore(n, &b, true)
+	}
+	return collapseBlankLines(b.String())
+}
+
+// collapseBlankLines squashes runs of blank lines left behind by nested
+// blocks down to one, and trims trailing whitespace off each line — shared
+// by htmlToText and RenderMessageHTML so both flattening entry points
+// leave identical blank-line rhythm.
+func collapseBlankLines(s string) string {
+	lines := strings.Split(s, "\n")
 	var out []string
 	blank := false
 	for _, line := range lines {
@@ -78,7 +113,24 @@ const (
 	ShinySpace = '\uE023'
 )
 
+// walkText is walkTextCore with color painting off — the shape every
+// caller outside this function used before RenderMessageHTML existed
+// (htmlToText, and the detail/glance/shinies/segments card parsers that
+// call it directly for their own cell/fragment text). Keeping this exact
+// two-argument signature means those other files — outside this task's
+// edit list — never need to change.
 func walkText(n *html.Node, b *strings.Builder) {
+	walkTextCore(n, b, false)
+}
+
+// walkTextCore is walkText's shared implementation. color=true is
+// RenderMessageHTML's message-body path: bare `<span class="text-X">`
+// runs that don't match any of the more specific cases below (badges,
+// help blocks, headers, tokens, shimmer, svg/img, grids) get painted via
+// classStyle. color=false (every other caller, via the walkText wrapper
+// above) never takes that branch, so htmlToText and its callers are
+// byte-for-byte unchanged.
+func walkTextCore(n *html.Node, b *strings.Builder, color bool) {
 	if n.Type == html.TextNode {
 		b.WriteString(strings.ReplaceAll(n.Data, "\n", " "))
 	}
@@ -110,11 +162,11 @@ func walkText(n *html.Node, b *strings.Builder) {
 					// wrap the date text in a second, nested marker
 					// sequence instead of plain text.
 					for dchild := child.FirstChild; dchild != nil; dchild = dchild.NextSibling {
-						walkText(dchild, &date)
+						walkTextCore(dchild, &date, color)
 					}
 					continue
 				}
-				walkText(child, &face)
+				walkTextCore(child, &face, color)
 			}
 			escapeSpaces := func(s string) string {
 				// Inner spaces ride ShinySpace so wrapPlain's Fields-based
@@ -149,6 +201,15 @@ func walkText(n *html.Node, b *strings.Builder) {
 			// instead, same contract as the help block above.
 			preText(n, b)
 			return
+		case n.Data == "pre":
+			// Bare <pre> blocks (ASCII/braille art) — same whitespace-
+			// preserving contract as the two pre-wrap cases above; without
+			// this case the default TextNode branch collapsed every
+			// embedded newline to a space, destroying the art. preText's
+			// element/span branch also colors any text-* spans riding
+			// along inside, so painted art keeps its color here too.
+			preText(n, b)
+			return
 		case strings.Contains(attr(n, "class"), "font-bold") &&
 			(strings.Contains(attr(n, "class"), "text-purple") || strings.Contains(attr(n, "class"), "text-yellow")):
 			// Section headers get a breath of air above them (the web's
@@ -156,7 +217,7 @@ func walkText(n *html.Node, b *strings.Builder) {
 			b.WriteString("\n\n")
 			b.WriteRune(HeaderStart)
 			for child := n.FirstChild; child != nil; child = child.NextSibling {
-				walkText(child, b)
+				walkTextCore(child, b, color)
 			}
 			b.WriteRune(HeaderEnd)
 			if blockTags[n.Data] || n.Data == "div" {
@@ -167,14 +228,14 @@ func walkText(n *html.Node, b *strings.Builder) {
 			// Reference tokens ("7d", "@handle") — cyan on the web (2.0.0).
 			b.WriteRune(TokenStart)
 			for child := n.FirstChild; child != nil; child = child.NextSibling {
-				walkText(child, b)
+				walkTextCore(child, b, color)
 			}
 			b.WriteRune(TokenEnd)
 			return
 		case strings.Contains(attr(n, "class"), "pito-subject-shimmer"):
 			b.WriteRune(ShimmerStart)
 			for child := n.FirstChild; child != nil; child = child.NextSibling {
-				walkText(child, b)
+				walkTextCore(child, b, color)
 			}
 			b.WriteRune(ShimmerEnd)
 			return
@@ -210,16 +271,33 @@ func walkText(n *html.Node, b *strings.Builder) {
 		case strings.Contains(attr(n, "class"), "grid"):
 			// Label/value grids (detail cards): the web separates the
 			// span pairs visually; the terminal gets one pair per line.
-			if pairs := gridPairs(n); pairs != "" {
+			if pairs := gridPairs(n, color); pairs != "" {
 				b.WriteString("\n" + pairs)
 				return
 			}
+		case color && strings.Contains(attr(n, "class"), "text-"):
+			// Message-body color mode only (RenderMessageHTML) — bare
+			// `<span class="text-X">` runs that reached here unmatched by
+			// every more specific case above keep their web color instead
+			// of flattening to plain runes. color is always false for
+			// walkText's callers (htmlToText and the table/kv/detail
+			// parsers across this package), so this case never fires for
+			// them — they're byte-for-byte unaffected.
+			var inner strings.Builder
+			for child := n.FirstChild; child != nil; child = child.NextSibling {
+				walkTextCore(child, &inner, color)
+			}
+			b.WriteString(classStyle(attr(n, "class")).Render(inner.String()))
+			if blockTags[n.Data] {
+				b.WriteString("\n")
+			}
+			return
 		case blockTags[n.Data]:
 			b.WriteString("\n")
 		}
 	}
 	for child := n.FirstChild; child != nil; child = child.NextSibling {
-		walkText(child, b)
+		walkTextCore(child, b, color)
 		// Adjacent inline elements with no text between them (grid
 		// neighbors, badge runs) must not glue their words together.
 		if child.Type == html.ElementNode && child.NextSibling != nil &&
@@ -233,24 +311,34 @@ func walkText(n *html.Node, b *strings.Builder) {
 }
 
 // preText extracts text preserving newlines (pre-formatted / pre-wrap
-// blocks: pito-help-block's man pages, and video/channel description and
-// tags prose). Section-header spans — the web's "text-purple font-bold" /
-// "text-yellow font-bold" — are painted to match; every other span (cyan
-// tokens, dim copy, the bare timestamp slot) stays plain runes. That's the
-// one parity gap named for help blocks (the web's colored section
-// rhythm) — not a general markup-fidelity pass.
+// blocks: pito-help-block's man pages, bare <pre> ASCII/braille art, and
+// video/channel description and tags prose). Section-header spans — the
+// web's "text-purple font-bold" / "text-yellow font-bold" — are painted
+// bold via headerSpanStyle; every other span carrying a "text-*" class
+// (cyan tokens, dim copy, orange/pito accents, art riding colored spans
+// inside a <pre>) is painted plain (no bold) via classStyle directly, so
+// colored art and inline accents keep their web color here too.
 func preText(n *html.Node, b *strings.Builder) {
 	if n.Type == html.TextNode {
 		b.WriteString(n.Data)
 		return
 	}
 	if n.Type == html.ElementNode {
-		if style, ok := headerSpanStyle(attr(n, "class")); ok {
+		class := attr(n, "class")
+		if style, ok := headerSpanStyle(class); ok {
 			var inner strings.Builder
 			for child := n.FirstChild; child != nil; child = child.NextSibling {
 				preText(child, &inner)
 			}
 			b.WriteString(style.Render(inner.String()))
+			return
+		}
+		if strings.Contains(class, "text-") {
+			var inner strings.Builder
+			for child := n.FirstChild; child != nil; child = child.NextSibling {
+				preText(child, &inner)
+			}
+			b.WriteString(classStyle(class).Render(inner.String()))
 			return
 		}
 	}
@@ -286,13 +374,16 @@ func attr(n *html.Node, name string) string {
 
 // gridPairs renders a label/value grid as aligned lines. Any element can
 // be a cell (the channel card mixes spans with an avatar <img>). Returns
-// "" when the element does not look like a pair grid.
-func gridPairs(n *html.Node) string {
+// "" when the element does not look like a pair grid. color threads
+// walkTextCore's message-body coloring into each cell (RenderMessageHTML
+// only — htmlToText's callers pass color=false via walkText's own grid
+// case, which is unaffected).
+func gridPairs(n *html.Node, color bool) string {
 	var cells []string
 	for child := n.FirstChild; child != nil; child = child.NextSibling {
 		if child.Type == html.ElementNode {
 			var cell strings.Builder
-			walkText(child, &cell)
+			walkTextCore(child, &cell, color)
 			cells = append(cells, strings.TrimSpace(cell.String()))
 		}
 	}
