@@ -4,14 +4,16 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	tea "charm.land/bubbletea/v2"
 )
 
-// ── the F9 toggle + its single-writer tick chain ─────────────────────────
+// ── the ctrl+f9 toggle + its single-writer tick chain ────────────────────
 
 // Turning the chip on must arm a fresh counter and schedule exactly one
 // tick — startFPSTick's own guard (fpsoverlay.go) is what keeps a mashed
-// f9 from ever stacking more than one live chain, but the toggle itself
-// must always kick the FIRST tick off.
+// ctrl+f9 from ever stacking more than one live chain, but the toggle
+// itself must always kick the FIRST tick off.
 func TestFPSToggleOnArmsCounterAndSchedulesTick(t *testing.T) {
 	m, _ := newTestModel(t, chatServer(t), WithNewConversation())
 	m = sized(m)
@@ -19,9 +21,9 @@ func TestFPSToggleOnArmsCounterAndSchedulesTick(t *testing.T) {
 		t.Fatalf("chip must start off: fpsOn=%v fps=%v", m.fpsOn, m.fps)
 	}
 
-	m, cmd := driveCmd(m, key("f9"))
+	m, cmd := driveCmd(m, key("ctrl+f9"))
 	if !m.fpsOn {
-		t.Error("f9 must turn the chip on")
+		t.Error("ctrl+f9 must turn the chip on")
 	}
 	if m.fps == nil {
 		t.Fatal("turning on must arm a fresh counter")
@@ -44,15 +46,15 @@ func TestFPSToggleOffDropsCounterAndLateTickDoesNotReschedule(t *testing.T) {
 	m, _ := newTestModel(t, chatServer(t), WithNewConversation())
 	m = sized(m)
 
-	m, cmd := driveCmd(m, key("f9")) // on: schedules the first tick
-	m, cmd = driveCmd(m, cmd())      // deliver it: still on, reschedules
+	m, cmd := driveCmd(m, key("ctrl+f9")) // on: schedules the first tick
+	m, cmd = driveCmd(m, cmd())           // deliver it: still on, reschedules
 	if cmd == nil || !m.fpsTicking {
 		t.Fatal("the chain must be alive before we exercise the off transition")
 	}
 
-	m, cmd = driveCmd(m, key("f9")) // off
+	m, cmd = driveCmd(m, key("ctrl+f9")) // off
 	if m.fpsOn {
-		t.Error("second f9 must turn the chip back off")
+		t.Error("second ctrl+f9 must turn the chip back off")
 	}
 	if m.fps != nil {
 		t.Error("turning off must drop the counter, not just stop counting")
@@ -73,6 +75,27 @@ func TestFPSToggleOffDropsCounterAndLateTickDoesNotReschedule(t *testing.T) {
 	}
 	if m.fpsTicking {
 		t.Error("a late tick after off must be the one to clear fpsTicking")
+	}
+}
+
+// Plain f9 is deliberately left unbound (the window manager owns it
+// globally for dictation and must never see the terminal steal it), so
+// it must be a complete no-op against the chip — never armed, never a
+// command scheduled. Built directly as tea.KeyPressMsg{Code: tea.KeyF9}
+// rather than via the key() helper: key()'s fallback for unrecognized
+// names stuffs the whole string into Text too, which makes it look like
+// printable input and takes the chat-input insertion path instead of a
+// genuine F9 press (a non-printable key, Text always empty).
+func TestFPSPlainF9IsANoOp(t *testing.T) {
+	m, _ := newTestModel(t, chatServer(t), WithNewConversation())
+	m = sized(m)
+
+	m, cmd := driveCmd(m, tea.KeyPressMsg{Code: tea.KeyF9})
+	if m.fpsOn || m.fps != nil {
+		t.Fatalf("plain f9 must not toggle the chip: fpsOn=%v fps=%v", m.fpsOn, m.fps)
+	}
+	if cmd != nil {
+		t.Error("plain f9 must not schedule any command")
 	}
 }
 

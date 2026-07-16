@@ -31,9 +31,9 @@ project follows [Semantic Versioning](https://semver.org/).
   copygen re-pin against pito's palette locale; until then they fall
   back to their insert text, the same COPY LAW fallback every other
   ctrl+k label already has.
-- **F9 toggles a live frame-rate chip** — a small "NN fps" readout pinned
-  to the viewport's top-left corner, the same key and shape as pito web
-  and pitomd (cross-repo parity). The rate is measured, not simulated: a
+- **A live frame-rate chip** — a small "NN fps" readout pinned to the
+  viewport's top-left corner, the same shape as pito web and pitomd
+  (cross-repo parity). The rate is measured, not simulated: a
   self-rescheduling ~100ms tick keeps the chip breathing at a ~10fps
   floor while idle (Bubble Tea only repaints on Update, so a genuinely
   idle terminal would otherwise read as frozen at 0), and that same loop

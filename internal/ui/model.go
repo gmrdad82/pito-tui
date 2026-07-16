@@ -105,7 +105,7 @@ type Model struct {
 	skyOn      bool
 	skyPhase   float64
 	skyTicking bool
-	// fpsOn/fpsTicking/fps drive F9's top-left "NN fps" chip
+	// fpsOn/fpsTicking/fps drive ctrl+f9's top-left "NN fps" chip
 	// (fpsoverlay.go): fpsOn is the toggle itself; fps is nil whenever
 	// it's off (zero work, no allocations) and a fresh *fpsCounter the
 	// instant it flips on; fpsTicking mirrors skyTicking's shape — the
@@ -1217,13 +1217,14 @@ func (m Model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.setFollow(true)
 		m.scrollEasing = true
 		return m, m.animate()
-	case "f9":
-		// Cross-repo parity (owner order): F9 toggles the top-left
-		// "NN fps" chip everywhere (pito web, pitomd, the tui) — same key,
-		// same behavior. Flipping either way resets the sliding window:
-		// turning on starts counting from a clean slate, turning off drops
-		// the in-flight samples rather than let them go stale for a future
-		// re-arm (fpsoverlay.go).
+	case "ctrl+f9":
+		// Owner override: plain f9 is bound globally to dictation by the
+		// window manager and never reaches the terminal, so the top-left
+		// "NN fps" chip toggle lives on ctrl+f9 only — plain f9 is left
+		// alone here on purpose, not wired to anything. Flipping either
+		// way resets the sliding window: turning on starts counting from
+		// a clean slate, turning off drops the in-flight samples rather
+		// than let them go stale for a future re-arm (fpsoverlay.go).
 		m.fpsOn = !m.fpsOn
 		m.fps = nil
 		if m.fpsOn {
@@ -2083,7 +2084,7 @@ func (m Model) viewContent() string {
 		vpBody = paintScrollNavOverlay(vpBody, top, bottom, m.contentWidth())
 	}
 	if m.fpsOn {
-		// fpsoverlay.go: F9's top-left "NN fps" chip — guarded here so an
+		// fpsoverlay.go: ctrl+f9's top-left "NN fps" chip — guarded here so an
 		// untoggled chip costs nothing (no stamp, no allocation). The
 		// stamp happens at THIS exact point, the one seam every real paint
 		// of the chat viewport passes through, so the count measures
