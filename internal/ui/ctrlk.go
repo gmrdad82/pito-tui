@@ -59,6 +59,10 @@ func ctrlKCatalog(authenticated bool) []ctrlKSection {
 			// (ctrlKLabel's COPY LAW fallback). Deliberate, not a bug.
 			{labelKey: "search_games_for", insert: "search games for "},
 			{labelKey: "search_games_like", insert: "search games like "},
+			{labelKey: "search_games_about", insert: "search games about "},
+			{labelKey: "search_vids_for", insert: "search vids for "},
+			{labelKey: "search_vids_like", insert: "search vids like "},
+			{labelKey: "search_vids_about", insert: "search vids about "},
 		}},
 		{titleKey: "config", items: []ctrlKItem{
 			{labelKey: "config_ai", insert: "/config ai"},
