@@ -6,6 +6,18 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Thinking indicators no longer stack above their own echo** — a
+  broadcast missed during a reconnect's subscribe-confirm gap (easy on a
+  starved server) came back via the re-sync merge AFTER the turn's later
+  events had already arrived live, so a turn's echo could slot in under
+  its own thinking indicator and the spinner read as a second indicator
+  stacked on the previous turn. Events now slot within their turn by the
+  server's own `position` (already on both the cable and the backfill
+  wire), so cable and re-sync deliveries always reassemble in server
+  order; position-less events keep plain arrival order.
+
 ## [3.0.0] — 2026-07-16
 
 ### Added

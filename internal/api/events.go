@@ -28,9 +28,19 @@ const (
 // decoding happens in the renderers, so decoding a page can never fail on
 // an unknown kind.
 type Event struct {
-	ID        int64           `json:"id"`
-	TurnID    int64           `json:"turn_id"`
-	Kind      string          `json:"kind"`
+	ID     int64  `json:"id"`
+	TurnID int64  `json:"turn_id"`
+	Kind   string `json:"kind"`
+	// Position is the server's per-conversation event order
+	// (Event.create_with_position!, serialized by Pito::Stream::EventJson on
+	// both the cable and the backfill). It is the ONE order that holds when
+	// the two transports interleave: a broadcast missed during a reconnect's
+	// subscribe-confirm gap arrives late via the re-sync Merge, AFTER
+	// later-positioned events already delivered live (owner screenshot
+	// 2026-07-17 02:01: a turn's echo merged in under its own thinking
+	// indicator, so the spinner read as stacked on the previous turn).
+	// Zero when a server predating the field sent the event.
+	Position  int64           `json:"position"`
 	Payload   json.RawMessage `json:"payload"`
 	CreatedAt time.Time       `json:"created_at"`
 }

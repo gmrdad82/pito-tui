@@ -58,6 +58,16 @@ func (t *Transcript) SetRenderer(render RenderFunc) {
 // Append adds an event to its turn, creating the turn block on its first
 // event (mirrors the web's turn containers). Duplicate IDs are dropped —
 // that idempotency is what makes the reconnect re-sync race-free.
+//
+// WITHIN a turn the event slots by the server's Position, not by arrival:
+// arrival order lies exactly when it matters most. A broadcast missed in a
+// reconnect's subscribe-confirm gap is recovered by the re-sync Merge —
+// AFTER the cable already delivered the turn's later events live (owner
+// screenshot 2026-07-17 02:01, starved prod: a turn's echo merged in under
+// its own thinking indicator, so the spinner rendered above its echo and
+// read as a second indicator stacked on the PREVIOUS turn). Position-less
+// events (0 — synthetic locals, servers predating the field) keep plain
+// arrival order.
 func (t *Transcript) Append(ev api.Event) {
 	if _, dup := t.byEvent[ev.ID]; dup {
 		return
@@ -68,10 +78,33 @@ func (t *Transcript) Append(ev api.Event) {
 		t.byTurn[ev.TurnID] = turn
 		t.turns = append(t.turns, turn)
 	}
-	turn.Events = append(turn.Events, ev)
-	t.byEvent[ev.ID] = eventPos{turn: turn, idx: len(turn.Events) - 1}
+	idx := turn.insertionIndex(ev)
+	turn.Events = append(turn.Events, api.Event{})
+	copy(turn.Events[idx+1:], turn.Events[idx:])
+	turn.Events[idx] = ev
+	// Reindex the shifted tail (byEvent carries each event's slot).
+	for i := idx; i < len(turn.Events); i++ {
+		t.byEvent[turn.Events[i].ID] = eventPos{turn: turn, idx: i}
+	}
 	turn.dirty = true
 	t.joinedOK = false
+}
+
+// insertionIndex finds where ev belongs in the turn: after the last event
+// that is not provably later than it. Only KNOWN positions (> 0) ever hop
+// backward over other known positions — an unknown (0) stops the walk, so
+// runs of position-less events are never reordered and the pre-Position
+// behavior (plain append) is byte-identical when nothing carries one.
+func (turn *Turn) insertionIndex(ev api.Event) int {
+	if ev.Position <= 0 {
+		return len(turn.Events)
+	}
+	for i := len(turn.Events) - 1; i >= 0; i-- {
+		if p := turn.Events[i].Position; p <= 0 || p <= ev.Position {
+			return i + 1
+		}
+	}
+	return 0
 }
 
 // Replace rewrites an event in place (event.replace — confirmations
