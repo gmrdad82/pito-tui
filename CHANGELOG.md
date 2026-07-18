@@ -6,6 +6,20 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Grammar snapshot re-pinned to pito v3.4.0** —
+  `internal/grammar/grammar.json` regenerated from the paired release's
+  `tools.yml`: `footage` is gone entirely (chat verb and its `game_detail`
+  reply target both retired on the pito side — the `update game footage`
+  form and the games list `footage` column are untouched), the reply-only
+  `apply` tool arrives (`ai_message` target, `use`/`accept` aliases — the
+  AI-answer command-staging fallback), and `schedule` (along with most
+  other video reply tools) picks up a `video_search` reply target so
+  scheduling from a search-results list works the same as from `list`.
+  Tests/docs only — the runtime binary carries no grammar knowledge either
+  way.
+
 ### Fixed
 
 - **Thinking indicators no longer stack above their own echo** — a

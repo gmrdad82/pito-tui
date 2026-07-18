@@ -57,6 +57,11 @@
           "target": "video_list",
           "mode": "append",
           "aliases": []
+        },
+        {
+          "target": "video_search",
+          "mode": "append",
+          "aliases": []
         }
       ]
     },
@@ -153,6 +158,11 @@
           "target": "video_list",
           "mode": "append",
           "aliases": []
+        },
+        {
+          "target": "video_search",
+          "mode": "append",
+          "aliases": []
         }
       ]
     },
@@ -212,6 +222,11 @@
         },
         {
           "target": "video_list",
+          "mode": "append",
+          "aliases": []
+        },
+        {
+          "target": "video_search",
           "mode": "append",
           "aliases": []
         }
@@ -318,21 +333,6 @@
       ]
     },
     {
-      "name": "footage",
-      "aliases": [],
-      "auth": "session",
-      "has_chat": true,
-      "has_slash": false,
-      "universal_reply": true,
-      "reply_targets": [
-        {
-          "target": "game_detail",
-          "mode": "append",
-          "aliases": []
-        }
-      ]
-    },
-    {
       "name": "price",
       "aliases": [],
       "auth": "session",
@@ -389,6 +389,14 @@
         },
         {
           "target": "video_list",
+          "mode": "append",
+          "aliases": [
+            "rm",
+            "del"
+          ]
+        },
+        {
+          "target": "video_search",
           "mode": "append",
           "aliases": [
             "rm",
@@ -460,6 +468,13 @@
           "aliases": [
             "pub"
           ]
+        },
+        {
+          "target": "video_search",
+          "mode": "append",
+          "aliases": [
+            "pub"
+          ]
         }
       ]
     },
@@ -478,6 +493,11 @@
         },
         {
           "target": "video_list",
+          "mode": "append",
+          "aliases": []
+        },
+        {
+          "target": "video_search",
           "mode": "append",
           "aliases": []
         }
@@ -500,14 +520,18 @@
           "target": "video_list",
           "mode": "append",
           "aliases": []
+        },
+        {
+          "target": "video_search",
+          "mode": "append",
+          "aliases": []
         }
       ]
     },
     {
       "name": "find",
       "aliases": [],
-      "auth": "session",
-      "has_chat": true,
+      "has_chat": false,
       "has_slash": false,
       "universal_reply": true,
       "reply_targets": []
@@ -572,6 +596,11 @@
           "target": "video_list",
           "mode": "append",
           "aliases": []
+        },
+        {
+          "target": "video_search",
+          "mode": "append",
+          "aliases": []
         }
       ]
     },
@@ -605,6 +634,11 @@
         },
         {
           "target": "video_list",
+          "mode": "append",
+          "aliases": []
+        },
+        {
+          "target": "video_search",
           "mode": "append",
           "aliases": []
         }
@@ -656,6 +690,11 @@
           "target": "video_list",
           "mode": "append",
           "aliases": []
+        },
+        {
+          "target": "video_search",
+          "mode": "append",
+          "aliases": []
         }
       ]
     },
@@ -700,6 +739,13 @@
         },
         {
           "target": "video_list",
+          "mode": "append",
+          "aliases": [
+            "more"
+          ]
+        },
+        {
+          "target": "video_search",
           "mode": "append",
           "aliases": [
             "more"
@@ -793,6 +839,11 @@
           "aliases": []
         },
         {
+          "target": "video_search",
+          "mode": "mutate",
+          "aliases": []
+        },
+        {
           "target": "channel_list",
           "mode": "mutate",
           "aliases": []
@@ -832,9 +883,31 @@
           "aliases": []
         },
         {
+          "target": "video_search",
+          "mode": "mutate",
+          "aliases": []
+        },
+        {
           "target": "channel_list",
           "mode": "mutate",
           "aliases": []
+        }
+      ]
+    },
+    {
+      "name": "apply",
+      "aliases": [],
+      "has_chat": false,
+      "has_slash": false,
+      "universal_reply": true,
+      "reply_targets": [
+        {
+          "target": "ai_message",
+          "mode": "append",
+          "aliases": [
+            "use",
+            "accept"
+          ]
         }
       ]
     },
@@ -912,7 +985,7 @@
       "auth": "authenticated_only",
       "has_chat": false,
       "has_slash": true,
-      "universal_reply": true,
+      "universal_reply": false,
       "reply_targets": []
     },
     {
@@ -921,7 +994,7 @@
       "auth": "authenticated_only",
       "has_chat": false,
       "has_slash": true,
-      "universal_reply": true,
+      "universal_reply": false,
       "reply_targets": []
     },
     {
@@ -930,7 +1003,7 @@
       "auth": "authenticated_only",
       "has_chat": false,
       "has_slash": true,
-      "universal_reply": true,
+      "universal_reply": false,
       "reply_targets": [
         {
           "target": "resume_missing",
@@ -947,7 +1020,7 @@
       "auth": "authenticated_only",
       "has_chat": false,
       "has_slash": true,
-      "universal_reply": true,
+      "universal_reply": false,
       "reply_targets": []
     },
     {
@@ -956,7 +1029,7 @@
       "auth": "session",
       "has_chat": true,
       "has_slash": true,
-      "universal_reply": true,
+      "universal_reply": false,
       "reply_targets": [
         {
           "target": "channel_detail",
@@ -976,7 +1049,7 @@
       "auth": "authenticated_only",
       "has_chat": false,
       "has_slash": true,
-      "universal_reply": true,
+      "universal_reply": false,
       "reply_targets": []
     },
     {
@@ -985,7 +1058,7 @@
       "auth": "authenticated_only",
       "has_chat": false,
       "has_slash": true,
-      "universal_reply": true,
+      "universal_reply": false,
       "reply_targets": []
     },
     {
@@ -994,7 +1067,7 @@
       "auth": "authenticated_only",
       "has_chat": false,
       "has_slash": true,
-      "universal_reply": true,
+      "universal_reply": false,
       "reply_targets": []
     },
     {
@@ -1005,7 +1078,7 @@
       "auth": "authenticated_only",
       "has_chat": false,
       "has_slash": true,
-      "universal_reply": true,
+      "universal_reply": false,
       "reply_targets": []
     },
     {
@@ -1014,7 +1087,7 @@
       "auth": "authenticated_only",
       "has_chat": false,
       "has_slash": true,
-      "universal_reply": true,
+      "universal_reply": false,
       "reply_targets": []
     },
     {
@@ -1023,7 +1096,7 @@
       "auth": "authenticated_only",
       "has_chat": false,
       "has_slash": true,
-      "universal_reply": true,
+      "universal_reply": false,
       "reply_targets": []
     }
   ],
@@ -1473,7 +1546,8 @@
         {
           "name": "private",
           "tokens": [
-            "private"
+            "private",
+            "draft"
           ],
           "scope": "private_unscheduled",
           "desc": "pito.copy.help.filters.vids.private"
@@ -1508,11 +1582,11 @@
         "ai",
         "tavily",
         "google",
-        "voyage",
         "igdb",
         "webhook",
         "sound",
-        "timezone"
+        "timezone",
+        "embeddings"
       ]
     },
     "connectives": {
@@ -1740,6 +1814,20 @@
       "members": [
         "slate"
       ]
+    },
+    "search_nouns": {
+      "members": [
+        "games",
+        "conversations",
+        "vids"
+      ],
+      "synonyms": {
+        "conversation": "conversations",
+        "game": "games",
+        "vid": "vids",
+        "video": "vids",
+        "videos": "vids"
+      }
     },
     "show_segments": {
       "members": [
