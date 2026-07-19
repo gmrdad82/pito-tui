@@ -207,17 +207,36 @@ func pickerView(rows []pickerRow, cursor, width, height int, now time.Time, true
 	return b.String()
 }
 
+// relativeTime is the 1:1 port of pito's Pito::Formatter::CompactTimeAgo
+// (lib/pito/formatter/compact_time_ago.rb) — same tiers, same "~" prefix,
+// same rounding (always DOWN: a just-finished event reads "~0s ago", never
+// "~1m ago"). The Ruby takes a nilable Time and returns "never" for nil;
+// its Go counterpart takes the zero time.Time as that same "no timestamp"
+// case. Ruby's `(Time.current - time).to_i` floors a non-negative float
+// delta the same way integer-dividing whole seconds does here, so the
+// straight Duration-in-seconds arithmetic below matches it exactly —
+// there's no separate floor step to port.
 func relativeTime(t, now time.Time) string {
-	d := now.Sub(t)
+	if t.IsZero() {
+		return "never"
+	}
+	seconds := int64(now.Sub(t) / time.Second)
+	if seconds < 0 {
+		seconds = 0
+	}
 	switch {
-	case d < time.Minute:
-		return "just now"
-	case d < time.Hour:
-		return fmt.Sprintf("%dm ago", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	case seconds < 60:
+		return fmt.Sprintf("~%ds ago", seconds)
+	case seconds < 3_600:
+		return fmt.Sprintf("~%dm ago", seconds/60)
+	case seconds < 86_400:
+		return fmt.Sprintf("~%dh ago", seconds/3_600)
+	case seconds < 2_592_000:
+		return fmt.Sprintf("~%dd ago", seconds/86_400)
+	case seconds < 31_536_000:
+		return fmt.Sprintf("~%dmo ago", seconds/2_592_000)
 	default:
-		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+		return fmt.Sprintf("~%dyr ago", seconds/31_536_000)
 	}
 }
 

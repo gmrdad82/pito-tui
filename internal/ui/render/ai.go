@@ -6,10 +6,14 @@
 // turn wears the AI's own chrome: a left bar that SLIDES the purple→
 // pito-blue gradient with the animation phase (aiAccentBar's static echo
 // treatment, given motion), every block the server sent in order, a
-// right-aligned model/cost badge, and the reply affordance. Two of the
-// twelve block types (score, ttb) have no painter elsewhere in the W2
-// split — small adapters here feed them into the shared ScoreBar/bar
-// primitives (bars.go) the same way detail.go's show cards do. Dispatch
+// right-aligned model/cost badge, and the reply affordance. The server
+// defines nine block types (text, kv_table, table, media, sparkline,
+// chart, score, ttb, suggestion — the `case b["type"]` in Ai::Blocks
+// #normalize, lib/ai/blocks.rb; MAX_BLOCKS=12 is the unrelated per-message
+// block COUNT cap). Two of the nine (score, ttb) have no painter
+// elsewhere in the W2 split — small adapters here feed them into the
+// shared ScoreBar/bar primitives (bars.go) the same way detail.go's show
+// cards do. Dispatch
 // never trusts a single block: an unrecognized type or an empty result
 // falls back to the raw-JSON degrade line, and a payload this client
 // can't even decode degrades exactly like any other unknown-shaped event.
@@ -112,6 +116,9 @@ func (r *R) aiDoneEvent(ev api.Event, p api.AiPayload, width int) string {
 	if model := strings.TrimSpace(p.Model); model != "" {
 		text := "✦ " + model
 		if cost := formatAiCost(p.CostAmount, p.CostCurrency); cost != "" {
+			if p.CostEstimated {
+				cost = "~" + cost // pito-computed, not a provider receipt — see formatAiCost
+			}
 			text += " · " + cost
 		}
 		right = r.dim(text)
@@ -167,7 +174,12 @@ func (r *R) aiChrome(content string) string {
 // entirely, never a bare "·". USD gets the web's attached "$0.03" look
 // (two decimals, no space); any other or unrecognized currency code
 // falls back to "<amount> <CODE>" so an unfamiliar currency still reads,
-// just without pretending to know its symbol.
+// just without pretending to know its symbol. This function never sees
+// CostEstimated — it renders a bare amount whether the number is a
+// genuine provider receipt or a pito-side estimate (stamped by the
+// server when the provider itself reported no cost, e.g. OpenCode Zen);
+// aiDoneEvent, the sole caller, is the one that tells the two apart and
+// prefixes a "~" onto this function's return when CostEstimated is set.
 func formatAiCost(amount *float64, currency string) string {
 	if amount == nil {
 		return ""

@@ -412,7 +412,12 @@ func TestAnalyzeChartsFromLivePayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := stripANSI(plain().Event(event("system", string(raw))))
+	// Pinned now (2026-07-19) matches the fixture dates' year — the "29 Jun"
+	// assertion below rides the house rule's current-year branch and would
+	// flip to "Jun '26" the day the real clock crossed into 2027.
+	fixedNow := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
+	r := New(60, WithPlain(), WithNow(func() time.Time { return fixedNow }))
+	out := stripANSI(r.Event(event("system", string(raw))))
 
 	// Charts draw in braille (the BrailleAreaChart port) — never the old
 	// solid block runes.
@@ -544,7 +549,12 @@ func TestAnalyzeVidLevelSurvivesListShapedLikesSlot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := plain().Event(event("system", string(raw)))
+	// Pinned now (2026-07-19) matches the fixture dates' year — the "29 Jun"
+	// assertion below rides the house rule's current-year branch and would
+	// flip to "Jun '26" the day the real clock crossed into 2027.
+	fixedNow := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
+	r := New(60, WithPlain(), WithNow(func() time.Time { return fixedNow }))
+	out := r.Event(event("system", string(raw)))
 	brailleVid := false
 	for _, ru := range out {
 		if ru > 0x2800 && ru <= 0x28FF {

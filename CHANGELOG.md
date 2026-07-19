@@ -4,7 +4,7 @@ All notable changes to pito-tui are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); from 1.0.0 onward the
 project follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [3.1.0] — 2026-07-19
 
 ### Changed
 
@@ -19,9 +19,95 @@ project follows [Semantic Versioning](https://semver.org/).
   scheduling from a search-results list works the same as from `list`.
   Tests/docs only — the runtime binary carries no grammar knowledge either
   way.
+- **@ai kv_table keys render in full on a wide terminal, shrink only under
+  real pressure** — the unconditional 20-cell `max-w-[20ch]` web-parity
+  cap this port shipped yesterday regressed the desktop case the very
+  next day: a long AI-authored key truncated with `…` even when the row
+  had all the room in the world. `aiKvKeyWidth` replaces the cap with a
+  width-aware allocator (owner decree): when the key plus the 3-cell
+  gutter plus at least a 10-cell value comfortably fits the available
+  width, the key renders at its full natural width, no truncation at
+  all. Only under genuine width pressure does it shrink toward
+  `aiKvKeyMaxWidth` — now a PRESSURE FLOOR, not a cap — and only by as
+  much as the value column actually needs; if the value would still
+  fall under its own 10-cell floor, the key gives up the rest down to
+  the floor and the value wraps exactly as it always did.
+- **@ai table numeric columns right-align, and every column gets a smart
+  width allocator** — pito's own table law, AI tables included: a column
+  whose non-empty body cells all read as numbers ("7,709", "2.2K", "93%"
+  — `NUMERIC_CELL` ported verbatim, quirks kept) right-aligns, header
+  cell included; prose keeps left-aligning. Column widths on an oversize
+  table are now decided by `aiTableColumnWidths`, an explicit,
+  deterministic pass run BEFORE lipgloss ever sees the table, replacing
+  lipgloss/table's own blunt total-`Width()` squeeze (which pinched
+  every column toward the median with no notion of which ones could
+  afford to give something up). Numeric columns — and any column already
+  at or under 8 cells — classify RIGID and never truncate; the rest
+  classify FLEXIBLE and absorb the whole deficit proportional to how far
+  each sits over its fair share of the remaining room, floored at 6
+  cells (or its header width if that's wider). A table whose columns
+  already fit renders untouched, byte-identical to skipping the
+  allocator entirely. Palette untouched.
+- **Right-alignment grows to three families** — a column of `#id`s
+  ("#38") or of dates (house shapes, bare times, and the frozen
+  ISO/DMY forms old payloads still carry) now right-aligns exactly like
+  a numeric column, header cell included, mirroring the web census
+  regex-for-regex; those columns also classify RIGID in the width
+  allocator — short and information-dense, they never truncate. Plain
+  kv values that read as an id, number, or date right-align within the
+  value column the same way typed values always did.
+- **Chart x-axis date ticks go year-aware, day-first** — one tick
+  formatter now serves both the @ai `chart=area` blocks and the analyze
+  surfaces: current-year ticks read `24 Feb` (the generic @ai block's
+  old month-first "Jan 2" retires), other years compress to `Jun '25` —
+  month-only with the house space, because five day-bearing ticks don't
+  fit a 42-cell braille canvas.
+- **Shiny badge dates print verbatim** — `shinyDateSuffix` stops
+  re-formatting the server's month label; the year-drop it used to do
+  client-side now lives server-side in pito's badge component, so the
+  TUI prints whatever the payload carries — single source of truth,
+  zero drift.
+- **The resume picker speaks pito's relative tongue** — `relativeTime`
+  becomes a 1:1 port of `Pito::Formatter::CompactTimeAgo`: `~3h ago` /
+  `~3d ago` through `~mo`/`~yr` tiers with the house `~` and floor
+  rounding, and a zero timestamp reads `never` — replacing the picker's
+  own invented "just now"/"3d ago" phrasing.
+- **Estimated costs wear a tilde** — when pito stamps a computed cost
+  (`cost_estimated` — the provider reported no receipt, e.g. OpenCode
+  Zen, so the server priced the tokens against the model's published
+  per-1M rates), the answer badge renders `~$0.03`; a provider-reported
+  receipt stays unmarked. Same coin, same badge, one honest character
+  of difference.
 
 ### Fixed
 
+- **@ai charts render as charts, not raw JSON** — the chart painter
+  decoded a nested `data` envelope the server never sends: `Ai::Blocks#chart`
+  flattens `bars`/`series`/`values`/`score` onto the block itself before
+  persisting, and `EventJson` ships that payload verbatim — so every
+  `chart` block (all four vizzes: bar, area, heatmap, heart) failed to
+  decode and fell through to the raw-JSON degrade dump. The TUI's own
+  fixtures encoded the same wrong nested shape, which is how the tests
+  stayed green. All four viz renderers now decode their fields flat off
+  the block (the sparkline painter always did), the fixtures match the
+  real wire, and a regression test feeds the exact owner-screen payload.
+  Wire bars carry no `color` (the model never picks colors — style stays
+  in the app): each bar now wears the house bucket ramp by position,
+  green→cyan→blue→purple→orange, mirroring the web's
+  `VizBlockComponent::BAR_RAMP`.
+- **kv_table typed dates wear the house date** — `formatAiDate` ported
+  the web's OLD pre-3.4.0 formatter (US-order, tz-ignorant "Jul 10,
+  2026") that pito replaced calling it "a real divergence bug"; it then
+  chased pito's own decree past the interim DD-MM-YYYY stamp to the
+  house shape proper: the four strict wire shapes render `19 Jul` /
+  `5 Jun '25` for date-only values (never a fabricated midnight, never
+  collapsed — a date that IS today still shows its day), and datetimes
+  collapse to bare `12:04` today, `19 Jul 12:04` this year,
+  `5 Jun '25 12:04` any other year (zone-bearing instants convert to
+  the local zone first); anything else, old lenient shapes included,
+  shows verbatim. One deliberate divergence, documented in the code:
+  Ruby calendar-overflows an invalid day ("2026-02-30" → 2 Mar), Go
+  shows it raw.
 - **Thinking indicators no longer stack above their own echo** — a
   broadcast missed during a reconnect's subscribe-confirm gap (easy on a
   starved server) came back via the re-sync merge AFTER the turn's later

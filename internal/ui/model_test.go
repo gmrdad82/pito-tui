@@ -1147,22 +1147,49 @@ func TestSpinnerTickAfterPendingDrainedStopsLoop(t *testing.T) {
 	}
 }
 
+// TestRelativeTime pins relativeTime tier-by-tier against pito's
+// Pito::Formatter::CompactTimeAgo (lib/pito/formatter/compact_time_ago.rb) —
+// every boundary below is read off the Ruby's thresholds, not carried over
+// from the Go's old "just now"/no-"~" phrasing.
 func TestRelativeTime(t *testing.T) {
-	cases := map[string]string{
-		"30s": "just now",
-		"5m":  "5m ago",
-		"3h":  "3h ago",
-		"72h": "3d ago",
+	cases := []struct {
+		name    string
+		seconds int64
+		want    string
+	}{
+		{"zero seconds", 0, "~0s ago"},
+		{"top of the seconds tier", 59, "~59s ago"},
+		{"bottom of the minutes tier", 60, "~1m ago"},
+		{"top of the minutes tier", 3_599, "~59m ago"},
+		{"bottom of the hours tier", 3_600, "~1h ago"},
+		{"top of the hours tier", 86_399, "~23h ago"},
+		{"bottom of the days tier", 86_400, "~1d ago"},
+		{"top of the days tier", 2_591_999, "~29d ago"},
+		{"bottom of the months tier", 2_592_000, "~1mo ago"},
+		{"top of the months tier", 31_535_999, "~12mo ago"},
+		{"bottom of the years tier", 31_536_000, "~1yr ago"},
+		{"deep into the years tier", 63_072_000, "~2yr ago"},
 	}
-	for in, want := range cases {
-		d, err := time.ParseDuration(in)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := relativeTime(fixedNow.Add(-d), fixedNow); got != want {
-			t.Errorf("relativeTime(-%s) = %q, want %q", in, got, want)
-		}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			d := time.Duration(c.seconds) * time.Second
+			if got := relativeTime(fixedNow.Add(-d), fixedNow); got != c.want {
+				t.Errorf("relativeTime(-%ds) = %q, want %q", c.seconds, got, c.want)
+			}
+		})
 	}
+
+	t.Run("future timestamp clamps to ~0s ago", func(t *testing.T) {
+		if got := relativeTime(fixedNow.Add(5*time.Second), fixedNow); got != "~0s ago" {
+			t.Errorf("relativeTime(future) = %q, want %q", got, "~0s ago")
+		}
+	})
+
+	t.Run("zero time.Time is never", func(t *testing.T) {
+		if got := relativeTime(time.Time{}, fixedNow); got != "never" {
+			t.Errorf("relativeTime(zero) = %q, want %q", got, "never")
+		}
+	})
 }
 
 func TestUnknownConversationFallsBackToPicker(t *testing.T) {

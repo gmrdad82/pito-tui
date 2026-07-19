@@ -112,15 +112,13 @@ type heartMetric struct {
 	Hearts  []heartEntry `json:"hearts"`
 }
 
-// commentsDateTickLayout is the x-tick date format every analyze area
-// chart actually renders in — the web's day-first "10 Mar" style
-// (Visualizers::Area#format_date's current-year branch: `date.strftime(
-// "%-d %b")`), as opposed to the generic @ai chart=area block's
-// month-first "Jan 2" default (ai_charts.go's areaDateTickLayout, which
-// analyze.go never uses — Rails' analytics cell ALWAYS drives the exact
-// same Area component, whether the metric is a breakdowns extra
-// (retention/comments) or a stash scalar (spark(), below)).
-const commentsDateTickLayout = "2 Jan"
+// Every analyze area chart — the breakdowns extras (retention/comments)
+// and every stash scalar metric via spark() alike — ticks its x-axis
+// through the SAME year-aware house rule as the generic @ai chart=area
+// block: ai_charts.go's formatDateTick, driven off r.now() with no
+// per-caller layout override (Rails' analytics cell ALWAYS drives the
+// exact same Visualizers::Area component regardless of which metric or
+// breakdown is on screen).
 
 // analyzeBarMetrics is the set of metric names that render as a bar
 // group (Pito::MessageBuilder::Analyze::Message::BAR_METRIC_KEYS).
@@ -257,9 +255,9 @@ func (r *R) analyzeMetricBody(name string, a *analyzeData, captions map[string]a
 	case name == "day_of_week_heatmap" && a.DayOfWeekHeatmap != nil:
 		return r.analyzeHeatmapBlock(a.DayOfWeekHeatmap, width), a.DayOfWeekHeatmap.Caption
 	case name == "retention" && a.Retention != nil:
-		return r.analyzeAreaBlock(a.Retention, width, areaDateTickLayout), a.Retention.Caption
+		return r.analyzeAreaBlock(a.Retention, width), a.Retention.Caption
 	case name == "comments" && a.Comments != nil:
-		return r.analyzeAreaBlock(a.Comments, width, commentsDateTickLayout), a.Comments.Caption
+		return r.analyzeAreaBlock(a.Comments, width), a.Comments.Caption
 	default:
 		m, ok := a.Stash[name]
 		if !ok || m.Slot != "charts" {
@@ -306,12 +304,13 @@ func (r *R) analyzeHeatmapBlock(d *analyzeHeatmapData, width int) string {
 // analyzeAreaBlock renders one retention/comments breakdown series via
 // the shared ticked braille engine (ai_charts.go's areaChart) — retention
 // carries no `dates`, so its x-ticks fall back to day-index (1..N)
-// automatically; comments' dates render in dateLayout ("10 Mar"-style).
-func (r *R) analyzeAreaBlock(d *analyzeAreaData, width int, dateLayout string) string {
+// automatically; comments' dates tick through the same year-aware house
+// rule (formatDateTick) as every other dated area chart.
+func (r *R) analyzeAreaBlock(d *analyzeAreaData, width int) string {
 	if d == nil || len(d.Series) == 0 {
 		return ""
 	}
-	return r.areaChart("", aiAreaData{Series: d.Series, Dates: d.Dates, Target: d.TargetDaily}, width, dateLayout)
+	return r.areaChart("", aiAreaData{Series: d.Series, Dates: d.Dates, Target: d.TargetDaily}, width)
 }
 
 // analyzeHeartsRow lays out the likes slot's hearts — one for a channel,
@@ -423,13 +422,14 @@ func formatAgeBracket(key string) string {
 // surface — app/components/pito/analytics/visualizers/sparkline.rb) — so
 // the terminal was under-drawing the stash relative to the web's real
 // per-metric widget: no y-ticks, no x-axis, at half the row count.
-// y-ticks + x-ticks (dates in the day-first style the web's Area
-// component actually renders, else day-index) come from the shared
-// engine automatically; analyzeStashPreset supplies the per-metric
-// value_format/x_axis pair (ported from Area#preset_value_format/
-// #preset_x_axis), and the total/prev/target legend line below is
-// UNCHANGED from before this pass — it's a TUI-only addition over the
-// web (no such line exists there) and stays exactly as it formatted.
+// y-ticks + x-ticks (dates in the year-aware house style — day-first
+// within the current year, month-only across a year boundary — else
+// day-index) come from the shared engine automatically; analyzeStashPreset
+// supplies the per-metric value_format/x_axis pair (ported from
+// Area#preset_value_format/#preset_x_axis), and the total/prev/target
+// legend line below is UNCHANGED from before this pass — it's a TUI-only
+// addition over the web (no such line exists there) and stays exactly as
+// it formatted.
 func (r *R) spark(name string, s analyzeSeries, width int) string {
 	format, xAxis := analyzeStashPreset(name)
 	chart := r.areaChart("", aiAreaData{
@@ -438,7 +438,7 @@ func (r *R) spark(name string, s analyzeSeries, width int) string {
 		Target: s.TargetDaily,
 		Format: format,
 		XAxis:  xAxis,
-	}, width, commentsDateTickLayout)
+	}, width)
 
 	total := trimFloat(s.Total)
 	if s.TotalPct != nil {

@@ -147,8 +147,10 @@ func walkTextCore(n *html.Node, b *strings.Builder, color bool) {
 			// to the two-segment payload exactly as before — no branching
 			// on context needed here, the source HTML already encodes
 			// compact vs extended by whether this span exists. tokens.go's
-			// paintTokens turns the raw date text into the TUI's own
-			// day-aware format (shinyDateSuffix).
+			// paintTokens prints the raw date text verbatim
+			// (shinyDateSuffix) — badge_component.rb is the single source
+			// of truth for its format (the current-year year-drop is
+			// landing there too, in the parallel web change).
 			b.WriteRune(ShinyStart)
 			b.WriteString(attr(n, "data-material"))
 			b.WriteRune(ShinySep)

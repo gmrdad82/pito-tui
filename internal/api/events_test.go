@@ -168,7 +168,7 @@ func TestDecodeAiPayload(t *testing.T) {
 					{"type": "table", "header": ["video", "views"], "rows": [["ep 12", "8.1k"], ["ep 13", "9.4k"]]},
 					{"type": "media", "entity": "vid", "id": 12, "variant": "thumb"},
 					{"type": "sparkline", "series": [1.0, 2.5, 3.2, 2.8], "label": "views/day", "series_max": 4.0},
-					{"type": "chart", "viz": "area", "data": {"series": [1, 2, 3], "dates": ["2026-07-01", "2026-07-02", "2026-07-03"]}, "label": "views"},
+					{"type": "chart", "viz": "area", "series": [1, 2, 3], "dates": ["2026-07-01", "2026-07-02", "2026-07-03"], "label": "views"},
 					{"type": "score", "value": 82, "label": "sentiment"},
 					{"type": "ttb", "levels": [{"label": "bronze", "hours": 10}, {"label": "silver", "hours": 40}], "current": {"label": "bronze", "hours": 12}, "label": "time to next badge"},
 					{"type": "suggestion", "command": "/analyze hades-2", "note": "deep dive"}
@@ -391,6 +391,35 @@ func TestDecodeAiPayload(t *testing.T) {
 				}
 				if *p.CostAmount != 0 {
 					t.Errorf("cost_amount = %v, want 0", *p.CostAmount)
+				}
+			},
+		},
+		{
+			name: "cost_estimated absent defaults false",
+			body: `{"status": "done", "blocks": [], "cost_amount": 0.03, "cost_currency": "USD"}`,
+			check: func(t *testing.T, p AiPayload) {
+				// A reported provider receipt carries no flag at all — must
+				// decode to false, not error or leave it ambiguous.
+				if p.CostEstimated {
+					t.Errorf("cost_estimated = %v, want false (absent key)", p.CostEstimated)
+				}
+			},
+		},
+		{
+			name: "cost_estimated true",
+			body: `{"status": "done", "blocks": [], "cost_amount": 0.03, "cost_currency": "USD", "cost_estimated": true}`,
+			check: func(t *testing.T, p AiPayload) {
+				if !p.CostEstimated {
+					t.Errorf("cost_estimated = %v, want true", p.CostEstimated)
+				}
+			},
+		},
+		{
+			name: "cost_estimated false",
+			body: `{"status": "done", "blocks": [], "cost_amount": 0.03, "cost_currency": "USD", "cost_estimated": false}`,
+			check: func(t *testing.T, p AiPayload) {
+				if p.CostEstimated {
+					t.Errorf("cost_estimated = %v, want false", p.CostEstimated)
 				}
 			},
 		},

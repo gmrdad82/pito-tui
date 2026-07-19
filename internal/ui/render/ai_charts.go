@@ -65,15 +65,20 @@ func (r *R) aiSparklineBlock(raw json.RawMessage, width int) string {
 // chart — dispatches on viz: area | bar | heatmap | heart.
 
 type aiChartPayload struct {
-	Viz   string          `json:"viz"`
-	Label string          `json:"label"`
-	Data  json.RawMessage `json:"data"`
+	Viz   string `json:"viz"`
+	Label string `json:"label"`
 }
 
-// aiChartBlock decodes {viz, label?, data} and hands data off to the
-// matching viz renderer. An unknown or missing viz — and a malformed
-// envelope — degrade to "" (nil-safe, per the block contract); the
-// caller's raw-JSON degrade line is what the owner actually sees.
+// aiChartBlock decodes {viz, label?, ...} and hands the WHOLE block's raw
+// bytes off to the matching viz renderer, which decodes its own subset of
+// fields straight off the top level. There is no nested "data" envelope on
+// the wire: Ai::Blocks#chart (lib/ai/blocks.rb) flattens the model's
+// {viz, data: {...}} shape into {viz, <viz's own fields>, label?} before
+// persisting, and EventJson ships that payload verbatim (lib/pito/stream/
+// event_json.rb) — so this client reads flat too. An unknown or missing
+// viz — and a malformed envelope — degrade to "" (nil-safe, per the block
+// contract); the caller's raw-JSON degrade line is what the owner actually
+// sees.
 func (r *R) aiChartBlock(raw json.RawMessage, width int) string {
 	var p aiChartPayload
 	if json.Unmarshal(raw, &p) != nil {
@@ -81,13 +86,13 @@ func (r *R) aiChartBlock(raw json.RawMessage, width int) string {
 	}
 	switch p.Viz {
 	case "area":
-		return r.aiAreaChart(p.Label, p.Data, width)
+		return r.aiAreaChart(p.Label, raw, width)
 	case "bar":
-		return r.aiBarChart(p.Label, p.Data, width)
+		return r.aiBarChart(p.Label, raw, width)
 	case "heatmap":
-		return r.aiHeatmapChart(p.Label, p.Data, width)
+		return r.aiHeatmapChart(p.Label, raw, width)
 	case "heart":
-		return r.aiHeartChart(p.Label, p.Data, width)
+		return r.aiHeartChart(p.Label, raw, width)
 	default:
 		return ""
 	}
@@ -113,37 +118,34 @@ type aiAreaData struct {
 // Rails' own generic `x_axis:` kwarg on Visualizers::Area.
 const areaXAxisPercent = "percent"
 
-// aiAreaChart renders {series, dates?, target?, format?} on the shared
-// 42×11 braille canvas (BrailleArea/paintBraille — the same engine
-// analyze.go's areaChart-backed callers drive too: the D8 breakdowns
-// extras AND every stash scalar metric via spark()), plus the web's
-// discrete tick VALUES: ~3 y-ticks stamped inside-left onto their
+// aiAreaChart renders a chart=area block's {series, dates?, target?,
+// format?, x_axis?} — flat on the block itself, no "data" envelope — on
+// the shared 42×11 braille canvas (BrailleArea/paintBraille — the same
+// engine analyze.go's areaChart-backed callers drive too: the D8
+// breakdowns extras AND every stash scalar metric via spark()), plus the
+// web's discrete tick VALUES: ~3 y-ticks stamped inside-left onto their
 // data-height row (no axis line, per pito's locked spec) and ~5 x-ticks
 // below (real dates when given, day-index otherwise, or the fixed
 // 0%→100% position axis when XAxis == areaXAxisPercent).
-func (r *R) aiAreaChart(label string, data json.RawMessage, width int) string {
+func (r *R) aiAreaChart(label string, raw json.RawMessage, width int) string {
 	var d aiAreaData
-	if json.Unmarshal(data, &d) != nil || len(d.Series) == 0 {
+	if json.Unmarshal(raw, &d) != nil || len(d.Series) == 0 {
 		return ""
 	}
-	return r.areaChart(label, d, width, areaDateTickLayout)
+	return r.areaChart(label, d, width)
 }
-
-// areaDateTickLayout is the default x-tick date format ("Jan 2") every
-// @ai chart=area block uses. analyze.go's callers all override it with
-// commentsDateTickLayout instead (the web's "10 Mar" day-first style,
-// which every Pito::Analytics::Visualizers::Area instance actually
-// renders in — breakdowns' comments chart AND every stash scalar metric
-// via spark() alike), so the layout rides as a parameter rather than a
-// second copy of the tick math.
-const areaDateTickLayout = "Jan 2"
 
 // areaChart is aiAreaChart's core, split out so analyze.go's callers —
 // the D8 breakdowns retention/comments charts and the stash's scalar
 // metrics (spark()), each decoding their own JSON shapes rather than the
 // generic aiAreaData envelope — can drive the exact same braille+ticks
-// engine instead of duplicating it.
-func (r *R) areaChart(label string, d aiAreaData, width int, dateLayout string) string {
+// engine instead of duplicating it. Every caller ticks its dates through
+// the SAME house rule (formatDateTick, keyed off r.now()) — there is no
+// more per-caller layout override; the generic @ai chart=area block and
+// every analyze surface (breakdowns' retention/comments, every stash
+// scalar via spark()) render identically, matching the web's own single
+// Visualizers::Area component underneath all of them.
+func (r *R) areaChart(label string, d aiAreaData, width int) string {
 	cellW := aiChartCols
 	if width > 0 && width < cellW {
 		cellW = width
@@ -172,7 +174,7 @@ func (r *R) areaChart(label string, d aiAreaData, width int, dateLayout string) 
 		b.WriteString(r.dim(label) + "\n")
 	}
 	b.WriteString(strings.Join(lines, "\n"))
-	if xline := layoutXTickLine(areaXTicks(d, dateLayout), cellW); xline != "" {
+	if xline := layoutXTickLine(areaXTicks(d, r.now()), cellW); xline != "" {
 		b.WriteString("\n" + r.dim(xline))
 	}
 	return b.String()
@@ -279,10 +281,10 @@ type areaXTick struct {
 // XAxis == areaXAxisPercent — checked FIRST, exactly like Rails'
 // `@x_axis == :percent` early return, so it wins regardless of series
 // length or whether dates were supplied — otherwise ~5 evenly-spaced
-// ticks (deduped by data index on short series), real dates (rendered in
-// dateLayout) when `dates` pairs 1:1 with `series`, day-index (1-based)
-// otherwise.
-func areaXTicks(d aiAreaData, dateLayout string) []areaXTick {
+// ticks (deduped by data index on short series), real dates (rendered by
+// formatDateTick, year-aware against now) when `dates` pairs 1:1 with
+// `series`, day-index (1-based) otherwise.
+func areaXTicks(d aiAreaData, now time.Time) []areaXTick {
 	if d.XAxis == areaXAxisPercent {
 		return []areaXTick{
 			{frac: 0, label: "0%"},
@@ -311,25 +313,36 @@ func areaXTicks(d aiAreaData, dateLayout string) []areaXTick {
 		seen[i] = true
 		label := strconv.Itoa(i + 1)
 		if haveDates {
-			label = formatDateTick(d.Dates[i], dateLayout)
+			label = formatDateTick(d.Dates[i], now)
 		}
 		ticks = append(ticks, areaXTick{frac: f, label: label})
 	}
 	return ticks
 }
 
-// formatDateTick renders one ISO date as a compact tick in the given Go
-// time layout ("Jan 2" for the generic @ai area chart, "2 Jan" for the
-// breakdowns comments chart's "10 Mar"-style web parity); unparseable
-// strings pass through verbatim rather than vanishing.
-func formatDateTick(s, layout string) string {
-	if t, err := time.Parse("2006-01-02", s); err == nil {
-		return t.Format(layout)
+// formatDateTick renders one ISO date as a compact, year-aware x-axis
+// tick — the house rule (owner 2026-07-19), shared by every dated area
+// chart alike: the generic @ai chart=area block AND every analyze
+// surface (breakdowns' retention/comments, every stash scalar metric via
+// spark()) — no more per-caller layout. Mirrors stamp()'s own day-aware
+// year-elision (render.go's sameYear): current year renders day-first,
+// no leading zero, abbreviated month ("2 Jan" — e.g. "24 Feb"); other
+// years drop the day entirely and lead with the month instead ("Jan '06"
+// — WITH the space before the quote, e.g. "Jun '25") since the 42-cell
+// braille canvas can't fit five day-bearing prior-year ticks the way
+// stamp()'s single inline timestamp can. Unparseable strings pass
+// through verbatim rather than vanishing.
+func formatDateTick(s string, now time.Time) string {
+	t, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		if t, err = time.Parse(time.RFC3339, s); err != nil {
+			return s
+		}
 	}
-	if t, err := time.Parse(time.RFC3339, s); err == nil {
-		return t.Format(layout)
+	if sameYear(t.Year(), now) {
+		return t.Format("2 Jan")
 	}
-	return s
+	return t.Format("Jan '06")
 }
 
 // layoutXTickLine spreads ticks across a cols-wide blank line at their
@@ -375,6 +388,10 @@ func layoutXTickLine(ticks []areaXTick, cols int) string {
 // ---------------------------------------------------------------------
 // viz=bar — 1..5 horizontal bar-group, braille ⣿ rows.
 
+// aiBar is the shared bar shape both aiBarChart (decoded off the wire,
+// which never carries "color" — see aiBarRamp) and analyze.go's
+// breakdowns (built programmatically, Color set from barPresentation's own
+// token table) feed into the shared barChart/barRow engine below.
 type aiBar struct {
 	Label      string  `json:"label"`
 	Pct        float64 `json:"pct"`
@@ -434,16 +451,28 @@ func mixRGB(a, b RGB, t float64) RGB {
 	return RGB{lerp(a.R, b.R), lerp(a.G, b.G), lerp(a.B, b.B)}
 }
 
-// aiBarChart renders {bars: [{label,pct,color,value_label?}]} (1..5,
-// extras dropped) as the web's Visualizers::Bar: 2 identical braille
-// rows per bar (1-row gaps for ≤4 bars, none at 5, vertically centred
-// on the 11-row canvas), each row fully ⣿-filled with a dim lead/tail
-// and the bar's own color riding the filled span — then a legend line
-// of "● label value_label" per bar below.
-func (r *R) aiBarChart(label string, data json.RawMessage, width int) string {
+// aiBarRamp is the house bucket ramp for @ai chart=bar blocks — mirrors
+// VizBlockComponent::BAR_RAMP (app/components/pito/event/ai/
+// viz_block_component.rb) exactly: "the model never picks colors (style
+// stays in the app)", so Ai::Blocks#chart's bar branch never puts a
+// "color" key on a wire bar in the first place — every bucket gets its
+// hue assigned HERE, by its position in the group, cycling every 5.
+var aiBarRamp = []string{"green", "cyan", "blue", "purple", "orange"}
+
+// aiBarChart renders a chart=bar block's {bars: [{label,pct,value_label?}]}
+// (1..5, extras dropped; no per-bar "color" on the wire — see aiBarRamp)
+// as the web's Visualizers::Bar: 2 identical braille rows per bar (1-row
+// gaps for ≤4 bars, none at 5, vertically centred on the 11-row canvas),
+// each row fully ⣿-filled with a dim lead/tail and the bar's ramp color
+// riding the filled span — then a legend line of "● label value_label"
+// per bar below.
+func (r *R) aiBarChart(label string, raw json.RawMessage, width int) string {
 	var d aiBarsData
-	if json.Unmarshal(data, &d) != nil || len(d.Bars) == 0 {
+	if json.Unmarshal(raw, &d) != nil || len(d.Bars) == 0 {
 		return ""
+	}
+	for i := range d.Bars {
+		d.Bars[i].Color = aiBarRamp[i%len(aiBarRamp)]
 	}
 	return r.barChart(label, d.Bars, width)
 }
@@ -654,14 +683,15 @@ type aiHeatmapData struct {
 // explicit labels.
 var heatmapWeekdayLabels = []string{"Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"}
 
-// aiHeatmapChart renders {values, labels?} (2..42 values; labels, when
+// aiHeatmapChart renders a chart=heatmap block's {values, labels?} — flat
+// on the block itself, no "data" envelope — (2..42 values; labels, when
 // given, 1:1 with values) as N equal-width, full-height braille
 // columns — every cell is ⣿, the VALUE reads only in the column's
 // color (a green↔red lerp of the set's min..max, flat data neutral at
 // the midpoint), mirroring Visualizers::Heatmap.
-func (r *R) aiHeatmapChart(label string, data json.RawMessage, width int) string {
+func (r *R) aiHeatmapChart(label string, raw json.RawMessage, width int) string {
 	var d aiHeatmapData
-	if json.Unmarshal(data, &d) != nil {
+	if json.Unmarshal(raw, &d) != nil {
 		return ""
 	}
 	return r.heatmapChart(label, d, width)
@@ -799,13 +829,14 @@ type aiHeartData struct {
 // score.
 var aiHeartTint = aiThemeRed
 
-// aiHeartChart renders {score, likes?, dislikes?} via the shared
+// aiHeartChart renders a chart=heart block's {score, likes?, dislikes?} —
+// flat on the block itself, no "data" envelope — via the shared
 // heartCanvas (heart.go, a sibling dispatch) — this file only decodes
 // the block and never draws heart glyphs itself. A missing/malformed
 // score degrades to "" rather than a fake 0% heart.
-func (r *R) aiHeartChart(label string, data json.RawMessage, width int) string {
+func (r *R) aiHeartChart(label string, raw json.RawMessage, width int) string {
 	var d aiHeartData
-	if json.Unmarshal(data, &d) != nil || d.Score == nil {
+	if json.Unmarshal(raw, &d) != nil || d.Score == nil {
 		return ""
 	}
 	pct := fmt.Sprintf("%.2f%%", *d.Score)

@@ -24,10 +24,10 @@ func TestShiniesRailsAndBadges(t *testing.T) {
 		}
 	}
 	// Shinies-lane badges are the web's EXTENDED form (metric_row_component's
-	// default, unlike the compact detail-card strip): the unlock date now
-	// rides along as a dim suffix — bare "Jun" when the badge's year matches
-	// the clock, "Jun '26" otherwise (shinyDateSuffix's stamp()-style rule).
-	// Contains("Jun") holds either way without pinning wall-clock time here.
+	// default, unlike the compact detail-card strip): the unlock date rides
+	// along as a dim suffix, printed verbatim exactly as the fixture sends
+	// it ("Jun '26" here) — shinyDateSuffix no longer reformats it locally,
+	// the year-drop lives server-side in badge_component.rb now.
 	if !strings.Contains(out, "Jun") {
 		t.Errorf("extended badges must carry their unlock date:\n%s", out)
 	}
@@ -56,12 +56,15 @@ func TestShinyBadgeComponent(t *testing.T) {
 
 // TestShinyBadgeExtendedCarriesDateCompactDoesNot exercises the FULL
 // pipeline (html.go's marker extraction -> tokens.go's paintTokens) on
-// two minimal fragments shaped exactly like the web's two badge forms
+// minimal fragments shaped exactly like the web's two badge forms
 // (badge_component.rb): a compact detail-card badge never renders a
 // __date child at all, so it must stay date-less; an extended badge
-// (shinies-tool lanes) does, and the TUI now shows it — formatted through
-// stamp()'s day-aware rule (shinyDateSuffix) rather than passed through
-// verbatim, so a same-year unlock drops the now-redundant year.
+// (shinies-tool lanes) does, and the TUI prints it verbatim — no local
+// re-formatting, single-source-of-truth rule. The year-drop badge_component
+// now does server-side (current year → "%b", other years → "%b '%y") is
+// exercised here by feeding both shapes straight through unchanged,
+// including under a clock that would have called for the OPPOSITE rule
+// under the TUI's old local re-format — proving nothing local touches it.
 func TestShinyBadgeExtendedCarriesDateCompactDoesNot(t *testing.T) {
 	withTrueColor(t)
 	// The __date span's OWN class ("pito-shiny__date block") contains the
@@ -70,7 +73,8 @@ func TestShinyBadgeExtendedCarriesDateCompactDoesNot(t *testing.T) {
 	// SECOND marker sequence inside the date segment (owner bug caught in
 	// the 2026-07-12 vhs capture: tofu glyphs bleeding into the pill), so
 	// this test checks the RENDERED TEXT EXACTLY, not just substrings.
-	extended := `<span class="pito-shiny" data-material="wood">1 Sub<span class="pito-shiny__date block">Jun &#39;26</span></span>`
+	yearless := `<span class="pito-shiny" data-material="wood">1 Sub<span class="pito-shiny__date block">Jun</span></span>`
+	yearBearing := `<span class="pito-shiny" data-material="wood">1 Sub<span class="pito-shiny__date block">Jun &#39;25</span></span>`
 	compact := `<span class="pito-shiny pito-shiny--compact" data-material="wood">1 Sub</span>`
 	requireNoMarkerRunes := func(t *testing.T, s string) {
 		t.Helper()
@@ -81,18 +85,28 @@ func TestShinyBadgeExtendedCarriesDateCompactDoesNot(t *testing.T) {
 		}
 	}
 
-	sameYearNow := time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)
-	r := New(80, WithTruecolor(true), WithNow(func() time.Time { return sameYearNow }))
+	// Pinned to the SAME year the year-bearing fixture below carries — the
+	// old local rule would have dropped "'25" here; verbatim pass-through
+	// must not.
+	now := time.Date(2025, 6, 20, 12, 0, 0, 0, time.UTC)
+	r := New(80, WithTruecolor(true), WithNow(func() time.Time { return now }))
 
-	extOut := stripANSI(r.paintTokens(FlattenHTML(extended), lipgloss.NewStyle()))
-	requireNoMarkerRunes(t, extOut)
-	// Same-year unlock: the redundant year drops, exactly "1 Sub · Jun"
-	// (padded with the pill's own leading/trailing space and edge caps).
-	if !strings.Contains(extOut, "1 Sub · Jun ") {
-		t.Errorf("extended badge must read exactly %q, got: %q", "1 Sub · Jun", extOut)
+	yearlessOut := stripANSI(r.paintTokens(FlattenHTML(yearless), lipgloss.NewStyle()))
+	requireNoMarkerRunes(t, yearlessOut)
+	// The server already sent no year: verbatim pass-through renders
+	// exactly "1 Sub · Jun" (padded with the pill's own leading/trailing
+	// space and edge caps).
+	if !strings.Contains(yearlessOut, "1 Sub · Jun ") {
+		t.Errorf("extended badge must read exactly %q, got: %q", "1 Sub · Jun", yearlessOut)
 	}
-	if strings.Contains(extOut, "'26") {
-		t.Errorf("same-year badge date must drop the year like stamp(): %q", extOut)
+
+	yearOut := stripANSI(r.paintTokens(FlattenHTML(yearBearing), lipgloss.NewStyle()))
+	requireNoMarkerRunes(t, yearOut)
+	// The server sent a year-bearing date, even though it matches r.now()'s
+	// year: verbatim pass-through must keep it exactly as sent, not re-run
+	// the old same-year elision.
+	if !strings.Contains(yearOut, "1 Sub · Jun '25 ") {
+		t.Errorf("extended badge must read exactly %q, got: %q", "1 Sub · Jun '25", yearOut)
 	}
 
 	compOut := stripANSI(r.paintTokens(FlattenHTML(compact), lipgloss.NewStyle()))
@@ -102,17 +116,6 @@ func TestShinyBadgeExtendedCarriesDateCompactDoesNot(t *testing.T) {
 	}
 	if strings.Contains(compOut, "Jun") || strings.Contains(compOut, "·") {
 		t.Errorf("compact badges must stay date-less: %q", compOut)
-	}
-
-	// A different year than "now": the qualifier is no longer redundant,
-	// so shinyDateSuffix keeps it — same rule stamp() applies to full
-	// timestamps, just at the month granularity the web actually sends.
-	otherYearNow := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
-	r2 := New(80, WithTruecolor(true), WithNow(func() time.Time { return otherYearNow }))
-	out2 := stripANSI(r2.paintTokens(FlattenHTML(extended), lipgloss.NewStyle()))
-	requireNoMarkerRunes(t, out2)
-	if !strings.Contains(out2, "1 Sub · Jun '26 ") {
-		t.Errorf("cross-year badge must read exactly %q, got: %q", "1 Sub · Jun '26", out2)
 	}
 }
 

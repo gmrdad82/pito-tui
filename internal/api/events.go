@@ -74,7 +74,11 @@ func (b *AiBlock) UnmarshalJSON(raw []byte) error {
 // "pending" while the model is still working the turn and "done" once
 // Blocks is final. CostAmount is a pointer because the server distinguishes
 // "no price yet" (nil, e.g. a pending payload or unknown-pricing model)
-// from an actual $0.00 (free model, still a settled cost).
+// from an actual $0.00 (free model, still a settled cost). CostEstimated
+// marks a cost pito computed itself because the provider reported none
+// (e.g. OpenCode Zen) rather than a genuine provider receipt; a reported
+// cost carries no flag at all, so an absent key decodes to false here
+// exactly like every other tolerant bool in this package.
 type AiPayload struct {
 	Status        string    `json:"status"`
 	Blocks        []AiBlock `json:"blocks"`
@@ -84,6 +88,7 @@ type AiPayload struct {
 	Effort        string    `json:"effort"`
 	CostAmount    *float64  `json:"cost_amount"`
 	CostCurrency  string    `json:"cost_currency"`
+	CostEstimated bool      `json:"cost_estimated"`
 	ReplyHandle   string    `json:"reply_handle"`
 	ReplyConsumed bool      `json:"reply_consumed"`
 	AnchorEventID int64     `json:"anchor_event_id"`

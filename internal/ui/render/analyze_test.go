@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -119,8 +120,13 @@ func TestAnalyzeStashPresetMatchesRailsAreaVisualizer(t *testing.T) {
 }
 
 func TestSparkRendersTheFullTickedAreaChart(t *testing.T) {
+	// Pinned now (2026-07-19) matches the fixture dates' year — the "29 Jun"
+	// assertion below rides the house rule's current-year branch and would
+	// flip to "Jun '26" the day the real clock crossed into 2027.
+	fixedNow := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
+	r := New(60, WithPlain(), WithNow(func() time.Time { return fixedNow }))
 	prev := 37.0
-	out := stripANSI(plain().spark("views", analyzeSeries{
+	out := stripANSI(r.spark("views", analyzeSeries{
 		Dates:       []string{"2026-06-29", "2026-06-30", "2026-07-01", "2026-07-02", "2026-07-03"},
 		Series:      []float64{5, 12, 3, 1, 0},
 		Total:       21,
@@ -236,7 +242,7 @@ func TestAnalyzeAreaBlockRetentionFallsBackToDayIndexTicks(t *testing.T) {
 	// retention never carries `dates` — its x-ticks must fall back to
 	// day-index (1..N), same as any @ai chart=area block with no dates.
 	d := &analyzeAreaData{Series: []float64{10, 20, 30, 40, 50}}
-	out := plain().analyzeAreaBlock(d, 60, areaDateTickLayout)
+	out := plain().analyzeAreaBlock(d, 60)
 	lines := strings.Split(out, "\n")
 	xline := lines[len(lines)-1]
 	if !strings.Contains(xline, "1") || !strings.Contains(xline, "5") {
@@ -244,24 +250,51 @@ func TestAnalyzeAreaBlockRetentionFallsBackToDayIndexTicks(t *testing.T) {
 	}
 }
 
-func TestAnalyzeAreaBlockCommentsRendersDayFirstDateTicks(t *testing.T) {
+func TestAnalyzeAreaBlockCommentsRendersDayFirstDateTicksInTheCurrentYear(t *testing.T) {
+	// Pinned now (2026-07-19) matches the fixture dates' year — the house
+	// rule's current-year branch: day-first, no leading zero, abbreviated
+	// month ("10 Mar"-style).
+	fixedNow := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
+	r := New(60, WithPlain(), WithNow(func() time.Time { return fixedNow }))
 	d := &analyzeAreaData{
 		Series: []float64{1, 2, 3, 4, 5},
 		Dates:  []string{"2026-03-10", "2026-03-11", "2026-03-12", "2026-03-13", "2026-03-14"},
 	}
-	out := plain().analyzeAreaBlock(d, 60, commentsDateTickLayout)
+	out := r.analyzeAreaBlock(d, 60)
 	lines := strings.Split(out, "\n")
 	xline := lines[len(lines)-1]
 	if !strings.Contains(xline, "10 Mar") {
-		t.Errorf("comments dates must render day-first (\"10 Mar\"-style): %q", xline)
+		t.Errorf("comments dates must render day-first (\"10 Mar\"-style) in the current year: %q", xline)
+	}
+}
+
+func TestAnalyzeAreaBlockCommentsPriorYearRendersMonthOnlyTicks(t *testing.T) {
+	// A year boundary: the fixture's dates fall in 2025 while "now" is
+	// 2026 — the house rule's other-year branch drops the day entirely
+	// and leads with month + space + 2-digit year ("Mar '25"), since the
+	// 42-cell canvas can't fit five day-bearing prior-year ticks.
+	fixedNow := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
+	r := New(60, WithPlain(), WithNow(func() time.Time { return fixedNow }))
+	d := &analyzeAreaData{
+		Series: []float64{1, 2, 3, 4, 5},
+		Dates:  []string{"2025-03-10", "2025-03-11", "2025-03-12", "2025-03-13", "2025-03-14"},
+	}
+	out := r.analyzeAreaBlock(d, 60)
+	lines := strings.Split(out, "\n")
+	xline := lines[len(lines)-1]
+	if !strings.Contains(xline, "Mar '25") {
+		t.Errorf("prior-year comments x-ticks must render month-only (\"Mar '25\", with the space): %q", xline)
+	}
+	if strings.Contains(xline, "10 Mar") {
+		t.Errorf("prior-year x-ticks must never carry a day: %q", xline)
 	}
 }
 
 func TestAnalyzeAreaBlockEmptySeriesDegradesToNoData(t *testing.T) {
-	if out := plain().analyzeAreaBlock(nil, 60, areaDateTickLayout); out != "" {
+	if out := plain().analyzeAreaBlock(nil, 60); out != "" {
 		t.Errorf("a nil breakdown must degrade to \"\" (pending/no-data), got %q", out)
 	}
-	if out := plain().analyzeAreaBlock(&analyzeAreaData{}, 60, areaDateTickLayout); out != "" {
+	if out := plain().analyzeAreaBlock(&analyzeAreaData{}, 60); out != "" {
 		t.Errorf("an empty series must degrade to \"\" (pending/no-data), got %q", out)
 	}
 }
@@ -325,7 +358,12 @@ func TestAnalyzeBreakdownsChannelRendersEveryExtra(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := stripANSI(plain().Event(event("enhanced", string(raw))))
+	// Pinned now (2026-07-19) matches the fixture dates' year — the "10 Mar"
+	// assertion below rides the house rule's current-year branch and would
+	// flip to "Mar '26" the day the real clock crossed into 2027.
+	fixedNow := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
+	r := New(60, WithPlain(), WithNow(func() time.Time { return fixedNow }))
+	out := stripANSI(r.Event(event("enhanced", string(raw))))
 	assertBrailleOnly(t, out)
 
 	for _, want := range []string{

@@ -1,7 +1,6 @@
 package render
 
 import (
-	"strconv"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -307,26 +306,15 @@ const shinyCompactMax = 12
 // the non-truecolor static pill (which this flag never changes).
 const shinyGlowEnabled = true
 
-// shinyDateSuffix adapts the web's coarse unlock date onto stamp()'s
-// day-aware rule. badge_component.rb only ever sends
-// unlocked_on.strftime("%b '%y") — "Jun '26", no day-of-month — so unlike
-// stamp()'s full "6 Jul" / "2 Jan '25", the rule bottoms out at month
-// granularity: same year as now, drop the now-redundant year ("Jun");
-// otherwise keep it ("Jun '26"). Anything that doesn't parse as that
-// shape passes through verbatim — a badge must never fail to render over
-// a date format surprise (package rule: novelty never crashes).
+// shinyDateSuffix prints the web's unlock date exactly as it arrives —
+// single-source-of-truth rule: a pre-formatted payload string prints
+// verbatim, the TUI never re-derives it. This used to drop the year
+// itself when it matched stamp()'s "now" (mirroring stamp()'s day-aware
+// rule at month granularity); that year-drop is moving server-side into
+// badge_component.rb (current year → "%b", other years → "%b '%y" — until
+// that lands the web still sends "%b '%y" for every year), and
+// re-formatting here would only risk drifting out of sync with it.
 func (r *R) shinyDateSuffix(webDate string) string {
-	mon, yy, ok := strings.Cut(webDate, " '")
-	if !ok || len(yy) != 2 {
-		return webDate
-	}
-	yyNum, err := strconv.Atoi(yy)
-	if err != nil {
-		return webDate
-	}
-	if sameYear(2000+yyNum, r.now()) {
-		return mon
-	}
 	return webDate
 }
 

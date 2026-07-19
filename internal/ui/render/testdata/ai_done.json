@@ -13,12 +13,10 @@
     {"type": "suggestion", "command": "show game 12", "note": "top pick"},
     {"type": "suggestion", "command": "ls games with genre RPG"},
     {"type": "sparkline", "series": [1, 2, 3, 4, 5], "label": "views/day"},
-    {"type": "chart", "viz": "bar", "label": "Completion split", "data": {
-      "bars": [
-        {"label": "Main", "pct": 60, "color": "green"},
-        {"label": "Extras", "pct": 40, "color": "blue"}
-      ]
-    }},
+    {"type": "chart", "viz": "bar", "label": "Completion split", "bars": [
+      {"label": "Main", "pct": 60},
+      {"label": "Extras", "pct": 40}
+    ]},
     {"type": "score", "value": 94, "label": "Metacritic"},
     {"type": "ttb", "label": "Time to beat", "levels": [
       {"label": "Main", "hours": 31},

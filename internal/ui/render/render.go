@@ -304,10 +304,10 @@ func (r *R) stamp(ev api.Event) string {
 }
 
 // sameYear is the day-aware rule stamp() keys its year-elision off — true
-// once year no longer needs spelling out because it matches now's. Shared
-// with tokens.go's shinyDateSuffix (the shiny badge's unlock date), which
-// mirrors this exact rule at month granularity (the web sends no day for
-// badge dates, only "Mon 'YY").
+// once year no longer needs spelling out because it matches now's. (No
+// longer shared with tokens.go's shinyDateSuffix: the shiny badge's
+// unlock-date year-drop is moving server-side into badge_component.rb,
+// so shinyDateSuffix now just prints the web's date verbatim.)
 func sameYear(year int, now time.Time) bool {
 	return year == now.Year()
 }

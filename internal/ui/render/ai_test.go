@@ -30,7 +30,7 @@ func TestAiEventFullFixtureRendersEveryBlockInOrder(t *testing.T) {
 	// order the fixture lists them.
 	markers := []string{
 		"great pick for your backlog", // text
-		"Feb 25, 2022",                // kv_table (typed date value)
+		"25 Feb '22",                  // kv_table (typed date value)
 		"Hades II",                    // table
 		"top pick",                    // suggestion #1's note
 		"ls games with genre RPG",     // suggestion #2's command
@@ -187,6 +187,34 @@ func TestAiEventCostNilOmitsTheDotSegment(t *testing.T) {
 	}
 	if strings.Contains(out, "·") {
 		t.Errorf("a nil cost must drop the \"·\" segment entirely:\n%s", out)
+	}
+}
+
+func TestAiEventEstimatedCostPrefixesTilde(t *testing.T) {
+	payload := `{"status":"done","blocks":[{"type":"text","text":"x"}],
+		"model":"claude-sonnet-5","cost_amount":0.03,"cost_currency":"USD","cost_estimated":true}`
+	out := plain().aiEvent(event("ai", payload))
+	if !strings.Contains(out, "✦ claude-sonnet-5 · ~$0.03") {
+		t.Errorf("an estimated cost must render \"~$0.03\":\n%s", out)
+	}
+}
+
+func TestAiEventReportedCostOmitsTilde(t *testing.T) {
+	// cost_estimated false and cost_estimated absent must render
+	// byte-identically — neither is a provider-estimated cost.
+	for _, payload := range []string{
+		`{"status":"done","blocks":[{"type":"text","text":"x"}],
+			"model":"claude-sonnet-5","cost_amount":0.03,"cost_currency":"USD","cost_estimated":false}`,
+		`{"status":"done","blocks":[{"type":"text","text":"x"}],
+			"model":"claude-sonnet-5","cost_amount":0.03,"cost_currency":"USD"}`,
+	} {
+		out := plain().aiEvent(event("ai", payload))
+		if !strings.Contains(out, "✦ claude-sonnet-5 · $0.03") {
+			t.Errorf("a reported cost must render \"$0.03\" unchanged:\n%s", out)
+		}
+		if strings.Contains(out, "~") {
+			t.Errorf("a reported cost must never carry the estimate tilde:\n%s", out)
+		}
 	}
 }
 
