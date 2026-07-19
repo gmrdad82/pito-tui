@@ -4,6 +4,34 @@ All notable changes to pito-tui are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); from 1.0.0 onward the
 project follows [Semantic Versioning](https://semver.org/).
 
+## [3.2.0] — 2026-07-19
+
+### Added
+
+- **Shift+U stages the latest AI suggestion** — at an empty prompt, the
+  key finds the newest @ai answer's last suggestion block and stages its
+  command into the input, cursor parked — the TUI twin of the web's
+  Shift+U (which clicks the accept chip). No suggestion anywhere, or a
+  non-empty input, and "U" just types — the same type-through contract
+  Shift+J and Shift+R keep.
+- **The completion palette wraps long help** — a tool description that
+  outran the row used to be clipped mid-sentence; it now word-wraps onto
+  continuation rows indented to the description column, budgeted by
+  visual rows so the overlay never outgrows the viewport (the selected
+  item always shows in full; tiny terminals keep the old single-line
+  clip rather than degenerate wrapping).
+- **The @ai completion row names its model in orange** — the server's
+  additive `model` field marks the answering model, painted `ColorOrange`
+  (selected rows keep the orange visible), composing with the new
+  wrapping wherever the split falls. Mid-batch the mention moved homes on
+  the server — from the description sentence into the LABEL itself
+  (`@ai(claude-sonnet-5)`, the owner's "I know who I'm sending to" form)
+  — and the painting followed: the label's model span wears the orange,
+  label-width math accounts for the longer painted label, and the
+  description path stays contract-tolerant for whatever a server sends.
+  Old servers without the field render exactly as before; an unconfigured
+  server simply never offers the @ai row at all.
+
 ## [3.1.0] — 2026-07-19
 
 ### Changed

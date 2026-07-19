@@ -30,7 +30,7 @@ import (
 	"github.com/gmrdad82/pito-tui/internal/api"
 )
 
-//go:generate env PITO_REF=v2.0.0 go run github.com/gmrdad82/pito-tui/tools/copygen
+//go:generate env PITO_REF=v3.6.0 go run github.com/gmrdad82/pito-tui/tools/copygen
 
 //go:embed pito_copy.json
 var pitoCopyJSON []byte

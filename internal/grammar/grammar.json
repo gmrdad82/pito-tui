@@ -563,6 +563,66 @@
       "universal_reply": true,
       "reply_targets": [
         {
+          "target": "game_list",
+          "mode": "append",
+          "aliases": []
+        },
+        {
+          "target": "video_list",
+          "mode": "append",
+          "aliases": []
+        },
+        {
+          "target": "channel_list",
+          "mode": "append",
+          "aliases": []
+        },
+        {
+          "target": "channel_detail",
+          "mode": "append",
+          "aliases": []
+        },
+        {
+          "target": "video_detail",
+          "mode": "append",
+          "aliases": []
+        },
+        {
+          "target": "game_detail",
+          "mode": "append",
+          "aliases": []
+        },
+        {
+          "target": "channel_games",
+          "mode": "append",
+          "aliases": []
+        },
+        {
+          "target": "game_channels",
+          "mode": "append",
+          "aliases": []
+        },
+        {
+          "target": "game_similar",
+          "mode": "append",
+          "aliases": []
+        },
+        {
+          "target": "game_linked_videos",
+          "mode": "append",
+          "aliases": []
+        },
+        {
+          "target": "analyze_message",
+          "mode": "append",
+          "aliases": []
+        },
+        {
+          "target": "analytics_glance",
+          "mode": "append",
+          "aliases": []
+        },
+        {
           "target": "ai_message",
           "mode": "append",
           "aliases": []

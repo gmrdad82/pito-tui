@@ -456,4 +456,16 @@ type Suggestion struct {
 	Description string `json:"description"`
 	Insert      string `json:"insert"`
 	Masked      bool   `json:"masked"`
+	// Model is the active model id (e.g. "claude-sonnet-5") — ADDITIVE,
+	// present only on the @ai item when a model is configured; every
+	// other item and an unconfigured @ai item omit it, decoding to "".
+	// Since the label-parens contract, Label itself already arrives
+	// interpolated as "@ai(<model>)" and Description is back to the
+	// plain sentence — this field exists so the client can locate that
+	// substring inside Label (the description carve-out stays as a
+	// tolerant fallback for older servers) and paint it orange; a client
+	// that ignores it still renders the plain, correct label. Old
+	// servers that never send "model", or send it without wrapping the
+	// label in parens, decode and render fine either way.
+	Model string `json:"model"`
 }

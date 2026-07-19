@@ -1277,6 +1277,18 @@ func (m Model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.refreshViewport()
 				return m, nil
 			}
+		case "U":
+			// Shift+U at an empty prompt (web parity, #stageLatestSuggestion):
+			// stage the newest ai answer's latest suggested command —
+			// found → same fill-and-ready-to-send treatment as Shift+R's
+			// single-handle case; none → the "U" types through below, the
+			// same no-match fallthrough as "R"/"J".
+			if command, ok := m.transcript.LatestSuggestion(); ok {
+				m.input.SetValue(command)
+				m.input.CursorEnd()
+				m.suggest = nil
+				return m, tea.Batch(m.suggestCmd(), m.animate())
+			}
 		case "J":
 			// Shift+J at an empty prompt: the conversation-search jump
 			// affordance (hitpicker.go, pito-tui 3.0.0 U2.3) — live only
@@ -1989,7 +2001,43 @@ var (
 	dotOK       = lipgloss.NewStyle().Foreground(render.ColorOK).Render("■")
 	dotWarn     = lipgloss.NewStyle().Foreground(render.ColorWarn).Render("■")
 	dotErr      = lipgloss.NewStyle().Foreground(render.ColorErr).Render("■")
+	// paletteModelStyle paints a menu item's model-id mention (the
+	// server-declared Suggestion.Model substring) orange — the
+	// model-mention wire contract's TUI half, web's text-orange twin.
+	// Since the label-parens contract, the mention lives inside the
+	// LABEL ("@ai(claude-sonnet-5)"); paletteAccentSpan also still
+	// carves it out of the Description when it finds it there, so an
+	// old server that puts the model back in the sentence still paints
+	// correctly. Plain foreground, no bold, same recipe as classStyle's
+	// "text-orange" case (render.go) so the mention reads the same
+	// everywhere pito paints it.
+	paletteModelStyle = lipgloss.NewStyle().Foreground(render.ColorOrange)
 )
+
+// paletteAccentSpan renders one chunk of text (a label, a whole
+// description, or one already-wrapped line of a description) against
+// base, carving out and re-styling the item's Model substring — if any —
+// in accent. Composes styled FRAGMENTS (base/accent/base) rather than
+// styling the whole chunk and patching over it, so the accent is never
+// clobbered by a later blanket restyle (scrollnav.go's precedent).
+// model == "" or no match in this particular chunk (it may have landed
+// in a different field or a different wrapped line, or the item carries
+// no model at all) falls straight through to plain base-only rendering —
+// byte-identical to a chunk that never went through this function, which
+// is what keeps old-server (no Model, or Model absent from this text)
+// rendering unchanged. Shared by both the label (the model-mention wire
+// contract's current home) and the description (its former home, kept
+// contract-tolerant rather than deleted) — one mechanism, two chunks.
+func paletteAccentSpan(chunk, model string, base, accent lipgloss.Style) string {
+	if model == "" {
+		return base.Render(chunk)
+	}
+	idx := strings.Index(chunk, model)
+	if idx < 0 {
+		return base.Render(chunk)
+	}
+	return base.Render(chunk[:idx]) + accent.Render(chunk[idx:idx+len(model)]) + base.Render(chunk[idx+len(model):])
+}
 
 // View satisfies tea.Model. Bubble Tea v2's declarative View() replaces the
 // v1 tea.WithAltScreen() program option — AltScreen now lives on the
@@ -2199,6 +2247,13 @@ const paletteMax = 6
 
 // paletteView renders the server-driven suggestion menu above the prompt
 // (the web's ctrl+k palette, inlined). Selected row wears the accent bar.
+// A description too long for its column wraps onto continuation rows
+// indented under the description column, styled as one block with its
+// item — the whole thing is still an OVERLAY (overlayBottom, micro.go)
+// painted onto scrollerView's fixed-height output, so the total rows
+// emitted here are budgeted against the viewport, never just the item
+// count: an overlay taller than its base clips from its own TOP, which
+// would eat the footer and the topmost rows first, not the bottom.
 func (m Model) paletteView() string {
 	if m.suggest == nil || len(m.suggest.MenuItems) == 0 || m.mode != modeChat {
 		return ""
@@ -2217,20 +2272,128 @@ func (m Model) paletteView() string {
 		}
 	}
 	sel := lipgloss.NewStyle().Foreground(render.ColorAccent).Bold(true)
-	var b strings.Builder
-	for i := start; i < end; i++ {
+
+	// The description column starts after the 2 marker cells, the
+	// label (padded to labelWidth), and the "  " gap — continuation
+	// rows indent to this same offset so wrapped text hangs under the
+	// description, not the marker.
+	descOffset := 2 + labelWidth + 2
+	descWidth := m.contentWidth() - descOffset
+	// A column under ~10 cells makes word-wrap pathological (one or two
+	// letters a line) — a tiny terminal falls back to today's single
+	// hard-clipped line instead.
+	wrap := descWidth >= 10
+	plainIndent := strings.Repeat(" ", descOffset)
+	barIndent := sel.Render("▌ ") + strings.Repeat(" ", max(descOffset-2, 0))
+
+	// itemLines renders one item as its full visual block: the marker
+	// + label + description row, plus any wrapped continuation rows.
+	// Selected-row styling (the accent bar) carries down every row of
+	// the block, not just the first, so a wrapped selected item still
+	// reads as one highlighted unit.
+	itemLines := func(i int) []string {
 		it := items[i]
-		marker, label := "  ", it.Label
-		if i == m.suggestSel {
-			marker = sel.Render("▌ ")
-			label = sel.Render(it.Label)
+		marker, labelBase := "  ", lipgloss.NewStyle()
+		selected := i == m.suggestSel
+		if selected {
+			marker, labelBase = sel.Render("▌ "), sel
 		}
+		// The label wears no style (unselected) or the accent bar's bold
+		// sel style (selected) — same as before this feature. The
+		// label-parens contract ("@ai(<model>)") puts the model-mention
+		// wire contract's substring inside the label now, so it carves
+		// out into paletteModelStyle (orange) here too, on either row,
+		// via the same fragment-composition mechanism the description
+		// below uses — an unmatched or absent Model falls straight
+		// through to plain labelBase.Render(it.Label), byte-identical to
+		// today's rendering (old servers, and every non-@ai item).
+		label := paletteAccentSpan(it.Label, it.Model, labelBase, paletteModelStyle)
 		pad := strings.Repeat(" ", labelWidth-lipgloss.Width(it.Label))
-		line := marker + label + pad
-		if it.Description != "" {
-			line += statusStyle.Render("  " + it.Description)
+		first := marker + label + pad
+		clip := func(s string) string { return lipgloss.NewStyle().MaxWidth(m.contentWidth()).Render(s) }
+		if it.Description == "" {
+			return []string{clip(first)}
 		}
-		b.WriteString(lipgloss.NewStyle().MaxWidth(m.contentWidth()).Render(line) + "\n")
+		// Descriptions wear statusStyle (dim) whether or not the row is
+		// selected — selection only ever restyles the marker/label above,
+		// never the description column — so that IS "the selection
+		// style" here. The model-mention wire contract now lives in the
+		// label (above), and the server sends the description already
+		// interpolated with no model substring in it — but an old server
+		// that still puts the model in the sentence carves out into
+		// paletteModelStyle (orange) here too via paletteAccentSpan, so
+		// this path stays contract-tolerant rather than a dead no-op.
+		if !wrap {
+			return []string{clip(first + paletteAccentSpan("  "+it.Description, it.Model, statusStyle, paletteModelStyle))}
+		}
+		wrapped := render.WrapPlain(it.Description, descWidth)
+		lines := make([]string, 0, len(wrapped))
+		lines = append(lines, clip(first+paletteAccentSpan("  "+wrapped[0], it.Model, statusStyle, paletteModelStyle)))
+		cont := plainIndent
+		if selected {
+			cont = barIndent
+		}
+		for _, w := range wrapped[1:] {
+			// The model id is a single word-wrap token (no spaces), so it
+			// lands entirely on ONE emitted line — never split across a
+			// wrap boundary — meaning per-line substring matching (style
+			// AFTER wrap, not before) is sufficient; a line that doesn't
+			// carry the substring just falls through paletteAccentSpan's
+			// idx < 0 branch to plain statusStyle, same as before.
+			lines = append(lines, clip(cont+paletteAccentSpan(w, it.Model, statusStyle, paletteModelStyle)))
+		}
+		return lines
+	}
+
+	groups := make([][]string, end-start)
+	for i := start; i < end; i++ {
+		groups[i-start] = itemLines(i)
+	}
+
+	// Row budget: items + continuations + the footer must fit inside
+	// the viewport the overlay paints over. paletteMax items at one row
+	// each (the pre-wrap footprint) plus the footer is the soft target;
+	// a short terminal tightens it further. Trim whole items — never a
+	// mid-block split — off whichever end of the window is farther from
+	// suggestSel, so the selected item's block always survives intact.
+	const footerRows = 1
+	rowBudget := paletteMax + footerRows
+	if vp := m.chatViewportHeight(); vp < rowBudget {
+		rowBudget = vp
+	}
+	if rowBudget < footerRows+1 {
+		rowBudget = footerRows + 1 // always room for the selected item + footer
+	}
+	lo, hi := start, end
+	rows := func() int {
+		n := 0
+		for i := lo; i < hi; i++ {
+			n += len(groups[i-start])
+		}
+		return n
+	}
+	for hi-lo > 1 && rows()+footerRows > rowBudget {
+		if lo < m.suggestSel {
+			lo++
+		} else {
+			hi--
+		}
+	}
+	// Pathological case: even the lone selected item's own block outgrows
+	// the budget (a very long description in a very short terminal) —
+	// truncate its continuation rows rather than let the overlay outgrow
+	// the viewport it's meant to sit inside.
+	if hi-lo == 1 {
+		if cap := rowBudget - footerRows; cap >= 1 && len(groups[lo-start]) > cap {
+			groups[lo-start] = groups[lo-start][:cap]
+		}
+	}
+
+	var b strings.Builder
+	for i := lo; i < hi; i++ {
+		for _, line := range groups[i-start] {
+			b.WriteString(line + "\n")
+		}
 	}
 	footer := statusStyle.Render("tab complete · ↑/↓ move · esc dismiss")
 	if hint := m.suggest.Ghost.NextHint; hint != "" {

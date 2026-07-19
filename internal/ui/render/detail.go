@@ -517,6 +517,12 @@ func (r *R) kvRows(pairs [][2]string, width int, zebra bool) string {
 	return strings.Join(rows, "\n")
 }
 
+// WrapPlain is wrapPlain's exported door — the ui package's suggestion
+// palette (continuation rows for a wrapped description) needs the exact
+// same word-wrap this package already uses internally four times over;
+// a thin wrapper beats a duplicated copy living in package ui.
+func WrapPlain(text string, width int) []string { return wrapPlain(text, width) }
+
 // wrapPlain word-wraps plain text to width; words longer than a line
 // stand alone (the bar's own wrap would shear them anyway).
 func wrapPlain(text string, width int) []string {

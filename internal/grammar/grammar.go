@@ -20,7 +20,7 @@
 // when pairing with a newer pito release; don't let it drift silently.
 package grammar
 
-//go:generate env PITO_REF=v3.4.0 go run github.com/gmrdad82/pito-tui/tools/toolsgen
+//go:generate env PITO_REF=v3.6.0 go run github.com/gmrdad82/pito-tui/tools/toolsgen
 
 import (
 	_ "embed"

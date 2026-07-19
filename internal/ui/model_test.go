@@ -1523,6 +1523,346 @@ func TestPaletteNeverResizesTheViewport(t *testing.T) {
 	}
 }
 
+// A description too long for its column wraps onto a continuation row
+// indented to the description column (2 marker cells + labelWidth + the
+// "  " gap) — not the marker column, and it carries no marker/label of
+// its own.
+func TestPaletteWrapsLongDescriptionToContinuationRow(t *testing.T) {
+	m, _ := newTestModel(t, suggestionsServer(t), WithConversation("u1"))
+	m = sized(m) // width 80
+	longDesc := strings.Repeat("word ", 30)
+	m.suggest = &api.Suggestions{MenuItems: []api.Suggestion{
+		{Label: "a", Description: "short"},
+		{Label: "channels", Description: longDesc},
+	}}
+	m.suggestSel = 0 // "channels" is NOT selected — plain-space indent, easiest to assert exactly
+
+	view := ansi.Strip(m.paletteView())
+	lines := strings.Split(view, "\n")
+	if len(lines) < 4 {
+		t.Fatalf("expected item0 row + item1 first row + >=1 continuation + footer, got %d lines:\n%s", len(lines), view)
+	}
+	if !strings.Contains(lines[1], "channels") {
+		t.Fatalf("lines[1] should be the wrapped item's first row, got %q", lines[1])
+	}
+	// labelWidth = len("channels") = 8 → descOffset = 2 + 8 + 2 = 12.
+	const descOffset = 12
+	cont := lines[2]
+	indent := strings.Repeat(" ", descOffset)
+	if !strings.HasPrefix(cont, indent) {
+		t.Errorf("continuation row not indented to the description column (%d cells): %q", descOffset, cont)
+	}
+	if rest := strings.TrimPrefix(cont, indent); rest == "" || strings.HasPrefix(rest, " ") {
+		t.Errorf("continuation row should carry no marker/label — text starts right at the description column: %q", cont)
+	}
+	if strings.Contains(cont, "channels") {
+		t.Errorf("continuation row must carry no label of its own: %q", cont)
+	}
+}
+
+// The selected item's block — including every wrapped continuation
+// row — must survive the row-budget trim even when other items get
+// dropped to make room.
+func TestPaletteSelectedLongItemStaysFullyVisible(t *testing.T) {
+	m, _ := newTestModel(t, suggestionsServer(t), WithConversation("u1"))
+	m = sized(m) // width 80, height 24 → chatViewportHeight() well above paletteMax+1
+	items := make([]api.Suggestion, 6)
+	for i := range items {
+		items[i] = api.Suggestion{Label: fmt.Sprintf("zero%d", i)}
+	}
+	// The selected item's description is long enough to wrap several
+	// rows, and its LAST word is a unique tail marker — if the tail
+	// marker survives, the whole wrapped block survived.
+	items[5].Label = "selected"
+	items[5].Description = strings.Repeat("word ", 40) + "TAILMARKER"
+	m.suggest = &api.Suggestions{MenuItems: items}
+	m.suggestSel = 5
+
+	view := m.paletteView()
+	if !strings.Contains(view, "selected") {
+		t.Fatal("selected item's label must render")
+	}
+	if !strings.Contains(view, "TAILMARKER") {
+		t.Error("selected item's LAST wrapped row was dropped — the block was truncated instead of trimming other items")
+	}
+	if !strings.Contains(view, "tab complete") {
+		t.Error("footer must still render alongside the selected item's wrapped block")
+	}
+}
+
+// Row budget: items + continuations + the footer must never exceed the
+// viewport the overlay paints over, even with 6 items all wrapping —
+// fewer items get shown rather than clipped rows.
+func TestPaletteRowBudgetCapsWithSixLongItems(t *testing.T) {
+	m, _ := newTestModel(t, suggestionsServer(t), WithConversation("u1"))
+	m = sized(m) // width 80, height 24
+	longDesc := strings.Repeat("word ", 20)
+	items := make([]api.Suggestion, 6)
+	for i := range items {
+		items[i] = api.Suggestion{Label: fmt.Sprintf("item%d", i), Description: longDesc}
+	}
+	m.suggest = &api.Suggestions{MenuItems: items}
+	m.suggestSel = 3
+
+	view := ansi.Strip(m.paletteView())
+	lines := strings.Split(view, "\n")
+	if got := len(lines); got > paletteMax+1 {
+		t.Errorf("palette emitted %d rows, want <= paletteMax+1 (%d)", got, paletteMax+1)
+	}
+	if got := len(lines); got > m.chatViewportHeight() {
+		t.Fatalf("palette rows (%d) exceed the viewport (%d) — overlayBottom would clip its own top", got, m.chatViewportHeight())
+	}
+	if !strings.Contains(view, "item3") {
+		t.Error("selected item must stay visible even under a tight row budget")
+	}
+	if shown := strings.Count(view, "item"); shown >= len(items) {
+		t.Errorf("expected the row budget to trim below all %d items when every one wraps, got %d shown", len(items), shown)
+	}
+	if !strings.Contains(view, "tab complete") {
+		t.Error("footer must still render")
+	}
+}
+
+// A description column under ~10 cells (a tiny terminal) makes word-wrap
+// pathological — fall back to today's single hard-clipped line instead
+// of wrapping into single-letter rows.
+func TestPaletteNarrowWidthFallsBackToSingleLineClip(t *testing.T) {
+	m, _ := newTestModel(t, suggestionsServer(t), WithConversation("u1"))
+	m = drive(m, tea.WindowSizeMsg{Width: 20, Height: 24})
+	m.suggest = &api.Suggestions{MenuItems: []api.Suggestion{
+		{Label: "channels", Description: strings.Repeat("word ", 30)},
+	}}
+	m.suggestSel = 0
+
+	view := ansi.Strip(m.paletteView())
+	lines := strings.Split(view, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 1 clipped item row + footer, got %d lines:\n%s", len(lines), view)
+	}
+	if w := lipgloss.Width(lines[0]); w > m.contentWidth() {
+		t.Errorf("item row not clipped to contentWidth: %d > %d", w, m.contentWidth())
+	}
+}
+
+// The model-mention wire contract's TUI half: the @ai item's Model
+// substring inside its already-interpolated Description paints orange
+// (render.ColorOrange, 256-color "215" off truecolor) — a fragment
+// composed alongside the surrounding dim description text, not a
+// blanket restyle.
+const paletteOrangeOpen = "\x1b[38;5;215m"
+
+func TestPaletteModelMentionPaintedOrange(t *testing.T) {
+	m, _ := newTestModel(t, suggestionsServer(t), WithConversation("u1"))
+	m = sized(m)
+	m.suggest = &api.Suggestions{MenuItems: []api.Suggestion{
+		{Label: "@ai", Description: "ask claude-sonnet-5 anything", Model: "claude-sonnet-5"},
+	}}
+	m.suggestSel = 0 // unselected — the "channels" test's easiest-to-assert row
+
+	view := m.paletteView()
+	want := paletteOrangeOpen + "claude-sonnet-5\x1b[m"
+	if !strings.Contains(view, want) {
+		t.Errorf("model mention not painted orange:\nwant substring: %q\ngot view:\n%s", want, view)
+	}
+	if got := ansi.Strip(view); !strings.Contains(got, "ask claude-sonnet-5 anything") {
+		t.Errorf("stripped view lost description text: %q", got)
+	}
+}
+
+// No Model field (the every-other-item, and the no-model-configured @ai
+// fallback, cases) must render BYTE-IDENTICAL to the pre-feature
+// rendering: plain statusStyle over the whole description, no orange
+// anywhere.
+func TestPaletteNoModelFieldByteIdenticalToPlainRendering(t *testing.T) {
+	m, _ := newTestModel(t, suggestionsServer(t), WithConversation("u1"))
+	m = sized(m)
+	desc := "ask the assistant anything"
+	m.suggest = &api.Suggestions{MenuItems: []api.Suggestion{
+		{Label: "@ai", Description: desc}, // Model left zero-valued ("")
+	}}
+	m.suggestSel = 1 // nothing selected among the one item
+
+	got := m.paletteView()
+	if strings.Contains(got, paletteOrangeOpen) {
+		t.Errorf("no-model item must never paint orange: %s", got)
+	}
+	labelWidth := lipgloss.Width("@ai")
+	first := "  " + "@ai" + strings.Repeat(" ", labelWidth-lipgloss.Width("@ai"))
+	want := lipgloss.NewStyle().MaxWidth(m.contentWidth()).Render(first+statusStyle.Render("  "+desc)) + "\n" +
+		statusStyle.Render("tab complete · ↑/↓ move · esc dismiss")
+	if got != want {
+		t.Errorf("no-model rendering diverged from plain statusStyle rendering:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+// A Model that doesn't actually occur in Description (a mismatched or
+// stale value) must render plain — no crash, no partial/garbled paint.
+func TestPaletteModelSubstringMissingRendersPlain(t *testing.T) {
+	m, _ := newTestModel(t, suggestionsServer(t), WithConversation("u1"))
+	m = sized(m)
+	m.suggest = &api.Suggestions{MenuItems: []api.Suggestion{
+		{Label: "@ai", Description: "ask the assistant anything", Model: "claude-sonnet-5"},
+	}}
+	m.suggestSel = 0
+
+	view := m.paletteView()
+	if strings.Contains(view, paletteOrangeOpen) {
+		t.Errorf("Model with no match in Description must not paint orange: %s", view)
+	}
+	if got := ansi.Strip(view); !strings.Contains(got, "ask the assistant anything") {
+		t.Errorf("description text lost: %q", got)
+	}
+}
+
+// The selected row restyles the marker/label with the accent, but the
+// description column keeps wearing its own style (statusStyle, dim) —
+// today's behavior, unchanged by this feature — so the model span must
+// still carve out into orange on a selected row exactly as it does on an
+// unselected one; the accent bar must not swallow it.
+func TestPaletteModelMentionSelectedRowStaysOrange(t *testing.T) {
+	m, _ := newTestModel(t, suggestionsServer(t), WithConversation("u1"))
+	m = sized(m)
+	m.suggest = &api.Suggestions{MenuItems: []api.Suggestion{
+		{Label: "@ai", Description: "ask claude-sonnet-5 anything", Model: "claude-sonnet-5"},
+	}}
+	m.suggestSel = 0 // the only item — selected
+
+	view := m.paletteView()
+	want := paletteOrangeOpen + "claude-sonnet-5\x1b[m"
+	if !strings.Contains(view, want) {
+		t.Errorf("selected row must keep the model span orange:\nwant substring: %q\ngot view:\n%s", want, view)
+	}
+}
+
+// A description long enough to wrap, where the model id lands on a
+// CONTINUATION line rather than the first — per-line substring matching
+// (style after wrap) must still find and paint it there.
+func TestPaletteModelMentionOnContinuationLine(t *testing.T) {
+	m, _ := newTestModel(t, suggestionsServer(t), WithConversation("u1"))
+	m = sized(m) // width 80
+	desc := strings.Repeat("filler ", 20) + "claude-sonnet-5 is the active model"
+	m.suggest = &api.Suggestions{MenuItems: []api.Suggestion{
+		{Label: "@ai", Description: desc, Model: "claude-sonnet-5"},
+	}}
+	m.suggestSel = 0
+
+	view := m.paletteView()
+	lines := strings.Split(view, "\n")
+	firstOrange := -1
+	for i, line := range lines {
+		if strings.Contains(line, paletteOrangeOpen) {
+			firstOrange = i
+			break
+		}
+	}
+	if firstOrange < 0 {
+		t.Fatalf("model mention never painted orange across wrapped lines:\n%s", view)
+	}
+	if firstOrange == 0 {
+		t.Errorf("expected the model id to land on a continuation line (filler pushed it past line 0), got line %d", firstOrange)
+	}
+	if got := ansi.Strip(view); !strings.Contains(got, "claude-sonnet-5 is the active model") {
+		t.Errorf("continuation text lost: %q", got)
+	}
+}
+
+// The label-parens contract: the model-mention wire contract's substring
+// moved into the LABEL ("@ai(<model>)"); Description is back to the plain
+// sentence with no model in it. paletteAccentSpan is the same mechanism
+// TestPaletteModelMentionPaintedOrange already proved on Description —
+// these four cover it on Label.
+
+func TestPaletteLabelModelMentionPaintedOrange(t *testing.T) {
+	m, _ := newTestModel(t, suggestionsServer(t), WithConversation("u1"))
+	m = sized(m)
+	m.suggest = &api.Suggestions{MenuItems: []api.Suggestion{
+		{Label: "@ai(claude-sonnet-5)", Description: "ask the assistant anything", Model: "claude-sonnet-5"},
+	}}
+	m.suggestSel = 1 // nothing selected — the label's plain (unstyled) branch
+
+	view := m.paletteView()
+	want := paletteOrangeOpen + "claude-sonnet-5\x1b[m"
+	if !strings.Contains(view, want) {
+		t.Errorf("label model mention not painted orange:\nwant substring: %q\ngot view:\n%s", want, view)
+	}
+	if n := strings.Count(view, paletteOrangeOpen); n != 1 {
+		t.Errorf("expected exactly one orange span (the label's — the plain description carries no model), got %d: %s", n, view)
+	}
+	if got := ansi.Strip(view); !strings.Contains(got, "@ai(claude-sonnet-5)") || !strings.Contains(got, "ask the assistant anything") {
+		t.Errorf("label or description text lost: %q", got)
+	}
+}
+
+// The selected row restyles the label with the accent bar's bold sel
+// style, but the model span must still carve out into orange — same
+// rule TestPaletteModelMentionSelectedRowStaysOrange proved for
+// Description — so the accent bar never swallows the mention.
+func TestPaletteLabelModelMentionSelectedRowStaysOrange(t *testing.T) {
+	m, _ := newTestModel(t, suggestionsServer(t), WithConversation("u1"))
+	m = sized(m)
+	m.suggest = &api.Suggestions{MenuItems: []api.Suggestion{
+		{Label: "@ai(claude-sonnet-5)", Description: "ask the assistant anything", Model: "claude-sonnet-5"},
+	}}
+	m.suggestSel = 0 // the only item — selected
+
+	view := m.paletteView()
+	want := paletteOrangeOpen + "claude-sonnet-5\x1b[m"
+	if !strings.Contains(view, want) {
+		t.Errorf("selected row must keep the label's model span orange:\nwant substring: %q\ngot view:\n%s", want, view)
+	}
+	if got := ansi.Strip(view); !strings.Contains(got, "@ai(claude-sonnet-5)") {
+		t.Errorf("stripped view lost the label text: %q", got)
+	}
+}
+
+// An old server that still sends the plain "@ai" label (whether or not
+// it also sends Model, e.g. mid-migration or a server still painting the
+// model into Description per the earlier contract) must render the
+// label byte-identical to today: "claude-sonnet-5" never occurs inside
+// "@ai", so paletteAccentSpan's idx < 0 branch falls straight through to
+// plain, unstyled label rendering.
+func TestPaletteOldServerPlainLabelByteIdentical(t *testing.T) {
+	m, _ := newTestModel(t, suggestionsServer(t), WithConversation("u1"))
+	m = sized(m)
+	m.suggest = &api.Suggestions{MenuItems: []api.Suggestion{
+		{Label: "@ai", Description: "ask claude-sonnet-5 anything", Model: "claude-sonnet-5"},
+	}}
+	m.suggestSel = 1 // nothing selected — the label's plain (unstyled) branch
+
+	got := m.paletteView()
+	labelWidth := lipgloss.Width("@ai")
+	wantLabel := "  " + "@ai" + strings.Repeat(" ", labelWidth-lipgloss.Width("@ai"))
+	if !strings.HasPrefix(got, wantLabel) {
+		t.Errorf("plain \"@ai\" label rendering diverged from today's:\ngot view:\n%s\nwant prefix: %q", got, wantLabel)
+	}
+}
+
+// labelWidth (the padding every row's description column aligns to) must
+// account for the FULL label text, parens and model id included — a
+// shorter item's label pads out to the longer "@ai(<model>)" label's
+// width, not the old bare "@ai" width.
+func TestPaletteLabelWidthAccountsForModelParens(t *testing.T) {
+	m, _ := newTestModel(t, suggestionsServer(t), WithConversation("u1"))
+	m = sized(m)
+	m.suggest = &api.Suggestions{MenuItems: []api.Suggestion{
+		{Label: "@ai(claude-sonnet-5)", Description: "ask the assistant anything", Model: "claude-sonnet-5"},
+		{Label: "channels", Description: "list your channels"},
+	}}
+	m.suggestSel = 0
+
+	got := ansi.Strip(m.paletteView())
+	lines := strings.Split(got, "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected at least 2 item lines: %v", lines)
+	}
+	longLabel := "@ai(claude-sonnet-5)"
+	labelWidth := lipgloss.Width(longLabel)
+	wantLine := "  channels" + strings.Repeat(" ", labelWidth-lipgloss.Width("channels")) + "  list your channels"
+	if lines[1] != wantLine {
+		t.Errorf("shorter label not padded to the longer (paren-inclusive) label width:\n got: %q\nwant: %q", lines[1], wantLine)
+	}
+}
+
 func TestAvatarCellsVanishEverywhere(t *testing.T) {
 	// Owner call: no stand-in glyphs, no phantom column — avatar cells
 	// disappear from tables on every terminal.
@@ -2293,6 +2633,88 @@ func TestShiftRPrefillsTheLiveHandle(t *testing.T) {
 	m = next.(Model)
 	if m.input.Value() != "R" {
 		t.Fatalf("all-consumed must type through, got %q", m.input.Value())
+	}
+}
+
+// TestShiftUStagesLatestSuggestionOrTypesThrough mirrors
+// TestShiftRPrefillsTheLiveHandle's shape: U at an empty prompt is a no-op
+// affordance unless the newest ai answer carries a usable suggestion, and
+// every no-match/gated case must let the keystroke type through (or type
+// normally, for the non-empty-input case) untouched, never silently eat it.
+func TestShiftUStagesLatestSuggestionOrTypesThrough(t *testing.T) {
+	m, _ := newTestModel(t, http.NotFoundHandler(), WithConversation("u-1"))
+	m = sized(m)
+
+	// Empty transcript: no ai event at all, so U types through.
+	next, _ := m.Update(tea.KeyPressMsg{Code: 'U', Text: "U"})
+	m = next.(Model)
+	if m.input.Value() != "U" {
+		t.Fatalf("with no suggestions U must type through, got %q", m.input.Value())
+	}
+	m.input.Reset()
+
+	// The newest ai event carries one suggestion block → staged verbatim.
+	m.transcript.Append(api.Event{ID: 1, TurnID: 1, Kind: api.KindAi, Payload: []byte(`{
+		"status": "done",
+		"blocks": [
+			{"type": "text", "text": "Here's a pick."},
+			{"type": "suggestion", "command": "show game 12", "note": "top pick"}
+		]
+	}`)})
+	next, _ = m.Update(tea.KeyPressMsg{Code: 'U', Text: "U"})
+	m = next.(Model)
+	if m.input.Value() != "show game 12" {
+		t.Fatalf("shift+U must stage the suggestion verbatim, got %q", m.input.Value())
+	}
+	m.input.Reset()
+
+	// Several suggestions in the same payload → the LAST one wins (old
+	// answers predating 3.4.0's one-per-answer cap).
+	m.transcript.Replace(api.Event{ID: 1, TurnID: 1, Kind: api.KindAi, Payload: []byte(`{
+		"status": "done",
+		"blocks": [
+			{"type": "suggestion", "command": "show game 12"},
+			{"type": "suggestion", "command": "ls games with genre RPG"}
+		]
+	}`)})
+	next, _ = m.Update(tea.KeyPressMsg{Code: 'U', Text: "U"})
+	m = next.(Model)
+	if m.input.Value() != "ls games with genre RPG" {
+		t.Fatalf("several suggestions must resolve last-wins, got %q", m.input.Value())
+	}
+	m.input.Reset()
+
+	// A newer, non-ai event riding after the answer must not hide it —
+	// the backward scan skips it, mirroring LiveHandles' own robustness.
+	m.transcript.Append(api.Event{ID: 2, TurnID: 2, Kind: "system", Payload: []byte(`{"text":"pong"}`)})
+	next, _ = m.Update(tea.KeyPressMsg{Code: 'U', Text: "U"})
+	m = next.(Model)
+	if m.input.Value() != "ls games with genre RPG" {
+		t.Fatalf("a newer non-ai event must not hide the suggestion, got %q", m.input.Value())
+	}
+	m.input.Reset()
+
+	// Non-empty input: U types normally, the staging gate never fires even
+	// though a live suggestion exists.
+	m.input.SetValue("x")
+	m.input.CursorEnd()
+	next, _ = m.Update(tea.KeyPressMsg{Code: 'U', Text: "U"})
+	m = next.(Model)
+	if m.input.Value() != "xU" {
+		t.Fatalf("with input already present U must type normally, got %q", m.input.Value())
+	}
+	m.input.Reset()
+
+	// The newest ai event carries no suggestion block at all → types
+	// through, same as the empty-transcript case above.
+	m.transcript.Replace(api.Event{ID: 1, TurnID: 1, Kind: api.KindAi, Payload: []byte(`{
+		"status": "done",
+		"blocks": [{"type": "text", "text": "nothing to run"}]
+	}`)})
+	next, _ = m.Update(tea.KeyPressMsg{Code: 'U', Text: "U"})
+	m = next.(Model)
+	if m.input.Value() != "U" {
+		t.Fatalf("with no suggestions U must type through, got %q", m.input.Value())
 	}
 }
 

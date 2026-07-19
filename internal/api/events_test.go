@@ -768,3 +768,43 @@ func TestResumeFixtureDecodes(t *testing.T) {
 		t.Error("last_activity_at did not parse")
 	}
 }
+
+// TestSuggestionModelFieldDecodes pins the model-mention wire contract's
+// client half: the @ai menu item gains an ADDITIVE optional "model"
+// field, absent on every other item and absent when no model is
+// configured — old servers that never send it, and menu items that never
+// carry it, must decode to "" without error either way.
+func TestSuggestionModelFieldDecodes(t *testing.T) {
+	cases := []struct {
+		name      string
+		body      string
+		wantModel string
+	}{
+		{
+			name:      "ai item with a configured model",
+			body:      `{"label":"@ai","description":"ask claude-sonnet-5 anything","insert":"@ai ","model":"claude-sonnet-5"}`,
+			wantModel: "claude-sonnet-5",
+		},
+		{
+			name:      "ai item, no model configured — field absent",
+			body:      `{"label":"@ai","description":"ask the assistant anything","insert":"@ai "}`,
+			wantModel: "",
+		},
+		{
+			name:      "non-ai item — field never present, old server shape",
+			body:      `{"label":"/config","description":"open settings","insert":"/config"}`,
+			wantModel: "",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var s Suggestion
+			if err := json.Unmarshal([]byte(c.body), &s); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if s.Model != c.wantModel {
+				t.Errorf("Model = %q, want %q", s.Model, c.wantModel)
+			}
+		})
+	}
+}

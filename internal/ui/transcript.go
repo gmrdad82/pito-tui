@@ -432,3 +432,61 @@ func (t *Transcript) LiveHandles() []LiveHandle {
 	}
 	return nil
 }
+
+// LatestSuggestion reports the newest ai event's LAST suggestion block's
+// command, ok=false when none — Shift+U's gate (onChatKey's empty-prompt
+// block), the TUI's stand-in for the web's #stageLatestSuggestion
+// (chat_form_controller.js): the web clicks the LAST
+// `[data-pito-use-widget-fill]` button anywhere in the scrollback, and
+// since only an ai payload's suggestion blocks ever render that widget,
+// the last one in DOM order is always the newest ai event's last
+// suggestion block — this walks straight to the same answer from decoded
+// events instead of the DOM. Events are scanned newest-first, turn by
+// turn — like LiveHandles, not LatestEvent alone — so a newer non-ai
+// event (a plain echo or system reply riding after the answer) never
+// hides it. A blank command (mirrors render.aiSuggestionBlock's own
+// skip) doesn't count as a suggestion.
+func (t *Transcript) LatestSuggestion() (string, bool) {
+	for i := len(t.turns) - 1; i >= 0; i-- {
+		events := t.turns[i].Events
+		for j := len(events) - 1; j >= 0; j-- {
+			ev := events[j]
+			if ev.Kind != api.KindAi {
+				continue
+			}
+			payload, err := api.DecodeAiPayload(ev.Payload)
+			if err != nil {
+				return "", false
+			}
+			return lastSuggestionCommand(payload.Blocks)
+		}
+	}
+	return "", false
+}
+
+// lastSuggestionCommand walks blocks for "suggestion"-typed entries and
+// returns the LAST one's trimmed command — old answers (pre-3.4.0's
+// one-suggestion-per-answer cap) may carry several, and last wins, same
+// as the web's DOM-order "last widget" pick.
+func lastSuggestionCommand(blocks []api.AiBlock) (string, bool) {
+	var cmd string
+	found := false
+	for _, b := range blocks {
+		if b.Type != "suggestion" {
+			continue
+		}
+		var p struct {
+			Command string `json:"command"`
+		}
+		if json.Unmarshal(b.Raw, &p) != nil {
+			continue
+		}
+		trimmed := strings.TrimSpace(p.Command)
+		if trimmed == "" {
+			continue
+		}
+		cmd = trimmed
+		found = true
+	}
+	return cmd, found
+}
