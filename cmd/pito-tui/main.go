@@ -53,7 +53,7 @@ func parseFlags(fs *flag.FlagSet, args []string) (*cliFlags, error) {
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), `usage: pito-tui [flags] [conversation-uuid]
        pito-tui config [key=value ...]   show or update the config
-                                         (keys: server, sounds, conversation)
+                                         (keys: server, sounds, conversation, fx.*)
        pito-tui version                  print version and exit
        pito-tui --tour                   play a scripted demo, then hand back control
        pito-tui --resume <uuid-or-name>  resume an existing conversation directly

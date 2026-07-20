@@ -38,9 +38,10 @@ func fpsTick() tea.Cmd {
 
 // startFPSTick begins the chip's own idle-nudge loop — a no-op if the
 // chip is off or a chain is already running (mirrors ambient.go's
-// startSky/skyTicking shape exactly: the boolean is set here, the ONE
-// place that clears it again is onFPSTick itself, so there is never more
-// than one live chain rescheduling regardless of how fast f9 is mashed).
+// startHeartbeat/heartbeatTicking shape exactly: the boolean is set here,
+// the ONE place that clears it again is onFPSTick itself, so there is
+// never more than one live chain rescheduling regardless of how fast f9
+// is mashed).
 func (m *Model) startFPSTick() tea.Cmd {
 	if !m.fpsOn || m.fpsTicking {
 		return nil
@@ -52,7 +53,7 @@ func (m *Model) startFPSTick() tea.Cmd {
 // onFPSTick reschedules itself while the chip stays on; the instant f9
 // turns it off, this is the single authoritative point that lets the
 // chain die (one more harmless tick after toggling off, exactly like
-// onSkyTick's own lazy stop).
+// onHeartbeatTick's own lazy stop).
 func (m Model) onFPSTick() (tea.Model, tea.Cmd) {
 	if !m.fpsOn {
 		m.fpsTicking = false

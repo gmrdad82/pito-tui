@@ -77,7 +77,18 @@ type Model struct {
 	glamourStyle string
 	truecolor    bool
 	renderer     *render.R
-	shimmer      map[int64]bool // turns with shimmer-marked words (animate forever)
+	// shimmer holds the turns whose events need the FAST 16ms chain:
+	// pending @ai replies, unresolved thinking/confirmation lines. The
+	// gate closes the moment they all resolve — resolved work moves to
+	// the ambient map below (or leaves animation entirely).
+	shimmer map[int64]bool
+	// ambient holds the turns whose finished content still animates —
+	// done-@ai gradient bars and shimmer-marked shiny words. They ride
+	// the ambient heartbeat (ambient.go) instead of holding the fast
+	// chain open: through 3.2.0 one finished @ai reply kept a second
+	// 16ms chain alive for the process lifetime (the owner's 103%-CPU
+	// background tab, 2026-07-21).
+	ambient map[int64]bool
 	// revealing tracks freshly-arrived events whose charts/bars grow in
 	// (the web's pito-bar-reveal): eventID → one harmonica spring state
 	// (position + velocity), replacing a birth-time + fixed-duration ease
@@ -97,18 +108,40 @@ type Model struct {
 	// scrollEasing: a follow-mode glide toward the bottom is in flight
 	// (easeTowardBottom) — holds the animation gate open until it lands.
 	scrollEasing bool
-	// skyPhase/skyTicking: the star sky's own slow drift (ambient.go) —
-	// deliberately OFF the fast gate so it breathes even at rest. skyOn
-	// is WithStarSky's setting (NewModel defaults it true; the test
-	// harness forces false — braille stars read as thumb/chart glyphs to
-	// frame-scanning assertions).
-	skyOn      bool
-	skyPhase   float64
-	skyTicking bool
+	// skyPhase/heartbeatTicking/hbInterval: the ambient heartbeat
+	// (ambient.go) — the ONE slow loop driving the star sky's drift and
+	// the ambient class, deliberately OFF the fast gate. skyOn is
+	// WithStarSky's setting — the [fx] sky knob's landing point (NewModel
+	// defaults it true; the test harness forces false — braille stars
+	// read as thumb/chart glyphs to frame-scanning assertions).
+	// hbInterval is the interval the live chain was last scheduled with
+	// (the phase step scales by it, so throttling never changes the
+	// sky's wall-clock speed).
+	skyOn            bool
+	skyPhase         float64
+	heartbeatTicking bool
+	hbInterval       time.Duration
+	// focused mirrors the terminal's focus reports (tea.FocusMsg/
+	// BlurMsg; View sets ReportFocus). Initialized TRUE and only ever
+	// changed by an actual report — terminals that never report focus
+	// (GNU screen, unconfigured tmux, the Linux console) keep their fx
+	// forever: fail-safe to focused by construction.
+	focused bool
+	// lastActivity is the activity clock behind the heartbeat's idle
+	// ladder (ambient.go's heartbeatPlan): stamped by every keystroke,
+	// mouse event, resize, cable delivery, and focus-in.
+	lastActivity time.Time
+	// fx tuning — the [fx] config table (WithFxTuning; defaults in
+	// NewModel match config.defaults()): pause-on-blur, the idle grace
+	// window, the idle-throttle fps, and the deep-idle park (0 = never).
+	fxPauseOnBlur bool
+	fxIdleGrace   time.Duration
+	fxIdleFPS     int
+	fxDeepIdle    time.Duration
 	// fpsOn/fpsTicking/fps drive ctrl+f9's top-left "NN fps" chip
 	// (fpsoverlay.go): fpsOn is the toggle itself; fps is nil whenever
 	// it's off (zero work, no allocations) and a fresh *fpsCounter the
-	// instant it flips on; fpsTicking mirrors skyTicking's shape — the
+	// instant it flips on; fpsTicking mirrors heartbeatTicking's shape — the
 	// one authoritative flag the tick loop itself (never the toggle)
 	// clears, so there is never more than one live chain rescheduling.
 	fpsOn      bool
@@ -289,10 +322,43 @@ func WithConversation(uuid string) Option {
 	}
 }
 
-// WithStarSky toggles the ambient star sky (tests force it off — its
-// braille stars would photobomb frame-scanning assertions).
+// WithStarSky toggles the ambient star sky — the [fx] table's `sky`
+// knob (the first runtime toggle for the eye-candy; the compile-time
+// starSkyEnabled kill switch still exists above it). Tests force it off
+// — its braille stars would photobomb frame-scanning assertions.
 func WithStarSky(on bool) Option {
 	return func(m *Model) { m.skyOn = on }
+}
+
+// FxTuning carries the [fx] table's activity-gating knobs into the
+// model (see ambient.go's heartbeat state ladder). Zero values are
+// legal (IdleFPS clamps at use; IdleGrace 0 means "throttle
+// immediately"; DeepIdle 0 means "never deep-idle while focused").
+type FxTuning struct {
+	// PauseOnBlur parks every fx the instant the terminal reports
+	// focus-out (fx.pause_on_blur, default true).
+	PauseOnBlur bool
+	// IdleGrace is how long after the last input/cable activity the
+	// full 60fps rate persists (fx.idle_grace_seconds, default 30s).
+	IdleGrace time.Duration
+	// IdleFPS is the throttled frame rate once the grace expires
+	// (fx.idle_fps, default 8) — same wall-clock motion, fewer frames.
+	IdleFPS int
+	// DeepIdle parks the heartbeat entirely after this long with no
+	// input and no cable traffic (fx.deep_idle_minutes, default 5m;
+	// 0 = never park while focused).
+	DeepIdle time.Duration
+}
+
+// WithFxTuning applies the [fx] table's timing knobs (config → app →
+// here, the same With* seam every other config value rides).
+func WithFxTuning(t FxTuning) Option {
+	return func(m *Model) {
+		m.fxPauseOnBlur = t.PauseOnBlur
+		m.fxIdleGrace = t.IdleGrace
+		m.fxIdleFPS = t.IdleFPS
+		m.fxDeepIdle = t.DeepIdle
+	}
 }
 
 // WithNewConversation opens an empty chat with no uuid: the first send
@@ -429,6 +495,7 @@ func NewModel(client *api.Client, connect ConnectFunc, opts ...Option) Model {
 		spin:         spin,
 		pending:      map[int64]bool{},
 		shimmer:      map[int64]bool{},
+		ambient:      map[int64]bool{},
 		shaking:      map[int64]errorShake{},
 		follow:       true,
 		histIndex:    -1, // -1 = "at the draft" (history_controller.js connect())
@@ -437,12 +504,23 @@ func NewModel(client *api.Client, connect ConnectFunc, opts ...Option) Model {
 		scopePeriod:  "7d",
 		splashOn:     true,
 		skyOn:        true,
-		footageExec:  realFootageExec{},
+		// Focus fail-safe: terminals that never report focus keep fx
+		// forever — focused only ever flips on a real report.
+		focused: true,
+		// The [fx] defaults, mirrored in config.defaults() — WithFxTuning
+		// overlays whatever the config file/`pito-tui config` said.
+		fxPauseOnBlur: true,
+		fxIdleGrace:   30 * time.Second,
+		fxIdleFPS:     8,
+		fxDeepIdle:    5 * time.Minute,
+		footageExec:   realFootageExec{},
 	}
 	m.transcript = NewTranscript(nil)
 	for _, opt := range opts {
 		opt(&m)
 	}
+	// The activity clock starts at boot, on whatever clock WithNow set.
+	m.lastActivity = m.now()
 	if cometTailEnabled && m.truecolor {
 		// ripple.go effect 4: swap the plain comet for the pre-styled
 		// truecolor variant now that WithTruecolor has landed (opts run
@@ -562,16 +640,60 @@ func (m Model) sendCmd(uuid, input string, width int, opts ...api.SendOpt) tea.C
 
 // ── Update ──────────────────────────────────────────────────────────────
 
+// Update is a thin shell around dispatch: it stamps the activity clock
+// for every real-interaction message (the heartbeat's idle ladder,
+// ambient.go), and re-arms the ambient heartbeat after EVERY dispatch —
+// the one seam through which the heartbeat ever starts, so any message
+// that changes the answer (a keystroke ending deep-idle, a focus-in, a
+// done-@ai reply arming the ambient class, the fast gate closing) wakes
+// it on its very next message. startHeartbeat itself is idempotent and
+// re-checks the full plan, so this blanket re-arm can never stack chains
+// or fight a park decision the plan just made.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg.(type) {
+	case tea.KeyPressMsg, tea.MouseClickMsg, tea.MouseMotionMsg,
+		tea.MouseReleaseMsg, tea.MouseWheelMsg, tea.WindowSizeMsg,
+		tea.FocusMsg, CableEventMsg:
+		// Input, a resize, a focus-in, or a delivered cable message all
+		// count as activity (owner-approved gates); ticks never do.
+		m.lastActivity = m.now()
+	}
+	next, cmd := m.dispatch(msg)
+	nm, ok := next.(Model)
+	if !ok {
+		return next, cmd
+	}
+	if hb := nm.startHeartbeat(); hb != nil {
+		return nm, tea.Batch(cmd, hb)
+	}
+	return nm, cmd
+}
+
+func (m Model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m = m.onResize(msg)
 		// chrome.go/splash.go: onResize may have just armed the startup
 		// splash (its own first-ready moment) — animate() is the seam that
 		// actually starts the tick loop for it (a no-op whenever nothing
-		// needs it, same as every other call site). The star sky's own
-		// slow loop starts here too and never stops (ambient.go).
-		return m, tea.Batch(m.animate(), m.startSky())
+		// needs it, same as every other call site). The ambient heartbeat
+		// (ambient.go) starts through Update's own re-arm seam.
+		return m, m.animate()
+	case tea.FocusMsg:
+		// The terminal regained focus (View sets ReportFocus): resume
+		// the fx exactly where blur froze them — Update's re-arm starts
+		// the heartbeat, and returning at all repaints once immediately,
+		// picking up any state the cable delivered while blurred.
+		m.focused = true
+		return m, nil
+	case tea.BlurMsg:
+		// Focus lost (background tab, other window): the heartbeat parks
+		// on its next tick (onHeartbeatTick's plan) with skyPhase frozen
+		// — never wall-clock-advanced — so focus-in is seamless.
+		// Transcript/cable processing continues normally while blurred;
+		// only rendering ticks stop.
+		m.focused = false
+		return m, nil
 	case tea.MouseClickMsg:
 		return m.onMouseClick(msg)
 	case tea.MouseMotionMsg:
@@ -648,8 +770,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, msg.cmd
 	case AnimTickMsg:
 		return m.onAnimTick()
-	case SkyTickMsg:
-		return m.onSkyTick()
+	case HeartbeatTickMsg:
+		return m.onHeartbeatTick()
 	case FPSTickMsg:
 		return m.onFPSTick()
 	case SuggestionsMsg:
@@ -1389,16 +1511,25 @@ func (m Model) fetchVersionCmd() tea.Cmd {
 	}
 }
 
-// eventNeedsTicks reports whether ONE event keeps its turn on the 40ms
-// animation loop. The distinction that matters is pending vs resolved:
-// a RESOLVED thinking line or confirmation renders static, and marking
-// them anyway put every backfilled turn on a permanent 25fps re-render
-// treadmill (owner smoke 2026-07-12: "everything seems very very slow")
-// — the transcript is full of resolved thinking events, one per turn.
+// eventNeedsTicks reports whether ONE event keeps its turn on the FAST
+// animation chain. The distinction that matters is pending vs resolved:
+// RESOLVED work renders on the ambient heartbeat (eventNeedsAmbient) or
+// static, and marking it fast anyway put every backfilled turn on a
+// permanent re-render treadmill (owner smoke 2026-07-12: "everything
+// seems very very slow") — and the 2026-07-21 sequel: a DONE @ai reply
+// held the fast gate open for the process lifetime (the owner's
+// 103%-CPU background tab), so its gradient bar is ambient-class now.
 func eventNeedsTicks(ev api.Event) bool {
 	switch ev.Kind {
 	case api.KindAi:
-		return true // the AI chrome's gradient bar rides the phase while pending AND done
+		// Pending only — the same shape as unresolved thinking. Any
+		// non-"done" status reads as pending, mirroring render/ai.go's
+		// own tolerant dispatch.
+		var p struct {
+			Status string `json:"status"`
+		}
+		_ = json.Unmarshal(ev.Payload, &p)
+		return p.Status != "done"
 	case api.KindThinking, api.KindConfirmation, api.KindConfirmationFollowUp:
 		var p struct {
 			Resolved bool `json:"resolved"`
@@ -1406,23 +1537,59 @@ func eventNeedsTicks(ev api.Event) bool {
 		_ = json.Unmarshal(ev.Payload, &p)
 		return !p.Resolved
 	}
+	return false
+}
+
+// eventNeedsAmbient reports whether ONE event keeps its turn on the
+// ambient heartbeat (ambient.go): finished content that still animates
+// — a done @ai reply's gradient bar, shimmer-marked shiny words. These
+// used to ride (and permanently pin) the fast chain; they pause with
+// the heartbeat in idle/blurred states — the owner's pre-approved
+// activity gating.
+func eventNeedsAmbient(ev api.Event) bool {
+	switch ev.Kind {
+	case api.KindAi:
+		return !eventNeedsTicks(ev) // done = the animated gradient bar
+	case api.KindThinking, api.KindConfirmation, api.KindConfirmationFollowUp:
+		return false // resolved copies render static, exactly as before
+	}
 	return render.HasShimmer(ev.Payload)
 }
 
-// reconcileTurnShimmer re-evaluates one turn's animation membership after
-// a replace (a thinking resolve, a confirmation outcome): when none of
-// the turn's events needs ticks anymore, the turn leaves the shimmer map
-// and — once nothing else is alive — the 40ms loop goes quiet again.
+// ambientAlive reports whether the ambient class has anything to
+// animate: an ambient-marked turn on the transcript, or the pulsing
+// @ai prompt ">" (aiPromptLive).
+func (m Model) ambientAlive() bool {
+	return len(m.ambient) > 0 || m.aiPromptLive()
+}
+
+// reconcileTurnShimmer re-evaluates one turn's animation membership
+// after a replace (a thinking resolve, an @ai resolve, a confirmation
+// outcome): fast membership drops when no event needs the fast chain
+// anymore, and ambient membership follows the turn's current content —
+// THE @ai pending→done transition migrates the turn from the fast map
+// to the ambient one right here.
 func (m *Model) reconcileTurnShimmer(turnID int64) {
-	if !m.shimmer[turnID] {
+	if !m.shimmer[turnID] && !m.ambient[turnID] {
 		return
 	}
+	fast, ambient := false, false
 	for _, ev := range m.transcript.TurnEvents(turnID) {
 		if eventNeedsTicks(ev) {
-			return
+			fast = true
+		}
+		if eventNeedsAmbient(ev) {
+			ambient = true
 		}
 	}
-	delete(m.shimmer, turnID)
+	if !fast {
+		delete(m.shimmer, turnID)
+	}
+	if ambient {
+		m.ambient[turnID] = true
+	} else {
+		delete(m.ambient, turnID)
+	}
 }
 
 // resyncNowMsg fires a deferred re-sync (mutation safety net).
@@ -1566,8 +1733,17 @@ func (m Model) onChatFetched(msg ChatFetchedMsg) (tea.Model, tea.Cmd) {
 	m.transcript.Merge(msg.Page.Events)
 	m.seedHistory()
 	for _, ev := range msg.Page.Events {
-		if m.truecolor && eventNeedsTicks(ev) {
+		if !m.truecolor {
+			continue
+		}
+		if eventNeedsTicks(ev) {
 			m.shimmer[ev.TurnID] = true
+		}
+		if eventNeedsAmbient(ev) {
+			// Done-@ai bars and shiny words ride the ambient heartbeat
+			// (ambient.go) — a backfill full of finished replies no
+			// longer opens the fast chain at all.
+			m.ambient[ev.TurnID] = true
 		}
 	}
 	// A fetched page can carry the first events of turns still marked
@@ -1660,6 +1836,11 @@ func (m Model) onCableEvent(msg CableEventMsg) (tea.Model, tea.Cmd) {
 			// Pending thinking rides the shimmer map too: its braille
 			// frame and network shimmer live off the same Touch loop.
 			m.shimmer[ev.TurnID] = true
+		}
+		if m.truecolor && eventNeedsAmbient(ev) {
+			// Finished-but-animating content (shiny words, a done @ai
+			// arriving whole) joins the ambient heartbeat's set instead.
+			m.ambient[ev.TurnID] = true
 		}
 		if ev.Kind == api.KindError {
 			// micro.go effect 1: the error's own arrival on the transcript
@@ -1776,14 +1957,15 @@ func (m *Model) applyAiStatus(eventID int64, text string) {
 	})
 }
 
-// Shimmer runs indefinitely, like the web (owner call, 2026-07-05) — the
-// tick loop lives as long as shimmer-marked turns are in the transcript.
-// 40ms ticks (25fps — owner call 2026-07-06: 12.5fps read as visible
-// ticking) with a ~2.7s cycle; per-element stagger lives in the
-// renderer (phaseOffset), so the shared phase never syncs neighbors —
-// EXCEPT during the shimmer conductor's own ~2s sweep window every ~30s
-// of alive time, where SetConductor deliberately collapses every
-// element's offset onto this same shared phase (ambient.go).
+// Shimmer runs indefinitely, like the web (owner call, 2026-07-05) —
+// pending work rides THIS fast chain; finished-but-animating content
+// rides the ambient heartbeat (ambient.go) with the same step, pausing
+// only in idle/blurred states. ~2.7s cycle; per-element stagger lives
+// in the renderer (phaseOffset), so the shared phase never syncs
+// neighbors — EXCEPT during the shimmer conductor's own ~2s sweep
+// window every ~30s of alive time, where SetConductor deliberately
+// collapses every element's offset onto this same shared phase
+// (ambient.go).
 const (
 	// 16ms ≈ 60fps (owner 2026-07-12, second pass: 30fps still read as
 	// "something keeping the animation in place" on a 280Hz OLED — the
@@ -1794,27 +1976,32 @@ const (
 	shimmerStep = 0.006
 )
 
-// animGateOpen reports whether ANYTHING alive still needs ticks: shimmer,
-// a reveal spring in flight, an in-flight fetch riding the shared
-// loadingDots phase, a picker/notifications overlay spring not yet at
-// rest, either of ripple.go's two live-data windows (the status-bar
-// ripple, the ✉ odometer roll), any of micro.go's three windowed effects
-// (an error's shake jitter, the palette ghost's type-in, the scroll-thumb's
-// fade-out — the confirm-glint needs no entry here, it rides the shimmer
-// map a pending confirmation already holds open), or either of chrome.go/
-// splash.go's own two (the startup splash's hold/rise, the keymap footer's
-// open/close spring). No springs active ⇒ no ticks — the house rule.
+// animGateOpen reports whether ANYTHING alive still needs FAST ticks:
+// pending-work shimmer, a reveal spring in flight, an in-flight fetch
+// riding the shared loadingDots phase, a picker/notifications overlay
+// spring not yet at rest, either of ripple.go's two live-data windows
+// (the status-bar ripple, the ✉ odometer roll), any of micro.go's three
+// windowed effects (an error's shake jitter, the palette ghost's
+// type-in, the scroll-thumb's fade-out — the confirm-glint needs no
+// entry here, it rides the shimmer map a pending confirmation already
+// holds open), or either of chrome.go/splash.go's own two (the startup
+// splash's hold/rise, the keymap footer's open/close spring). No
+// springs active ⇒ no fast ticks — the house rule. Finished-but-still-
+// animating content (done-@ai bars, shiny words, the @ai prompt pulse)
+// deliberately does NOT hold this gate: it rides the ambient heartbeat
+// (ambient.go), which pauses in idle/blurred states.
 func (m Model) animGateOpen() bool {
 	return len(m.shimmer) > 0 || m.notif.fetching || m.pickerFetching ||
 		m.entity.fetching || m.aiPicker.fetching ||
 		m.rippleAnim || m.unreadOdoAnim || len(m.shaking) > 0 || m.ghostTyping || m.thumbFading ||
-		m.toastTicks > 0 || m.dotPulseTicks > 0 || m.quitArmed > 0 || m.pickerDeleteArmed > 0 || m.scrollEasing || m.splashActive() || m.footerAnimating() || m.tourActive() ||
-		m.aiPromptLive()
+		m.toastTicks > 0 || m.dotPulseTicks > 0 || m.quitArmed > 0 || m.pickerDeleteArmed > 0 || m.scrollEasing || m.splashActive() || m.footerAnimating() || m.tourActive()
 }
 
 // aiPromptLive reports the chatbox wearing the AI accent — an @ai turn
 // mid-typing on a truecolor terminal. The pulsing ">" (viewContent's
-// prompt mood) needs the animation loop for as long as it's on screen,
+// prompt mood) is ambient-class: the heartbeat keeps the phase moving
+// for as long as it's on screen (typing itself keeps the activity
+// clock fresh, so it always pulses at the full rate while being typed),
 // exactly like the web's chatbox bar animating while data-accent="ai".
 func (m Model) aiPromptLive() bool {
 	return m.truecolor && aiInputRe.MatchString(m.input.Value())
@@ -1911,7 +2098,7 @@ func (m Model) onAnimTick() (tea.Model, tea.Cmd) {
 	m.stepSplash()
 	m.stepFooterAnim()
 	// Visible-only animation (owner 2026-07-12: off-screen effects must
-	// not cost anything): a shimmer-marked turn re-renders ONLY if its
+	// not cost anything): an animated turn re-renders ONLY if its
 	// lines intersect the scroller's window — and only on the SHIMMER
 	// BEAT: every second tick (30fps), the owner's split-rate order
 	// ("do the shimmering 30fps while keeping 60fps for the chroma").
@@ -1919,13 +2106,7 @@ func (m Model) onAnimTick() (tea.Model, tea.Cmd) {
 	// speed is unchanged — half the repaints, same motion. Springs,
 	// glide, sky, and every chrome effect stay on the full 60.
 	if m.aliveTicks%transcriptBeatDivisor == 0 {
-		winTop, winBottom := m.sc.YOffset(), m.sc.YOffset()+m.sc.height
-		for turnID := range m.shimmer {
-			start, end, ok := m.transcript.TurnLineRange(turnID)
-			if !ok || (end > winTop && start < winBottom) {
-				m.transcript.Touch(turnID)
-			}
-		}
+		m.touchAnimatedTurns()
 	}
 	// tour.go: advance --tour's own state machine one tick — typing,
 	// submitting through the real Enter path, dwelling. A no-op unless
@@ -1937,23 +2118,13 @@ func (m Model) onAnimTick() (tea.Model, tea.Cmd) {
 	if m.phase >= 1 {
 		m.phase -= 1
 	}
-	if m.renderer != nil {
-		m.renderer.SetPhase(m.phase)
-		// The shimmer conductor's periodic sync sweep (ambient.go) —
-		// weight is 0 almost always, ramping 0→1→0 across a ~2s window
-		// every ~30s of ALIVE time.
-		m.renderer.SetConductor(conductorWeight(m.aliveTicks))
-		// micro.go effect 2: the confirm-glint's own ~500ms sweep inside
-		// its ~4s cycle — -1 (inactive) almost always, same "rides
-		// aliveTicks, no dedicated gate entry" shape as the conductor.
-		m.renderer.SetGlint(confirmGlintProgress(m.aliveTicks))
-		// The raw counter itself, for render-side effects that key their
-		// own per-element cadence off it directly — the shiny badge's
-		// iridescent twinkle (render/tokens.go's sparkleActive), same
-		// "rides aliveTicks, no dedicated gate entry" shape as the two
-		// calls above.
-		m.renderer.SetTicks(m.aliveTicks)
+	// While the fast chain is open, the ambient heartbeat parks and THIS
+	// loop owns the sky's drift at the same 16ms cadence — at most one
+	// 16ms chain exists at any moment (ambient.go's collapse).
+	if starSkyEnabled && m.skyOn && m.truecolor && (m.focused || !m.fxPauseOnBlur) {
+		m.skyPhase += skyPhaseStep
 	}
+	m.pushAnimFrame()
 	// The follow-glide steps every tick (60fps chrome) but needs no
 	// transcript work — it only moves the scroller's offset; the window
 	// materializes lazily at View time.
@@ -1967,6 +2138,50 @@ func (m Model) onAnimTick() (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 	}
 	return m, tea.Batch(animTick(), tourCmd)
+}
+
+// pushAnimFrame hands the renderer the animation frame's shared inputs
+// — called by both the fast chain (onAnimTick) and the ambient
+// heartbeat (ambient.go's stepAmbient), never both on the same tick.
+func (m *Model) pushAnimFrame() {
+	if m.renderer == nil {
+		return
+	}
+	m.renderer.SetPhase(m.phase)
+	// The shimmer conductor's periodic sync sweep (ambient.go) —
+	// weight is 0 almost always, ramping 0→1→0 across a ~2s window
+	// every ~30s of ALIVE time.
+	m.renderer.SetConductor(conductorWeight(m.aliveTicks))
+	// micro.go effect 2: the confirm-glint's own ~500ms sweep inside
+	// its ~4s cycle — -1 (inactive) almost always, same "rides
+	// aliveTicks, no dedicated gate entry" shape as the conductor.
+	m.renderer.SetGlint(confirmGlintProgress(m.aliveTicks))
+	// The raw counter itself, for render-side effects that key their
+	// own per-element cadence off it directly — the shiny badge's
+	// iridescent twinkle (render/tokens.go's sparkleActive), same
+	// "rides aliveTicks, no dedicated gate entry" shape as the two
+	// calls above.
+	m.renderer.SetTicks(m.aliveTicks)
+}
+
+// touchAnimatedTurns dirties every animated turn whose lines intersect
+// the scroller's window — fast (shimmer) and ambient turns alike, so a
+// turn animates identically whichever chain is driving the beat. Off-
+// screen turns stay untouched (the virtualization contract).
+func (m *Model) touchAnimatedTurns() {
+	winTop, winBottom := m.sc.YOffset(), m.sc.YOffset()+m.sc.height
+	touch := func(turnID int64) {
+		start, end, ok := m.transcript.TurnLineRange(turnID)
+		if !ok || (end > winTop && start < winBottom) {
+			m.transcript.Touch(turnID)
+		}
+	}
+	for turnID := range m.shimmer {
+		touch(turnID)
+	}
+	for turnID := range m.ambient {
+		touch(turnID)
+	}
 }
 
 func (m Model) onConnState(msg ConnStateMsg) (tea.Model, tea.Cmd) {
@@ -2054,6 +2269,12 @@ func (m Model) View() tea.View {
 	// is the narrowest v2 mode that reports both wheel and drag events.
 	// Lists stay non-navigable — clicks only ever anchor selections.
 	v.MouseMode = tea.MouseModeCellMotion
+	// Focus reporting (DECSET 1004): the heartbeat's pause-on-blur gate
+	// (ambient.go) rides tea.FocusMsg/BlurMsg. Terminals that don't
+	// support it simply never report — and m.focused fail-safes to
+	// focused by construction, so their fx never pause on this axis
+	// (the idle ladder still covers them).
+	v.ReportFocus = true
 	if oscTitleEnabled {
 		// chrome.go effect 3: a plain tea.View field in Bubble Tea v2 (not
 		// a Cmd) — the renderer itself only emits the OSC sequence when

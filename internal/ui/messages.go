@@ -56,10 +56,12 @@ type SuggestionsMsg struct {
 	S   *api.Suggestions
 }
 
-// SkyTickMsg drives the star sky's slow drift loop (ambient.go's
-// startSky/onSkyTick) — independent of the fast animation gate so the
-// sky keeps moving at rest.
-type SkyTickMsg struct{}
+// HeartbeatTickMsg drives the ambient heartbeat (ambient.go's
+// startHeartbeat/onHeartbeatTick): the star sky's drift plus the whole
+// ambient class (done-@ai bars, shiny words, the @ai prompt pulse) —
+// separate from the fast animation gate, activity/focus-gated, and
+// parked entirely whenever the fast chain owns the cadence.
+type HeartbeatTickMsg struct{}
 
 // FPSTickMsg drives F9's frame-counter chip loop (fpsoverlay.go's
 // startFPSTick/onFPSTick) — a ~100ms nudge that keeps the viewport

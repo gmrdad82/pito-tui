@@ -81,7 +81,7 @@ pito-tui                      # conversation picker (recent first)
 pito-tui <conversation-uuid>  # open a conversation directly
 ```
 
-pito-tui ships pointing at nothing — it's a client for *your* server,
+pito-tui ships pointing at nothing — it's a client for _your_ server,
 and it will never suggest anyone else's. First run tells you exactly
 that and how to fix it:
 
@@ -107,16 +107,31 @@ server mints the session; the TUI just keeps the cookie
 server=…`, yours to edit, or drive it from the CLI:
 
 ```sh
-pito-tui config                              # show server, sounds, file path
+pito-tui config                              # show server, sounds, fx, file path
 pito-tui config server=pito.example.com     # set/switch backends (persists)
 pito-tui config sounds=off                   # keys: server, sounds, conversation
+pito-tui config fx.idle_fps=12               # tune the ambient-fx gating (below)
 pito-tui version                             # what am I running
 ```
 
 ```toml
 instance_url = "https://pito.example.com"  # your PITO instance
 sounds = true                              # send/receive/notify sounds
+
+[fx]                        # ambient effects: when frames get built
+sky = true                  # the drifting star sky on blank rows
+pause_on_blur = true        # freeze all fx while the terminal is unfocused
+idle_grace_seconds = 30     # full 60fps for this long after any activity
+idle_fps = 8                # then throttle to this (same motion, fewer frames)
+deep_idle_minutes = 5       # then pause entirely; 0 = never pause while focused
 ```
+
+The `[fx]` gating never changes how the effects look while you're
+active — only whether frames are built when nothing is happening. Any
+keystroke, mouse event, or server message snaps everything back
+instantly; focus-loss pause needs a terminal that reports focus (tmux:
+`set -g focus-events on`; terminals that can't report focus simply keep
+their fx running and rely on the idle timers instead).
 
 Flags override the file per run: `--instance <url>` (never rewrites the
 config), `--sounds=on|off`, `--config <path>` for an alternate file
@@ -128,15 +143,15 @@ Sounds play through `paplay` or `mpv` on Linux and the built-in
 
 ## Keys
 
-| Key | Action |
-| --- | --- |
-| `enter` | send the prompt |
-| `j` / `k` | scroll one line (when the prompt is empty) |
-| `ctrl-d` / `ctrl-u` | scroll half a page |
-| `g` / `G` | top / bottom (G re-enables follow) |
-| `ctrl-k` | commands |
-| `ctrl-f` | update footage |
-| `ctrl-c` | quit |
+| Key                 | Action                                     |
+| ------------------- | ------------------------------------------ |
+| `enter`             | send the prompt                            |
+| `j` / `k`           | scroll one line (when the prompt is empty) |
+| `ctrl-d` / `ctrl-u` | scroll half a page                         |
+| `g` / `G`           | top / bottom (G re-enables follow)         |
+| `ctrl-k`            | commands                                   |
+| `ctrl-f`            | update footage                             |
+| `ctrl-c`            | quit                                       |
 
 Everything else you type goes into the prompt — including slash commands,
 which are sent to the server as-is.

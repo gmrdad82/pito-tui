@@ -26,6 +26,41 @@ type Config struct {
 	// set (internal/telemetry gates on version.IsRelease()); source builds
 	// and unconfigured installs send nothing, ever.
 	Telemetry Telemetry `toml:"telemetry"`
+	// Fx tunes the ambient effects' activity gating (the star sky, the
+	// @ai gradient bars, shiny words). Rendering pauses/throttles when
+	// the terminal is unfocused or idle; these knobs say when.
+	Fx Fx `toml:"fx"`
+}
+
+// Fx is the [fx] table: every rate and gate of the ambient effects'
+// activity-gated rendering. Partial tables overlay the defaults key by
+// key (TOML decode semantics), so setting just one knob keeps the rest.
+type Fx struct {
+	// Sky toggles the drifting star sky on blank rows entirely — the
+	// first runtime toggle for the eye-candy (no rebuild needed).
+	Sky bool `toml:"sky"`
+	// PauseOnBlur freezes all effects the instant the terminal reports
+	// losing focus (background tab/window); focus-in resumes them
+	// exactly where they paused. Terminals that never report focus are
+	// unaffected (they fail safe to focused).
+	PauseOnBlur bool `toml:"pause_on_blur"`
+	// IdleGraceSeconds: how long after the last keystroke/mouse/cable
+	// message the effects keep their full 60fps rate.
+	IdleGraceSeconds int `toml:"idle_grace_seconds"`
+	// IdleFPS: the throttled frame rate once the grace expires — same
+	// wall-clock motion, fewer frames. Any activity snaps back to 60.
+	IdleFPS int `toml:"idle_fps"`
+	// DeepIdleMinutes: after this long with no input and no cable
+	// traffic the effects pause entirely even while focused (near-zero
+	// CPU). 0 = never pause while focused.
+	DeepIdleMinutes int `toml:"deep_idle_minutes"`
+}
+
+// defaultFx returns the [fx] defaults — mirrored by ui.NewModel's own
+// zero-config values so an absent table and a default table behave
+// identically.
+func defaultFx() Fx {
+	return Fx{Sky: true, PauseOnBlur: true, IdleGraceSeconds: 30, IdleFPS: 8, DeepIdleMinutes: 5}
 }
 
 // Telemetry is the [telemetry] table. Zero value = disabled: activation
@@ -56,6 +91,7 @@ func defaults() Config {
 		// Opt-out default: harmless while endpoint/key are empty, and a
 		// configured install works without also hunting for a switch.
 		Telemetry: Telemetry{Enabled: true},
+		Fx:        defaultFx(),
 	}
 }
 
@@ -99,6 +135,11 @@ func Save(path string, cfg Config) error {
 		telemetry = fmt.Sprintf("[telemetry]\nendpoint = %q\nkey = %q\nenabled = %v",
 			cfg.Telemetry.Endpoint, cfg.Telemetry.Key, cfg.Telemetry.Enabled)
 	}
+	fx := "# [fx]\n# sky = true\n# pause_on_blur = true\n# idle_grace_seconds = 30\n# idle_fps = 8\n# deep_idle_minutes = 5"
+	if cfg.Fx != defaultFx() {
+		fx = fmt.Sprintf("[fx]\nsky = %v\npause_on_blur = %v\nidle_grace_seconds = %d\nidle_fps = %d\ndeep_idle_minutes = %d",
+			cfg.Fx.Sky, cfg.Fx.PauseOnBlur, cfg.Fx.IdleGraceSeconds, cfg.Fx.IdleFPS, cfg.Fx.DeepIdleMinutes)
+	}
 	body := fmt.Sprintf(`# pito-tui configuration.
 
 # The PITO backend this client talks to. Change it here, or with
@@ -117,7 +158,15 @@ sounds = %v
 # endpoint: your hosted collector URL; key: the Push API key — both from
 # the AppSignal UI. enabled = false opts out without deleting them.
 %s
-`, cfg.InstanceURL, cfg.Sounds, conversation, telemetry)
+
+# Ambient-effect activity gating (`+"`pito-tui config fx.<key>=<value>`"+`):
+# sky toggles the star sky; pause_on_blur freezes effects while the
+# terminal is unfocused; after idle_grace_seconds without input the
+# frame rate throttles to idle_fps (same motion, fewer frames); after
+# deep_idle_minutes with no input/cable traffic effects pause entirely
+# (0 = never). Any keystroke or server message snaps back instantly.
+%s
+`, cfg.InstanceURL, cfg.Sounds, conversation, telemetry, fx)
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, []byte(body), 0o600); err != nil {
 		return fmt.Errorf("config: writing %s: %w", path, err)

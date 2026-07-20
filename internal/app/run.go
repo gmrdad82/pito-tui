@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/muesli/termenv"
@@ -163,6 +164,16 @@ Point pito-tui at your install:
 		ui.WithSounds(player),
 		ui.WithGlamourStyle(glamourStyle),
 		ui.WithTruecolor(truecolor),
+		// The [fx] table (config.Fx): the sky toggle plus the ambient
+		// heartbeat's activity-gating knobs — see ui/ambient.go's state
+		// ladder for what each one gates.
+		ui.WithStarSky(cfg.Fx.Sky),
+		ui.WithFxTuning(ui.FxTuning{
+			PauseOnBlur: cfg.Fx.PauseOnBlur,
+			IdleGrace:   time.Duration(cfg.Fx.IdleGraceSeconds) * time.Second,
+			IdleFPS:     cfg.Fx.IdleFPS,
+			DeepIdle:    time.Duration(cfg.Fx.DeepIdleMinutes) * time.Minute,
+		}),
 		ui.WithFootageFolder(lastFootageFolder, func(folder string) error {
 			return config.SaveFootageFolder(footagePath, folder)
 		}),

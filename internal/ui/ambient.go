@@ -2,10 +2,10 @@ package ui
 
 import (
 	"fmt"
-	"hash/fnv"
 	"image/color"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,7 +28,7 @@ import (
 //   - shimmerConductorEnabled: every ~30s of ALIVE time (animation
 //     ticks, never wall-clock idle), a ~2s window where every shimmer
 //     painter's per-element stagger collapses onto one shared traveling
-//     phase — see conductorWeight, pushed from Model.onAnimTick into
+//     phase — see conductorWeight, pushed from the animation frame into
 //     render.R via SetConductor.
 //   - cableActivityPulseEnabled: the status bar's presence dot takes
 //     one green breath whenever the cable delivers a message (owner
@@ -45,38 +45,168 @@ const (
 	cableActivityPulseEnabled = true
 )
 
-// skyTickInterval: the sky's own heartbeat — 16ms ≈ 60fps (owner
+// ── The ambient heartbeat ────────────────────────────────────────────────
+//
+// One self-rescheduling tick loop drives EVERYTHING that animates while
+// nothing is actively happening: the star sky's drift, the done-@ai
+// gradient bars, shimmer-marked shiny words, and the pulsing @ai prompt
+// ">" (the ambient class — Model.ambient + aiPromptLive). It replaces
+// the 3.x arrangement where the sky ran its own permanent 16ms chain AND
+// one finished @ai reply held the fast animation gate open forever,
+// stacking a second 16ms chain on top for the process lifetime.
+//
+// The heartbeat and the fast chain (animTick/onAnimTick) never run at
+// the same time: while the fast gate is open (pending sends, springs,
+// shakes, splash, tour) onAnimTick advances the sky and the ambient
+// class itself at the same 16ms cadence and the heartbeat parks;
+// the moment the gate closes, Update's post-dispatch re-arm (see
+// Model.Update) starts the heartbeat again. At most ONE 16ms chain
+// exists at any moment.
+//
+// The heartbeat is also where the activity gating lives (owner mandate
+// 2026-07-21, the 103%-CPU background-tab kill — fx pause when idle or
+// unfocused, pre-approved):
+//
+//   - BLURRED (terminal reported focus-out, fx.pause_on_blur): parks
+//     entirely. skyPhase is frozen, not wall-clock-advanced, so focus-in
+//     resumes the sky exactly where it paused.
+//   - ACTIVE (input/cable activity within fx.idle_grace_seconds): full
+//     16ms ≈ 60fps rate.
+//   - IDLE-FOCUSED (grace expired): throttled to fx.idle_fps. The phase
+//     step scales with the interval, so the sky's wall-clock drift speed
+//     is identical at every rate — same motion, fewer frames.
+//   - DEEP-IDLE (fx.deep_idle_minutes with no input and no cable
+//     traffic; 0 = never): parks entirely, frame frozen, until anything
+//     wakes it. This is the only idle path on terminals that never
+//     report focus (GNU screen, unconfigured tmux, the Linux console).
+//
+// Any keystroke, mouse event, cable delivery, or focus-in stamps
+// Model.lastActivity and re-arms the loop through the one Update seam —
+// heartbeatTicking makes the restart idempotent.
+
+// heartbeatInterval: the heartbeat's full rate — 16ms ≈ 60fps (owner
 // 2026-07-12: the first cut's 120ms/8fps read as lag on a 280Hz OLED;
 // "can we use 60fps?" — yes). Bubble Tea v2's cell-diff renderer only
-// writes the star cells that changed, so the full-rate loop stays
-// cheap; the fast 33ms gate is untouched (transcript repaints are the
-// expensive path, the sky is not).
-const skyTickInterval = 16 * time.Millisecond
+// writes the cells that changed, so the full-rate loop stays cheap while
+// it actually runs; the activity gating above decides when it runs.
+const heartbeatInterval = 16 * time.Millisecond
 
-func skyTick() tea.Cmd {
-	return tea.Tick(skyTickInterval, func(time.Time) tea.Msg { return SkyTickMsg{} })
+// skyPhaseStep: drift per 16ms tick — the same drift speed the original
+// 120ms loop had (0.35/tick), spread across 7.5× the frames.
+const skyPhaseStep = 0.047
+
+func heartbeatTick(interval time.Duration) tea.Cmd {
+	return tea.Tick(interval, func(time.Time) tea.Msg { return HeartbeatTickMsg{} })
 }
 
-// startSkyIfIdle keeps the sky's loop alive whenever the app is on the
-// chat surface with truecolor — a self-rescheduling slow tick, cheap by
-// construction (blank rows only; the dirty-gated fast path never runs).
-func (m *Model) startSky() tea.Cmd {
-	if !starSkyEnabled || !m.skyOn || !m.truecolor || m.skyTicking {
+// startHeartbeat arms the ambient heartbeat when anything needs it and
+// the activity plan allows it — a no-op otherwise, and idempotent while
+// a chain is already live (heartbeatTicking, cleared only by
+// onHeartbeatTick itself, the fpsTicking shape). Called from ONE seam:
+// Model.Update's post-dispatch re-arm, so every message that changes the
+// answer (a keystroke ending deep-idle, a focus-in, a done-@ai reply
+// arming the ambient class, the fast gate closing) reconsiders it.
+func (m *Model) startHeartbeat() tea.Cmd {
+	if !m.heartbeatNeeded() || m.heartbeatTicking || m.animating {
 		return nil
 	}
-	m.skyTicking = true
-	return skyTick()
+	if _, park := m.heartbeatPlan(m.now()); park {
+		return nil
+	}
+	m.heartbeatTicking = true
+	m.hbInterval = heartbeatInterval
+	return heartbeatTick(heartbeatInterval)
 }
 
-func (m Model) onSkyTick() (tea.Model, tea.Cmd) {
-	if !starSkyEnabled || !m.skyOn || !m.truecolor {
-		m.skyTicking = false
+// heartbeatNeeded reports whether the heartbeat has anything at all to
+// animate: the star sky, or the ambient class (done-@ai bars, shiny
+// words, the pulsing @ai prompt). Truecolor gates the lot — exactly the
+// terminals where none of these effects exist.
+func (m Model) heartbeatNeeded() bool {
+	if !m.truecolor {
+		return false
+	}
+	return (starSkyEnabled && m.skyOn) || m.ambientAlive()
+}
+
+// heartbeatPlan picks the heartbeat's next interval from the activity
+// state (see the state ladder in the package comment above): park on
+// blur or deep-idle, 16ms inside the grace window, the fx.idle_fps
+// throttle beyond it. Pure — now is a parameter so tests never sleep.
+func (m Model) heartbeatPlan(now time.Time) (interval time.Duration, park bool) {
+	if m.fxPauseOnBlur && !m.focused {
+		return 0, true
+	}
+	idle := now.Sub(m.lastActivity)
+	if m.fxDeepIdle > 0 && idle >= m.fxDeepIdle {
+		return 0, true
+	}
+	if idle < m.fxIdleGrace {
+		return heartbeatInterval, false
+	}
+	fps := m.fxIdleFPS
+	if fps < 1 {
+		fps = 1
+	} else if fps > 60 {
+		fps = 60
+	}
+	interval = time.Second / time.Duration(fps)
+	if interval < heartbeatInterval {
+		interval = heartbeatInterval
+	}
+	return interval, false
+}
+
+func (m Model) onHeartbeatTick() (tea.Model, tea.Cmd) {
+	if !m.heartbeatNeeded() || m.animating {
+		// Nothing left to animate — or the fast chain is open and owns
+		// the 16ms cadence (onAnimTick advances sky + ambient itself;
+		// Update's re-arm restarts this loop the moment its gate
+		// closes). Either way: park, don't reschedule.
+		m.heartbeatTicking = false
 		return m, nil
 	}
-	// Same drift speed the 120ms loop had (0.35/tick), spread across
-	// 7.5× the frames — smoothness, not acceleration.
-	m.skyPhase += 0.047
-	return m, skyTick()
+	interval, park := m.heartbeatPlan(m.now())
+	if park {
+		// Blur or deep-idle: the frame freezes exactly here — no step,
+		// so focus-in/wake resumes the sky where it paused.
+		m.heartbeatTicking = false
+		return m, nil
+	}
+	// Step by the interval THIS tick was scheduled with (the elapsed
+	// time), then reschedule at whatever the plan now says — the phase
+	// advances at the same wall-clock speed at every rate.
+	m.stepAmbient(float64(m.hbInterval) / float64(heartbeatInterval))
+	m.hbInterval = interval
+	return m, heartbeatTick(interval)
+}
+
+// stepAmbient advances everything the heartbeat animates by one tick of
+// `scale` × the full-rate step. Shared by the heartbeat (scale = its
+// interval ratio) and nothing else — the fast chain's onAnimTick has its
+// own step of the same fields at scale 1, plus all the windowed effects.
+func (m *Model) stepAmbient(scale float64) {
+	if starSkyEnabled && m.skyOn {
+		m.skyPhase += skyPhaseStep * scale
+	}
+	if !m.ambientAlive() {
+		return
+	}
+	// aliveTicks counts ticks, not wall-clock — under throttle the
+	// conductor's ~30s cycle stretches, which is its contract ("alive
+	// time"; ambient.go's conductorWeight doc).
+	m.aliveTicks++
+	m.phase += shimmerStep * scale
+	if m.phase >= 1 {
+		m.phase -= 1
+	}
+	m.pushAnimFrame()
+	// The 30fps shimmer beat (owner split-rate order): every second tick
+	// at the full rate; every tick once the interval itself is at or
+	// below the beat rate.
+	if scale > 1 || m.aliveTicks%transcriptBeatDivisor == 0 {
+		m.touchAnimatedTurns()
+	}
 }
 
 // ── Effect 1: margin star-field ──────────────────────────────────────────
@@ -146,9 +276,31 @@ var (
 	ambientStarFaint = render.RGB{R: 0x62, G: 0x62, B: 0x62} // ≈ ColorFaint (256-color 241)
 )
 
-// skyStar is one cached star of a row at a given drift base.
+// starHash is an inline FNV-1a over the byte sequence "%d<sep>%d" — the
+// EXACT bytes the retired fmt.Fprintf(fnv.New32a(), …) hashed, so every
+// star keeps its position, glyph, tint, size, and breathing period
+// (TestStarHashMatchesFnv pins the equivalence over a full grid). The
+// fmt/fnv round-trip was ~12% of all idle CPU plus one allocation per
+// probe; this is a stack buffer and a few multiplies.
+func starHash(a, b int, sep byte) uint32 {
+	var buf [40]byte
+	s := strconv.AppendInt(buf[:0], int64(a), 10)
+	s = append(s, sep)
+	s = strconv.AppendInt(s, int64(b), 10)
+	h := uint32(2166136261) // FNV-1a offset basis
+	for _, c := range s {
+		h ^= uint32(c)
+		h *= 16777619 // FNV-1a prime
+	}
+	return h
+}
+
+// skyStar is one cached star of a row. abs is the ABSOLUTE sampled
+// column (screen col + drift base) — the coordinate star identity hashes
+// from — so a cached star stays valid as the drift base slides; the
+// paint pass derives its screen column per frame (abs − base).
 type skyStar struct {
-	col    int
+	abs    int
 	glyph  rune
 	offset float64
 	tint   render.RGB
@@ -156,40 +308,84 @@ type skyStar struct {
 	period float64 // per-star breathing period multiplier (0.6..1.6)
 }
 
-// skyRowStarCache memoizes star positions per (salted row, drift base):
-// at 60fps the drift base only shifts every ~7 frames, so the fnv sweep
-// across every column (the sky's only real cost) runs on base changes
-// instead of every frame. The UI is single-goroutine — no lock. Bounded:
-// wholesale reset past 8k entries (a few minutes of drift).
-var skyRowStarCache = map[[3]int][]skyStar{}
+// starForAbs builds the full skyStar at an absolute column, or reports
+// no star there — the ONE place a sky star's derived fields (sized
+// glyph, tint, period) are computed, shared by the fresh sweep and the
+// incremental slide so they cannot disagree.
+func starForAbs(saltedRow, abs int) (skyStar, bool) {
+	present, glyph, offset := starAt(saltedRow, abs)
+	if !present {
+		return skyStar{}, false
+	}
+	sum := starHash(saltedRow, abs, '/')
+	sized, size := starSizeFor(sum>>4, glyph)
+	return skyStar{
+		abs: abs, glyph: sized, offset: offset,
+		tint:   starTintFor(sum >> 12),
+		size:   size,
+		period: 0.6 + float64(sum%97)/97,
+	}, true
+}
 
-func skyRowStars(saltedRow, base, termWidth int) []skyStar {
-	key := [3]int{saltedRow, base, termWidth}
-	if stars, ok := skyRowStarCache[key]; ok {
-		return stars
-	}
-	if len(skyRowStarCache) > 8192 {
-		skyRowStarCache = map[[3]int][]skyStar{}
-	}
+// skyRowEntry is one salted row's live star list, kept sorted by
+// ascending absolute column and maintained INCREMENTALLY as the drift
+// base slides: each +1 base step drops at most one star off the bottom
+// of the window and probes exactly one new column at the top, instead
+// of re-sweeping every column of the row (which the old (row, base,
+// termWidth)-keyed memo did on every base advance — layer 2's base moves
+// every ~2.7 frames, so that cache never amortized). The UI is
+// single-goroutine — no lock.
+type skyRowEntry struct {
+	base      int
+	termWidth int
+	stars     []skyStar
+}
+
+var skyRowCache = map[int]*skyRowEntry{}
+
+// sweepRowStars is the full-scan builder: every screen column of the
+// window at this base, in ascending absolute-column order. The rebuild
+// path (fresh row, resize, backward/large base jump) and the reference
+// the incremental slide is tested against.
+func sweepRowStars(saltedRow, base, termWidth int) []skyStar {
 	stars := []skyStar{}
 	for col := 2; col < termWidth-1; col++ {
-		present, glyph, offset := starAt(saltedRow, col+base)
-		if !present {
-			continue
+		if st, ok := starForAbs(saltedRow, col+base); ok {
+			stars = append(stars, st)
 		}
-		h := fnv.New32a()
-		fmt.Fprintf(h, "%d/%d", saltedRow, col+base)
-		sum := h.Sum32()
-		sized, size := starSizeFor(sum>>4, glyph)
-		stars = append(stars, skyStar{
-			col: col, glyph: sized, offset: offset,
-			tint:   starTintFor(sum >> 12),
-			size:   size,
-			period: 0.6 + float64(sum%97)/97,
-		})
 	}
-	skyRowStarCache[key] = stars
 	return stars
+}
+
+// skyRowStars returns the row's stars for the window at `base` —
+// incrementally slid forward when possible, rebuilt otherwise. The
+// returned slice is the cache's own; callers only read it within the
+// same frame.
+func skyRowStars(saltedRow, base, termWidth int) []skyStar {
+	e := skyRowCache[saltedRow]
+	if e == nil || e.termWidth != termWidth || base < e.base || base-e.base > termWidth {
+		if len(skyRowCache) > 4096 {
+			// Bound leftover rows from old sizes/salts (a resize churn's
+			// worth is tiny; this is belt and braces, not a hot path).
+			skyRowCache = map[int]*skyRowEntry{}
+		}
+		e = &skyRowEntry{base: base, termWidth: termWidth, stars: sweepRowStars(saltedRow, base, termWidth)}
+		skyRowCache[saltedRow] = e
+		return e.stars
+	}
+	for e.base < base {
+		e.base++
+		// The window is absolute cols [2+base, termWidth-2+base]: one
+		// column leaves at the bottom edge…
+		for len(e.stars) > 0 && e.stars[0].abs < 2+e.base {
+			e.stars = e.stars[1:]
+		}
+		// …and exactly one candidate enters at the top.
+		if st, ok := starForAbs(saltedRow, termWidth-2+e.base); ok {
+			e.stars = append(e.stars, st)
+		}
+	}
+	return e.stars
 }
 
 // starAt deterministically decides whether (row, col) carries a star:
@@ -198,15 +394,54 @@ func skyRowStars(saltedRow, base, termWidth int) []skyStar {
 // never reshuffle between frames. Only a present star's brightness ever
 // moves, and only when phase itself moves.
 func starAt(row, col int) (present bool, glyph rune, offset float64) {
-	h := fnv.New32a()
-	fmt.Fprintf(h, "%d:%d", row, col)
-	sum := h.Sum32()
+	sum := starHash(row, col, ':')
 	if sum%starDensity != 0 {
 		return false, 0, 0
 	}
 	glyph = starGlyphs[(sum>>8)%8]
 	offset = float64((sum>>16)%997) / 997
 	return true, glyph, offset
+}
+
+// writeSGRGlyph appends one truecolor-foreground glyph to b as a direct
+// escape sequence: "\x1b[38;2;R;G;Bm<glyph>\x1b[m" — byte-identical to
+// lipgloss.NewStyle().Foreground(hex).Render(string(glyph)) (pinned by
+// TestWriteSGRGlyphMatchesLipgloss), with none of the box-model
+// machinery. The lipgloss round-trip here was the single hottest line
+// of the idle profile: a fresh Style + hexColor's fmt.Sprintf per star
+// cell per frame — ~a third of ALL CPU.
+func writeSGRGlyph(b *strings.Builder, c render.RGB, glyph rune) {
+	var num [4]byte
+	b.WriteString("\x1b[38;2;")
+	b.Write(strconv.AppendUint(num[:0], uint64(c.R), 10))
+	b.WriteByte(';')
+	b.Write(strconv.AppendUint(num[:0], uint64(c.G), 10))
+	b.WriteByte(';')
+	b.Write(strconv.AppendUint(num[:0], uint64(c.B), 10))
+	b.WriteByte('m')
+	b.WriteRune(glyph)
+	b.WriteString("\x1b[m")
+}
+
+// skyScratch: reusable per-row accumulation buffers for paintStarSky —
+// column-indexed slices replacing the three map[int] allocations the
+// old paint pass made per blank row per frame (most of the idle GC
+// share). Single-goroutine UI, same no-lock rule as skyRowCache; glyph
+// 0 is the "no star landed here" sentinel (no starGlyph is ever 0), and
+// touched lists exactly the columns to repaint AND to zero afterwards.
+var skyScratch struct {
+	cells   []float64
+	glyphs  []rune
+	tints   []render.RGB
+	touched []int
+}
+
+func ensureSkyScratch(termWidth int) {
+	if len(skyScratch.cells) < termWidth {
+		skyScratch.cells = make([]float64, termWidth)
+		skyScratch.glyphs = make([]rune, termWidth)
+		skyScratch.tints = make([]render.RGB, termWidth)
+	}
 }
 
 // paintStarSky is the star field's 2.0.0 upgrade (owner eye-candy
@@ -227,6 +462,7 @@ func paintStarSky(body string, contentRows, termWidth int, skyPhase float64) str
 	if contentRows > len(lines) {
 		contentRows = len(lines)
 	}
+	ensureSkyScratch(termWidth)
 	// Layer drifts in CONTINUOUS cells: slow background, faster
 	// foreground. The fractional part drives sub-cell motion blending —
 	// a star fades out of its cell and into the next as it glides, so
@@ -242,17 +478,17 @@ func paintStarSky(body string, contentRows, termWidth int, skyPhase float64) str
 		base := math.Floor(d)
 		layers[i] = layerDrift{base: int(base), frac: d - base}
 	}
+	cells, glyphs, tints := skyScratch.cells, skyScratch.glyphs, skyScratch.tints
 	for row := 0; row < contentRows; row++ {
 		if strings.TrimSpace(lines[row]) != "" {
 			continue
 		}
-		// intensity per column: blended contributions land here first,
-		// then paint in one left-to-right pass.
-		cells := map[int]float64{}
-		glyphs := map[int]rune{}
-		tints := map[int]render.RGB{}
+		// intensity per column: blended contributions land in the
+		// scratch slices first, then paint in one left-to-right pass.
+		touched := skyScratch.touched[:0]
 		for layer, ld := range layers {
 			for _, st := range skyRowStars(row+layer*3691, ld.base, termWidth) {
+				col := st.abs - ld.base
 				// Each star breathes on its OWN period (organic — a
 				// field, not a metronome); size deepens the breath and
 				// raises the ceiling: dust whispers, ✦ glows.
@@ -262,41 +498,44 @@ func paintStarSky(body string, contentRows, termWidth int, skyPhase float64) str
 				pulse := depth * ceiling
 				// The star sits between col and col-1 by frac: split its
 				// light across both cells (linear crossfade).
-				if cells[st.col] < pulse*(1-ld.frac) {
-					cells[st.col] = pulse * (1 - ld.frac)
-					glyphs[st.col] = st.glyph
-					tints[st.col] = st.tint
+				if cells[col] < pulse*(1-ld.frac) {
+					if glyphs[col] == 0 {
+						touched = append(touched, col)
+					}
+					cells[col] = pulse * (1 - ld.frac)
+					glyphs[col] = st.glyph
+					tints[col] = st.tint
 				}
-				if st.col-1 >= 2 && cells[st.col-1] < pulse*ld.frac {
-					cells[st.col-1] = pulse * ld.frac
-					glyphs[st.col-1] = st.glyph
-					tints[st.col-1] = st.tint
+				if col-1 >= 2 && cells[col-1] < pulse*ld.frac {
+					if glyphs[col-1] == 0 {
+						touched = append(touched, col-1)
+					}
+					cells[col-1] = pulse * ld.frac
+					glyphs[col-1] = st.glyph
+					tints[col-1] = st.tint
 				}
 			}
 		}
-		if len(cells) == 0 {
+		if len(touched) == 0 {
+			skyScratch.touched = touched
 			continue
 		}
-		cols := make([]int, 0, len(cells))
-		for col := range cells {
-			cols = append(cols, col)
-		}
-		sort.Ints(cols)
+		sort.Ints(touched)
 		var b strings.Builder
 		cursor := 0
-		for _, col := range cols {
+		for _, col := range touched {
 			for ; cursor < col; cursor++ {
 				b.WriteByte(' ')
 			}
-			tint, ok := tints[col]
-			if !ok {
-				tint = ambientStarFaint
-			}
-			c := lerpRGB(ambientStarBG, tint, cells[col])
-			b.WriteString(lipgloss.NewStyle().Foreground(hexColor(c)).Render(string(glyphs[col])))
+			writeSGRGlyph(&b, lerpRGB(ambientStarBG, tints[col], cells[col]), glyphs[col])
 			cursor++
 		}
 		lines[row] = b.String()
+		// Reset exactly the cells this row lit, ready for the next row.
+		for _, col := range touched {
+			cells[col], glyphs[col] = 0, 0
+		}
+		skyScratch.touched = touched[:0]
 	}
 	return strings.Join(lines, "\n")
 }
@@ -316,7 +555,7 @@ func paintStarSky(body string, contentRows, termWidth int, skyPhase float64) str
 //     two lines of the split are unconditionally skipped.
 //
 // phase rides whatever the model's existing shimmer phase is — stars
-// have no tick of their own (the fast 40ms gate must still close when
+// have no tick of their own (the fast gate must still close when
 // only ambience remains); they simply draw with whatever phase was
 // last pushed by a real animation tick.
 func paintMarginStars(body string, contentWidth, termWidth int, phase float64) string {
@@ -360,8 +599,7 @@ func paintMarginStars(body string, contentWidth, termWidth int, phase float64) s
 				b.WriteByte(' ')
 			}
 			pulse := (math.Sin((phase+s.offset)*2*math.Pi) + 1) / 2 // 0..1..0
-			c := lerpRGB(ambientStarBG, ambientStarFaint, pulse)
-			b.WriteString(lipgloss.NewStyle().Foreground(hexColor(c)).Render(string(s.glyph)))
+			writeSGRGlyph(&b, lerpRGB(ambientStarBG, ambientStarFaint, pulse), s.glyph)
 			cursor++
 		}
 		lines[row] = b.String()
@@ -432,7 +670,9 @@ func (m Model) activityPulseDot() string {
 		G: uint8(float64(0xd7) * t),
 		B: uint8(float64(0x87) * t),
 	}
-	return lipgloss.NewStyle().Foreground(hexColor(c)).Render("■")
+	var b strings.Builder
+	writeSGRGlyph(&b, c, '■')
+	return b.String()
 }
 
 // ── shared helpers ────────────────────────────────────────────────────────
@@ -450,6 +690,9 @@ func lerpRGB(a, b render.RGB, t float64) render.RGB {
 	return render.RGB{R: lerp(a.R, b.R), G: lerp(a.G, b.G), B: lerp(a.B, b.B)}
 }
 
+// hexColor adapts a render.RGB for lipgloss styles — still what the
+// windowed effects (ripple, toast, thumb) use; the per-frame star paths
+// above bypass it entirely via writeSGRGlyph.
 func hexColor(c render.RGB) color.Color {
 	return lipgloss.Color(fmt.Sprintf("#%02x%02x%02x", c.R, c.G, c.B))
 }

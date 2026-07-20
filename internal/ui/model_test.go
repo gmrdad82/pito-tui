@@ -1335,6 +1335,11 @@ func TestReplaceClearsPendingToo(t *testing.T) {
 }
 
 func TestShimmerAnimatesIndefinitely(t *testing.T) {
+	// Shimmer-marked words animate indefinitely, like the web (owner
+	// call 2026-07-05) — but since the activity gating they are
+	// AMBIENT-class: they ride the heartbeat (which pauses only in
+	// idle/blurred states), never the fast chain, so a finished shiny
+	// message can no longer pin a 60fps loop open forever.
 	m, _ := newTestModel(t, chatServer(t), WithConversation("u1"), WithTruecolor(true))
 	m = sized(m)
 	m = drive(m, m.fetchChatCmd("u1", false)())
@@ -1344,28 +1349,39 @@ func TestShimmerAnimatesIndefinitely(t *testing.T) {
 		Type:  cable.TypeEventAppend,
 		Event: api.Event{ID: 40, TurnID: 15, Kind: "system", Payload: []byte(body)},
 	}})
-	if len(m.shimmer) != 1 {
-		t.Fatal("shimmer event must register for animation")
+	if len(m.ambient) != 1 {
+		t.Fatal("shimmer event must register with the ambient class")
+	}
+	if len(m.shimmer) != 0 {
+		t.Fatal("a finished shiny message must NOT hold the fast animation gate")
 	}
 	if cmd == nil {
-		t.Fatal("shimmer must start the animation loop")
+		t.Fatal("the cable arrival must start ticks (the dot pulse rides the fast chain)")
+	}
+	// The delivery's own dot pulse holds the fast gate for its ~1.2s
+	// window; once it drains, the gate closes and Update's re-arm hands
+	// the cadence to the ambient heartbeat.
+	m = driveAnim(t, m, 200)
+	if !m.heartbeatTicking {
+		t.Fatal("the ambient heartbeat must take over once the fast gate closes")
 	}
 
-	// Ticks advance the phase and re-arm forever (owner call: the web
-	// shimmers indefinitely, so does the terminal).
+	// Heartbeat ticks advance the phase and re-arm forever while active
+	// (the harness clock is pinned, so the model sits inside the
+	// activity grace window — full rate).
 	before := m.phase
 	for i := 0; i < 3; i++ {
 		var tick tea.Cmd
-		m, tick = driveCmd(m, AnimTickMsg{})
+		m, tick = driveCmd(m, HeartbeatTickMsg{})
 		if tick == nil {
-			t.Fatalf("tick %d must re-arm — shimmer never settles", i)
+			t.Fatalf("tick %d must re-arm — shimmer never settles while active", i)
 		}
 	}
 	if m.phase == before {
 		t.Error("phase must advance")
 	}
-	if len(m.shimmer) != 1 {
-		t.Error("shimmer set must persist")
+	if len(m.ambient) != 1 {
+		t.Error("ambient set must persist")
 	}
 }
 

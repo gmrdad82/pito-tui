@@ -16,11 +16,11 @@
 // blob (git show <ref>:config/pito/tools.yml), so WIP in the pito
 // checkout can't leak in.
 //
-// Currently pinned to pito v3.4.0 — re-pin deliberately (and regenerate)
+// Currently pinned to pito v4.0.0 — re-pin deliberately (and regenerate)
 // when pairing with a newer pito release; don't let it drift silently.
 package grammar
 
-//go:generate env PITO_REF=v3.6.0 go run github.com/gmrdad82/pito-tui/tools/toolsgen
+//go:generate env PITO_REF=v4.0.0 go run github.com/gmrdad82/pito-tui/tools/toolsgen
 
 import (
 	_ "embed"

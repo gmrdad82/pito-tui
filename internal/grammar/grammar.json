@@ -333,26 +333,6 @@
       ]
     },
     {
-      "name": "price",
-      "aliases": [],
-      "auth": "session",
-      "has_chat": true,
-      "has_slash": false,
-      "universal_reply": true,
-      "reply_targets": [
-        {
-          "target": "game_detail",
-          "mode": "append",
-          "aliases": []
-        },
-        {
-          "target": "game_list",
-          "mode": "append",
-          "aliases": []
-        }
-      ]
-    },
-    {
       "name": "delete",
       "aliases": [
         "rm",
@@ -420,26 +400,6 @@
         },
         {
           "target": "video_detail",
-          "mode": "append",
-          "aliases": []
-        }
-      ]
-    },
-    {
-      "name": "platform",
-      "aliases": [],
-      "auth": "session",
-      "has_chat": true,
-      "has_slash": false,
-      "universal_reply": true,
-      "reply_targets": [
-        {
-          "target": "game_detail",
-          "mode": "append",
-          "aliases": []
-        },
-        {
-          "target": "game_list",
           "mode": "append",
           "aliases": []
         }
@@ -1803,12 +1763,6 @@
         "yes": "on"
       }
     },
-    "platform_subcommands": {
-      "members": [
-        "set",
-        "unset"
-      ]
-    },
     "platforms": {
       "members": [
         "PlayStation 5",
@@ -1851,12 +1805,6 @@
         "xss": "Xbox Series S",
         "xsx": "Xbox Series X"
       }
-    },
-    "price_subcommands": {
-      "members": [
-        "set",
-        "unset"
-      ]
     },
     "release_status": {
       "members": [

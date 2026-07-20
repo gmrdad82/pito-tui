@@ -265,6 +265,58 @@ func TestSaveEmptyTelemetryWritesCommentedStub(t *testing.T) {
 	}
 }
 
+// The [fx] table: absent → defaults; partial → key-by-key overlay;
+// changed → written as a real table; default → the commented stub.
+func TestFxDefaultsAndPartialOverlay(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Fx != defaultFx() {
+		t.Errorf("missing file Fx = %+v, want defaults %+v", cfg.Fx, defaultFx())
+	}
+	if err := os.WriteFile(path, []byte("instance_url = \"https://dev.pitomd.com\"\n[fx]\nidle_fps = 4\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := defaultFx()
+	want.IdleFPS = 4
+	if cfg.Fx != want {
+		t.Errorf("partial [fx] table = %+v, want overlay %+v", cfg.Fx, want)
+	}
+}
+
+func TestSaveFxRoundTripAndCommentedStub(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	// Default fx: the saved file keeps the table as a commented stub.
+	if err := Save(path, Config{InstanceURL: "https://dev.pitomd.com", Fx: defaultFx()}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "# [fx]") {
+		t.Error("a default fx table must stay a commented stub")
+	}
+	// Changed fx: written for real, and round-trips.
+	changed := Fx{Sky: false, PauseOnBlur: true, IdleGraceSeconds: 60, IdleFPS: 12, DeepIdleMinutes: 0}
+	if err := Save(path, Config{InstanceURL: "https://dev.pitomd.com", Fx: changed}); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Fx != changed {
+		t.Errorf("Fx round trip = %+v, want %+v", loaded.Fx, changed)
+	}
+}
+
 func TestNormalizeInstanceURL(t *testing.T) {
 	good := map[string]string{
 		"dev.pitomd.com":            "https://dev.pitomd.com",

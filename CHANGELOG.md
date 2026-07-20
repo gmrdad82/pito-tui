@@ -4,6 +4,78 @@ All notable changes to pito-tui are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); from 1.0.0 onward the
 project follows [Semantic Versioning](https://semver.org/).
 
+## [4.0.0] — 2026-07-21
+
+### Changed
+
+- **Re-pinned to pito v4.0.0** — the grammar and copy snapshots regenerate
+  against the released tag: the retired `price` and `platform` verbs leave
+  the mirror and the palette (the major bump — the surface this TUI
+  advertises shrank with its server's), `update` carries the field-writes,
+  and the schedule grammar/copy speak the new spacing law.
+- **The ambient fx now pause when you're not looking and idle down when
+  you're not typing — the 103%-CPU background tab is dead.** The
+  glyph fx themselves are untouched (the visual contract: they are the
+  product); what changed is when frames get built at all, plus how
+  cheaply each one is built. State by state:
+  - **Focused and recently active: identical.** Same 60fps, same drift,
+    same twinkle, same shimmer — and each frame is far cheaper to build
+    (below), so the active state is faster too, not just the idle ones.
+  - **Terminal loses focus** (background tab, other window): every
+    effect freezes in place the instant the terminal reports blur, and
+    resumes exactly where it paused on focus — no jump-cut, no
+    wall-clock catch-up. Knob: `fx.pause_on_blur` (default `true`).
+    Two caveats: blur also fires when the window is visible on another
+    monitor but not OS-focused (the sky stands still there while you
+    can still see it); and tmux only reports focus with
+    `set -g focus-events on` — GNU screen and the Linux console never
+    do, and those fail safe to _focused_ (fx keep running; the idle
+    ladder below still recovers the CPU).
+  - **Focused but no input for a while**: after `fx.idle_grace_seconds`
+    (default 30) without a keystroke, mouse event, or server message,
+    the frame rate drops to `fx.idle_fps` (default 8) at the SAME
+    wall-clock drift speed — same motion, fewer frames, visibly
+    steppier up close. Any activity snaps back to 60 on the very next
+    message.
+  - **Left alone entirely**: after `fx.deep_idle_minutes` (default 5,
+    `0` = never) with no input and no cable traffic, the fx pause
+    outright even while focused — the near-zero-CPU floor, and the
+    whole idle path on terminals that can't report focus. The screen
+    shows a still sky until you touch anything.
+  - Transcript and cable processing continue normally in every state —
+    only rendering ticks stop.
+- **One finished @ai reply no longer pins a 60fps loop open forever** —
+  the forever-anim leak behind the idle burn: a done @ai reply's
+  gradient bar (and every shimmer-marked shiny word) held the fast
+  animation chain open for the process lifetime, stacking a second 16ms
+  loop on the sky's. Finished-but-animating content now rides ONE
+  unified heartbeat with the sky — identical look and cadence while
+  active, pause-with-everything when idle/blurred — and at most one
+  16ms chain exists at any moment. Pending work (an @ai turn still
+  thinking, unresolved confirmations) keeps the fast chain exactly as
+  before.
+- **Star frames build far cheaper** — invisible by construction, same
+  bytes out: star cells emit their SGR color sequence directly instead
+  of a fresh lipgloss style per glyph per frame (~a third of all idle
+  CPU), star positions hash with an inline integer FNV-1a instead of
+  `fmt` into a fresh allocation (~another eighth, positions provably
+  unchanged), and each row's star list slides incrementally with the
+  drift instead of re-sweeping every column when the parallax base
+  advances. The app's own sky-painting cost drops roughly tenfold;
+  what remains of a 60fps frame is the terminal diff/flush itself —
+  which the gating above stops scheduling when nobody needs it.
+  Deliberately NOT touched: active fps stays 60 (the 280Hz ruling),
+  star density and brightness stay as-is.
+
+### Added
+
+- **`[fx]` config table** — every rate and gate above gets a knob in
+  `config.toml`, settable live via `pito-tui config fx.<key>=<value>`:
+  `sky` (the first runtime toggle for the star sky — no rebuild
+  needed), `pause_on_blur`, `idle_grace_seconds`, `idle_fps`,
+  `deep_idle_minutes`. Defaults ← file ← flags, like everything else;
+  a config written by an older binary simply keeps all defaults.
+
 ## [3.2.0] — 2026-07-19
 
 ### Added
@@ -166,8 +238,8 @@ project follows [Semantic Versioning](https://semver.org/).
   the web's conversation-name cell types+submits — instead of jumping
   locally.
 - **Four more ctrl+k entries** — `search games for` / `search games
-  like` join the youtube section, `search conversations for` / `search
-  conversations like` join conversations. Labels land with the next
+like` join the youtube section, `search conversations for` / `search
+conversations like` join conversations. Labels land with the next
   copygen re-pin against pito's palette locale; until then they fall
   back to their insert text, the same COPY LAW fallback every other
   ctrl+k label already has.
@@ -190,8 +262,8 @@ project follows [Semantic Versioning](https://semver.org/).
   over-fetched, and resizing between pages changes the very next page's
   size to match.
 - **Status bar's action hints lose their doubled space** — `ctrl+f
-  footage · ctrl+k commands` replaces `ctrl+f update footage · ctrl+k
-  commands`: a new `KbdPlain` chip renderer owns no self-padding of its
+footage · ctrl+k commands` replaces `ctrl+f update footage · ctrl+k
+commands`: a new `KbdPlain` chip renderer owns no self-padding of its
   own, instead of `KbdBare`, which was already padding a space the
   caller was also adding.
 - **Scroll pills stop counting past ten** — the ctrl+home / ctrl+end

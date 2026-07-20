@@ -59,6 +59,40 @@ func TestSetConfigAliasesAndPreservation(t *testing.T) {
 	}
 }
 
+// The [fx] table's whole command surface: booleans in the house on/off
+// vocabulary, bounded integers, earlier keys preserved, and the show
+// line reporting the effective values.
+func TestSetConfigFxKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	var out strings.Builder
+	if err := SetConfig(&out, path, []string{
+		"fx.sky=off", "fx.pause_on_blur=on",
+		"fx.idle_grace_seconds=60", "fx.idle_fps=12", "fx.deep_idle_minutes=0",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fx := cfg.Fx
+	if fx.Sky || !fx.PauseOnBlur || fx.IdleGraceSeconds != 60 || fx.IdleFPS != 12 || fx.DeepIdleMinutes != 0 {
+		t.Errorf("fx did not persist: %+v", fx)
+	}
+	if !strings.Contains(out.String(), "sky=false") || !strings.Contains(out.String(), "idle_fps=12") {
+		t.Errorf("confirmation output must show the fx values:\n%s", out.String())
+	}
+	// A later unrelated set keeps the fx values (the preservation rule
+	// every other key already follows).
+	if err := SetConfig(&strings.Builder{}, path, []string{"sounds=off"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ = config.Load(path)
+	if cfg.Fx != fx {
+		t.Errorf("fx = %+v after unrelated set, want %+v preserved", cfg.Fx, fx)
+	}
+}
+
 func TestSetConfigRejectsNonsense(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	for _, pairs := range [][]string{
@@ -66,6 +100,10 @@ func TestSetConfigRejectsNonsense(t *testing.T) {
 		{"volume=11"},         // unknown key
 		{"sounds=loud"},       // bad value
 		{"server=ftp://nope"}, // bad scheme
+		{"fx.idle_fps=0"},     // below the 1..60 bound
+		{"fx.idle_fps=61"},    // above it
+		{"fx.sky=maybe"},      // not on|off
+		{"fx.deep_idle_minutes=-1"},
 	} {
 		if err := SetConfig(&strings.Builder{}, path, pairs); err == nil {
 			t.Errorf("SetConfig(%v) accepted nonsense", pairs)
