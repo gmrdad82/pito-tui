@@ -86,6 +86,7 @@ func (m Model) maybeFetchMore() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.notif.fetching = true
+	m.fetchStarted["notif"] = m.now()
 	return m, tea.Batch(m.notificationsFetchCmd(m.notif.next), m.animate())
 }
 
@@ -94,6 +95,7 @@ func (m Model) onNotificationsFetched(msg NotificationsFetchedMsg) (tea.Model, t
 		return m, nil // panel closed before this landed — drop it
 	}
 	m.notif.fetching = false
+	delete(m.fetchStarted, "notif")
 	if msg.Err != nil {
 		if errors.Is(msg.Err, api.ErrNotificationsUnavailable) {
 			m.mode = modeChat

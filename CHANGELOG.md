@@ -4,6 +4,29 @@ All notable changes to pito-tui are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); from 1.0.0 onward the
 project follows [Semantic Versioning](https://semver.org/).
 
+## [4.0.1] — 2026-07-21
+
+### Fixed
+
+- **The residual burn: answered confirmations read as live work** — the
+  server stamps an answered or superseded confirmation card with
+  `reply_consumed: true`, but the fast animation chain only honored a
+  `resolved` flag that belongs to the follow-up outcome event — so every
+  confirmation ever answered in a resumed conversation counted as
+  pending work and pinned the chain at full rate forever, restart-proof
+  (80–100% CPU with 26 answered cards in one history). Either stamp now
+  settles the card; a genuinely unanswered card still animates.
+- **The fast chain joins the park law** — spinners, pending cards and
+  transient effects now pause on terminal blur and in deep idle exactly
+  like the sky's heartbeat (frames nobody can see are never built) and
+  resume seamlessly on focus or activity. In 4.0.0 only the sky obeyed
+  blur; "work in progress" rendering was exempt on the assumption it
+  lasts seconds.
+- **Fetch flags heal themselves** — a fetch whose response never arrives
+  (a backend flip mid-request, a dropped cable) now force-clears after a
+  30s watchdog instead of holding the render loop open indefinitely; the
+  surface simply shows its resting state and refetches on reopen.
+
 ## [4.0.0] — 2026-07-21
 
 ### Changed

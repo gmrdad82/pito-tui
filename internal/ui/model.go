@@ -135,9 +135,15 @@ type Model struct {
 	// NewModel match config.defaults()): pause-on-blur, the idle grace
 	// window, the idle-throttle fps, and the deep-idle park (0 = never).
 	fxPauseOnBlur bool
-	fxIdleGrace   time.Duration
-	fxIdleFPS     int
-	fxDeepIdle    time.Duration
+	// fetchStarted stamps every in-flight fetch flag (notif/entity/
+	// aiPicker/picker) so the watchdog in onAnimTick can force-clear a
+	// flag whose response never arrived (a backend flip mid-fetch, a
+	// dropped cable) — a latched fetching flag must never pin the fast
+	// chain forever (4.0.1, the 84.9%-at-boot incident).
+	fetchStarted map[string]time.Time
+	fxIdleGrace  time.Duration
+	fxIdleFPS    int
+	fxDeepIdle   time.Duration
 	// fpsOn/fpsTicking/fps drive ctrl+f9's top-left "NN fps" chip
 	// (fpsoverlay.go): fpsOn is the toggle itself; fps is nil whenever
 	// it's off (zero work, no allocations) and a fresh *fpsCounter the
@@ -500,6 +506,7 @@ func NewModel(client *api.Client, connect ConnectFunc, opts ...Option) Model {
 		follow:       true,
 		histIndex:    -1, // -1 = "at the draft" (history_controller.js connect())
 		now:          time.Now,
+		fetchStarted: map[string]time.Time{},
 		scopeChannel: "@all",
 		scopePeriod:  "7d",
 		splashOn:     true,
@@ -627,6 +634,7 @@ func (m Model) maybeFetchMorePicker() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.pickerFetching = true
+	m.fetchStarted["picker"] = m.now()
 	return m, tea.Batch(m.fetchResumeMoreCmd(m.pickerNext), m.animate())
 }
 
@@ -663,8 +671,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if !ok {
 		return next, cmd
 	}
-	if hb := nm.startHeartbeat(); hb != nil {
+	hb := nm.startHeartbeat()
+	ac := nm.animate() // resume the fast chain too after focus/activity (no-op while parked or already ticking)
+	switch {
+	case hb != nil && ac != nil:
+		return nm, tea.Batch(cmd, hb, ac)
+	case hb != nil:
 		return nm, tea.Batch(cmd, hb)
+	case ac != nil:
+		return nm, tea.Batch(cmd, ac)
 	}
 	return nm, cmd
 }
@@ -1210,6 +1225,7 @@ func (m Model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.pickerNext = ""
 			m.pickerNotice = ""
 			m.pickerFetching = true
+			m.fetchStarted["picker"] = m.now()
 			return m, tea.Batch(m.fetchResumeCmd(), m.animate())
 		}
 		if noun, command, ok := entityPickerTrigger(text); ok {
@@ -1531,11 +1547,19 @@ func eventNeedsTicks(ev api.Event) bool {
 		_ = json.Unmarshal(ev.Payload, &p)
 		return p.Status != "done"
 	case api.KindThinking, api.KindConfirmation, api.KindConfirmationFollowUp:
+		// The server stamps an answered/superseded card with
+		// reply_consumed:true (FollowUpDispatchJob's consume seam);
+		// resolved:true is the follow-up outcome's own flag. Honoring only
+		// `resolved` here was the 4.0.0 residual burn: every answered
+		// confirmation in a resumed conversation read as live pending work
+		// and pinned the fast chain forever (the owner's 80-100% CPU,
+		// restart-proof). Either stamp means the card is settled.
 		var p struct {
-			Resolved bool `json:"resolved"`
+			Resolved      bool `json:"resolved"`
+			ReplyConsumed bool `json:"reply_consumed"`
 		}
 		_ = json.Unmarshal(ev.Payload, &p)
-		return !p.Resolved
+		return !p.Resolved && !p.ReplyConsumed
 	}
 	return false
 }
@@ -1661,6 +1685,7 @@ func (m *Model) acceptSuggestion() {
 // lands — keeps pulling, mirroring notificationsPanel.onNotificationsFetched.
 func (m Model) onResume(msg ResumeFetchedMsg) (tea.Model, tea.Cmd) {
 	m.pickerFetching = false
+	delete(m.fetchStarted, "picker")
 	if msg.Err != nil {
 		// pickerNext is left untouched on error: a later scroll nudge
 		// retries the SAME cursor via pickerNeedsFetch — no separate
@@ -2014,8 +2039,42 @@ func (m *Model) animate() tea.Cmd {
 	if m.animating || !m.animGateOpen() {
 		return nil
 	}
+	// The fast chain obeys the same blur/deep-idle park as the heartbeat
+	// (4.0.1): frames nobody can see are not built. The Update seam's
+	// blanket re-arm resumes it on the next focus-in/activity.
+	if _, park := m.heartbeatPlan(m.now()); park {
+		return nil
+	}
 	m.animating = true
 	return animTick()
+}
+
+// fetchWatchdog bounds how long any fetching flag may stay raised with
+// no response before it force-clears: long enough for a slow real fetch,
+// short enough that a dead one stops taxing the render loop.
+const fetchWatchdog = 30 * time.Second
+
+// expireStuckFetches force-clears fetch flags whose response never came
+// (stamped in fetchStarted at each request site). The cleared surface
+// simply shows its resting state; reopening it refetches.
+func (m *Model) expireStuckFetches(now time.Time) {
+	for name, started := range m.fetchStarted {
+		if now.Sub(started) < fetchWatchdog {
+			continue
+		}
+		delete(m.fetchStarted, name)
+		switch name {
+		case "notif":
+			m.notif.fetching = false
+		case "entity":
+			m.entity.fetching = false
+		case "aiPicker":
+			m.aiPicker.fetching = false
+		case "picker":
+			m.pickerFetching = false
+			delete(m.fetchStarted, "picker")
+		}
+	}
 }
 
 func animTick() tea.Cmd {
@@ -2023,6 +2082,16 @@ func animTick() tea.Cmd {
 }
 
 func (m Model) onAnimTick() (tea.Model, tea.Cmd) {
+	now := m.now()
+	// Watchdog first: a fetch flag whose response never arrived clears
+	// itself after fetchWatchdog, so the gate below reads healed state.
+	m.expireStuckFetches(now)
+	if _, park := m.heartbeatPlan(now); park {
+		// Same law as the heartbeat: park on blur/deep-idle; the Update
+		// seam re-arms on focus/activity and effects resume in place.
+		m.animating = false
+		return m, nil
+	}
 	if !m.animGateOpen() {
 		m.animating = false
 		return m, nil

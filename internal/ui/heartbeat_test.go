@@ -272,3 +272,85 @@ func TestHeartbeatDefersToOpenFastChain(t *testing.T) {
 		t.Fatalf("fast-chain sky step = %v, want %v", got, want)
 	}
 }
+
+// ── 4.0.1: the fast chain joins the park law; fetch flags self-heal ────────
+
+// A fetch flag whose response never arrives (backend flip mid-fetch, a
+// dropped cable) must clear itself after fetchWatchdog instead of pinning
+// the fast chain at 60fps forever — the 84.9%-at-boot incident.
+func TestStuckFetchExpiresAndUnpinsFastChain(t *testing.T) {
+	m, now := clockModel(t)
+	m.pickerFetching = true
+	m.fetchStarted["picker"] = *now
+	m.animating = true
+
+	if !m.animGateOpen() {
+		t.Fatal("a raised fetching flag must hold the anim gate open")
+	}
+
+	*now = now.Add(fetchWatchdog + time.Second)
+	m2, cmd := driveCmd(m, AnimTickMsg{})
+	if m2.pickerFetching {
+		t.Fatal("the watchdog must force-clear a latched fetching flag")
+	}
+	if len(m2.fetchStarted) != 0 {
+		t.Fatal("the watchdog must drop the expired stamp")
+	}
+	if cmd != nil || m2.animating {
+		t.Fatal("with the flag healed the fast chain must stop re-arming")
+	}
+}
+
+// Blur parks the fast chain exactly like the heartbeat (frames nobody can
+// see), and the Update seam's blanket re-arm resumes it on focus-in.
+func TestFastChainParksOnBlurAndResumesOnFocus(t *testing.T) {
+	m, _ := clockModel(t)
+	m.toastTicks = 100 // any alive transient holds the gate open
+	m.animating = true
+
+	m = drive(m, tea.BlurMsg{})
+	m2, cmd := driveCmd(m, AnimTickMsg{})
+	if cmd != nil || m2.animating {
+		t.Fatal("the first anim tick after blur must park the fast chain")
+	}
+	if m2.toastTicks != 100 {
+		t.Fatal("a parked tick must freeze effect counters, not advance them")
+	}
+
+	m3, cmd := driveCmd(m2, tea.FocusMsg{})
+	if !m3.animating || cmd == nil {
+		t.Fatal("focus-in must re-arm the fast chain via the Update seam")
+	}
+}
+
+// Deep idle (fx.deep_idle_minutes without input or cable) parks the fast
+// chain even while focused — the same blessed freeze the sky obeys.
+func TestDeepIdleParksFastChain(t *testing.T) {
+	m, now := clockModel(t)
+	m.toastTicks = 100
+	m.animating = true
+
+	*now = now.Add(6 * time.Minute) // beyond the 5-minute default
+	m2, cmd := driveCmd(m, AnimTickMsg{})
+	if cmd != nil || m2.animating {
+		t.Fatal("deep idle must park the fast chain")
+	}
+}
+
+// An answered/superseded confirmation carries the server's
+// reply_consumed:true stamp (its resolved flag stays unset — that key
+// belongs to the follow-up outcome event). It must NOT read as pending
+// work: 26 such cards in one resumed conversation pinned the fast chain
+// at full rate forever (the 4.0.0 residual burn).
+func TestConsumedConfirmationDoesNotPinFastChain(t *testing.T) {
+	consumed := api.Event{Kind: api.KindConfirmation, TurnID: 7,
+		Payload: []byte(`{"command":"video_schedule","reply_consumed":true}`)}
+	if eventNeedsTicks(consumed) {
+		t.Fatal("a reply_consumed confirmation must not need fast ticks")
+	}
+	live := api.Event{Kind: api.KindConfirmation, TurnID: 8,
+		Payload: []byte(`{"command":"video_schedule"}`)}
+	if !eventNeedsTicks(live) {
+		t.Fatal("a live unanswered confirmation must still animate")
+	}
+}

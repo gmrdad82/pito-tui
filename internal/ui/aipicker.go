@@ -96,6 +96,7 @@ func (m Model) onAiPickerFetched(msg AiPickerFetchedMsg) (tea.Model, tea.Cmd) {
 		return m, nil // closed before the state landed
 	}
 	m.aiPicker.fetching = false
+	delete(m.fetchStarted, "aiPicker")
 	if msg.Err != nil {
 		if isUnauthorized(msg.Err) {
 			m.needsLogin = true
@@ -144,6 +145,7 @@ func (m Model) onAiSettingsPatched(msg AiSettingsPatchedMsg) (tea.Model, tea.Cmd
 	}
 	if msg.Refetch {
 		m.aiPicker.fetching = true
+		m.fetchStarted["aiPicker"] = m.now()
 		return m, tea.Batch(m.aiPickerFetchCmd(), m.animate())
 	}
 	return m, nil

@@ -108,6 +108,7 @@ func (m Model) maybeFetchMoreEntities() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.entity.fetching = true
+	m.fetchStarted["entity"] = m.now()
 	return m, tea.Batch(m.entityFetchCmd(), m.animate())
 }
 
@@ -127,6 +128,7 @@ func (m Model) onEntityPickerFetched(msg EntityPickerFetchedMsg) (tea.Model, tea
 		return m, nil // panel closed or switched before this landed
 	}
 	m.entity.fetching = false
+	delete(m.fetchStarted, "entity")
 	if msg.Err != nil {
 		if isUnauthorized(msg.Err) {
 			m.needsLogin = true
