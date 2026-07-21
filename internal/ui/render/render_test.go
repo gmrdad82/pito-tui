@@ -435,10 +435,6 @@ func TestAnalyzeChartsFromLivePayload(t *testing.T) {
 		t.Errorf("solid block runes leaked into charts:\n%s", out)
 	}
 	for _, want := range []string{
-		"total -2",          // subs total (negative-friendly)
-		"prev 37",           // views previous window
-		"target 3.22/d",     // pacing
-		"27%",               // avg_viewed_pct via total_pct
 		"88.80%",            // the heart's pct, now inside heartCanvas's braille legend (was the old "♥ 88.8%" text line)
 		"14453 Likes",       // heart detail, now heartCanvas's "<n> Likes / <n> Dislikes (<pct>)" legend (was lowercase "likes")
 		"Subs stands at -2", // Butler caption survives html+shimmer stripping
@@ -463,6 +459,9 @@ func TestAnalyzeChartsFromLivePayload(t *testing.T) {
 	// percent scale, not a stray "1 Jul"/"5 Jul" repeat of the dates above.
 	if !strings.Contains(out, "0%       25%        50%       75%     100%") {
 		t.Errorf("avg_viewed_pct must render the fixed percent x-axis:\n%s", out)
+	}
+	if strings.Contains(out, "· target") {
+		t.Errorf("no total/prev/target legend line must remain under stash charts (web parity: no such line exists there):\n%s", out)
 	}
 }
 

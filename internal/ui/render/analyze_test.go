@@ -125,20 +125,18 @@ func TestSparkRendersTheFullTickedAreaChart(t *testing.T) {
 	// flip to "Jun '26" the day the real clock crossed into 2027.
 	fixedNow := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
 	r := New(60, WithPlain(), WithNow(func() time.Time { return fixedNow }))
-	prev := 37.0
 	out := stripANSI(r.spark("views", analyzeSeries{
 		Dates:       []string{"2026-06-29", "2026-06-30", "2026-07-01", "2026-07-02", "2026-07-03"},
 		Series:      []float64{5, 12, 3, 1, 0},
-		Total:       21,
-		Previous:    &prev,
 		TargetDaily: 322.42857142857144,
 	}, 60))
 	lines := strings.Split(out, "\n")
-	// 11 plot rows + 1 x-tick row + 1 meta row — the old bare sparkline
-	// was 2 plot rows + 1 meta row with no x-tick line at all.
-	if len(lines) != aiChartRows+2 {
-		t.Fatalf("stash chart must render %d rows (11 plot + x-ticks + meta), got %d:\n%s",
-			aiChartRows+2, len(lines), out)
+	// 11 plot rows + 1 x-tick row, full stop — no meta row (removed for web
+	// parity: no such line exists there). The old bare sparkline was 2 plot
+	// rows + 1 meta row with no x-tick line at all.
+	if len(lines) != aiChartRows+1 {
+		t.Fatalf("stash chart must render %d rows (11 plot + x-ticks), got %d:\n%s",
+			aiChartRows+1, len(lines), out)
 	}
 	if !strings.Contains(lines[0], "322") {
 		t.Errorf("top row must carry the ceiling y-tick (compactCount of target_daily 322.43): %q", lines[0])
@@ -146,8 +144,8 @@ func TestSparkRendersTheFullTickedAreaChart(t *testing.T) {
 	if !strings.Contains(lines[aiChartRows], "29 Jun") {
 		t.Errorf("x-tick row must render day-first dates (web's Area#format_date \"%%-d %%b\"): %q", lines[aiChartRows])
 	}
-	if got, want := lines[aiChartRows+1], "total 21 · prev 37 · target 322.43/d"; got != want {
-		t.Errorf("meta caption line (a TUI-only addition over the web) must be unchanged by this upgrade: got %q, want %q", got, want)
+	if strings.Contains(out, "total ") || strings.Contains(out, "· target") {
+		t.Errorf("no total/prev/target legend line must remain (web parity: no such line exists there): %q", out)
 	}
 }
 
@@ -186,6 +184,81 @@ func TestSparkAvgViewedPctUsesFixedPercentXAxisRegardlessOfDates(t *testing.T) {
 	}
 	if !strings.Contains(lines[0], "50.80%") {
 		t.Errorf("top y-tick must be percent-formatted (XX.XX%%), not the raw \"50.8\": %q", lines[0])
+	}
+}
+
+// ---------------------------------------------------------------------
+// analyzeBlock — chart+caption composition, parity with the web
+// (analyze_cell_component.html.erb passes the caption INTO the
+// visualizer, which renders it BENEATH the chart, wrapped to the
+// chart's own visual width — never the cell's).
+
+func TestAnalyzeCaptionRendersBelowTheChartXAxis(t *testing.T) {
+	// A minimal one-metric payload: one stash chart entry ("views") plus
+	// its caption living at the analyze object's own top-level "views"
+	// key (beside "stash", per the live payload shape — see
+	// testdata/analyze_channel.json's own top-level "subs").
+	payload := []byte(`{"analyze": {"stash": {"views": {"slot": "charts",
+		"data": {"dates": ["2026-06-29","2026-06-30","2026-07-01","2026-07-02","2026-07-03"],
+		"series": [1,2,3,4,5], "total": 15}}}, "views": {"caption": "Views ticked up this week."}}}`)
+	// Pinned now (2026-07-19) matches the fixture dates' year — the "29 Jun"
+	// x-tick assertion below rides the house rule's current-year branch.
+	fixedNow := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
+	r := New(60, WithPlain(), WithNow(func() time.Time { return fixedNow }))
+	out := stripANSI(r.analyzeBlock(payload))
+	lines := strings.Split(out, "\n")
+	xIdx, capIdx := -1, -1
+	for i, line := range lines {
+		if xIdx < 0 && strings.Contains(line, "29 Jun") {
+			xIdx = i
+		}
+		if capIdx < 0 && strings.Contains(line, "Views ticked up") {
+			capIdx = i
+		}
+	}
+	if xIdx < 0 {
+		t.Fatalf("chart's x-tick row (\"29 Jun\") not found:\n%s", out)
+	}
+	if capIdx < 0 {
+		t.Fatalf("caption line not found:\n%s", out)
+	}
+	if capIdx <= xIdx {
+		t.Errorf("caption must render BELOW the chart's x-tick row (line %d), got it at line %d:\n%s", xIdx, capIdx, out)
+	}
+}
+
+func TestAnalyzeCaptionNeverWidensPastTheChart(t *testing.T) {
+	// A deliberately long caption — long enough to word-wrap across
+	// several lines — must never produce a wrapped line wider than the
+	// chart body it sits beneath (the web sizes the caption's <p> to the
+	// SAME chart box; the terminal's stand-in is the chart's own widest
+	// rendered line).
+	longCaption := "Views ticked up a little this week and then settled back down again, nothing dramatic to report but worth a mention regardless of how small the movement really was."
+	payload := []byte(`{"analyze": {"stash": {"views": {"slot": "charts",
+		"data": {"dates": ["2026-06-29","2026-06-30","2026-07-01","2026-07-02","2026-07-03"],
+		"series": [1,2,3,4,5], "total": 15}}}, "views": {"caption": "` + longCaption + `"}}}`)
+	out := stripANSI(plain().analyzeBlock(payload))
+	lines := strings.Split(out, "\n")
+	// spark() renders the single-metric payload's chart as aiChartRows plot
+	// rows + 1 x-tick row (no meta row — removed for web parity); the
+	// wrapped caption is everything after that.
+	chartLastIdx := aiChartRows
+	chartMax, capMax := 0, 0
+	for i, line := range lines {
+		w := lipgloss.Width(line)
+		if i <= chartLastIdx {
+			if w > chartMax {
+				chartMax = w
+			}
+		} else if w > capMax {
+			capMax = w
+		}
+	}
+	if capMax == 0 {
+		t.Fatalf("no caption lines found after the chart body:\n%s", out)
+	}
+	if capMax > chartMax {
+		t.Errorf("a caption line (%d cells) must never be wider than the chart's widest line (%d cells):\n%s", capMax, chartMax, out)
 	}
 }
 
@@ -374,7 +447,10 @@ func TestAnalyzeBreakdownsChannelRendersEveryExtra(t *testing.T) {
 		"25–34 58.3%", "35–44 20.6%", "18–24 15.7%", "13–17 5.4%", // demographics_age
 		"Male 95.4%", "Female 4.6%", // demographics_gender
 		// retention + comments captions and comments' day-first tick
-		"mean retention", "below average", // retention caption
+		// ("Filed under below" is retention's caption up to its word-wrap
+		// point — the caption now wraps at the CHART's own visual width,
+		// so "below average" itself lands split across two lines).
+		"mean retention", "Filed under below", // retention caption
 		"settled at 5", // comments caption
 		"10 Mar",       // comments' first date, day-first x-tick
 	} {
@@ -401,14 +477,14 @@ func TestAnalyzeBreakdownsChannelOrderFollowsMetricKeys(t *testing.T) {
 	// devices, geography, demographics_age, demographics_gender,
 	// retention, comments.
 	markers := []string{
-		"Wednesday",      // day_of_week_heatmap caption subject
-		"Not subscribed", // subscribed_status
-		"Mobile",         // devices
-		"United States",  // geography
-		"25–34",          // demographics_age
-		"Male",           // demographics_gender
-		"below average",  // retention
-		"settled at 5",   // comments
+		"Wednesday",         // day_of_week_heatmap caption subject
+		"Not subscribed",    // subscribed_status
+		"Mobile",            // devices
+		"United States",     // geography
+		"25–34",             // demographics_age
+		"Male",              // demographics_gender
+		"Filed under below", // retention (caption wraps before "average" — see the other test)
+		"settled at 5",      // comments
 	}
 	prev := -1
 	for _, m := range markers {

@@ -4,6 +4,22 @@ All notable changes to pito-tui are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); from 1.0.0 onward the
 project follows [Semantic Versioning](https://semver.org/).
 
+## [4.1.0] — 2026-07-21
+
+### Changed
+
+- **Analyze captions move under their charts, dressed to the chart's
+  width** — the web's analytics cells render every caption beneath their
+  visualizer; the terminal had it inverted, floating each Butler line
+  above its canvas and letting long sentences wrap at the two-up cell's
+  full 54 columns, wider than the chart they describe. Captions (the
+  likes hearts' included) now sit below their chart and wrap at the
+  chart's own visual width, in both the two-up and single-column
+  layouts.
+- **The `total · prev · target` line under stash charts is gone** — a
+  TUI-only invention with no web counterpart; the target still shows as
+  the chart's dotted pacing line and ceiling tick, same as the web.
+
 ## [4.0.1] — 2026-07-21
 
 ### Fixed

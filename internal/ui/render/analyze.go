@@ -62,9 +62,6 @@ type analyzeMetric struct {
 type analyzeSeries struct {
 	Dates       []string  `json:"dates"`
 	Series      []float64 `json:"series"`
-	Total       float64   `json:"total"`
-	TotalPct    *float64  `json:"total_pct"`
-	Previous    *float64  `json:"previous"`
 	TargetDaily float64   `json:"target_daily"`
 }
 
@@ -185,12 +182,15 @@ func (r *R) analyzeBlock(payload []byte) string {
 	sort.Strings(rest)
 	names = append(names, rest...)
 
-	// Each metric renders as one caption+chart unit; wide terminals lay
+	// Each metric renders as one chart+caption unit (parity with the web:
+	// analyze_cell_component.html.erb passes the caption INTO the
+	// visualizer, which renders it BENEATH the chart); wide terminals lay
 	// the units TWO-UP (owner 2026-07-12: a single left column wasted
 	// half the screen — the web's analytics panel is multi-column too).
-	// analyzeCellW fits the 42-cell canvas plus its widest y-axis gutter;
-	// captions wrap inside the cell so a long sentence can't shove its
-	// neighbor.
+	// analyzeCellW fits the 42-cell canvas plus its widest y-axis gutter,
+	// aligning the two-up columns; the caption itself wraps at the
+	// CHART's own visual width, not the cell's, so a narrower chart (e.g.
+	// a short bar group) doesn't inherit the wide column's full wrap.
 	const analyzeCellW = 54
 	var units []string
 	for _, name := range names {
@@ -202,10 +202,9 @@ func (r *R) analyzeBlock(payload []byte) string {
 		if caption != "" {
 			head = r.paintShimmer(htmlToText(caption))
 		}
-		if width >= analyzeCellW*2+4 {
-			head = lipgloss.NewStyle().Width(analyzeCellW).Render(head)
-		}
-		units = append(units, head+"\n"+body)
+		chartW := lipgloss.Width(body)
+		head = lipgloss.NewStyle().Width(min(chartW, width)).Render(head)
+		units = append(units, body+"\n"+head)
 	}
 	var b strings.Builder
 	if width >= analyzeCellW*2+4 {
@@ -233,10 +232,13 @@ func (r *R) analyzeBlock(payload []byte) string {
 		if b.Len() > 0 {
 			b.WriteString("\n")
 		}
+		heartsRow := r.analyzeHeartsRow(a.Likes.Hearts, width)
+		b.WriteString(heartsRow)
 		if a.Likes.Caption != "" {
-			b.WriteString(r.paintShimmer(htmlToText(a.Likes.Caption)) + "\n")
+			caption := r.paintShimmer(htmlToText(a.Likes.Caption))
+			chartW := lipgloss.Width(heartsRow)
+			b.WriteString("\n" + lipgloss.NewStyle().Width(min(chartW, width)).Render(caption))
 		}
-		b.WriteString(r.analyzeHeartsRow(a.Likes.Hearts, width))
 	}
 	return b.String()
 }
@@ -426,32 +428,20 @@ func formatAgeBracket(key string) string {
 // within the current year, month-only across a year boundary — else
 // day-index) come from the shared engine automatically; analyzeStashPreset
 // supplies the per-metric value_format/x_axis pair (ported from
-// Area#preset_value_format/#preset_x_axis), and the total/prev/target
-// legend line below is UNCHANGED from before this pass — it's a TUI-only
-// addition over the web (no such line exists there) and stays exactly as
-// it formatted.
+// Area#preset_value_format/#preset_x_axis). The chart is the whole return
+// value — the total/prev/target legend line that used to trail it here is
+// removed for web parity (no such line exists on the web; its caption
+// renders beneath the chart, and the caption is the caller's job, not
+// spark's).
 func (r *R) spark(name string, s analyzeSeries, width int) string {
 	format, xAxis := analyzeStashPreset(name)
-	chart := r.areaChart("", aiAreaData{
+	return r.areaChart("", aiAreaData{
 		Series: s.Series,
 		Dates:  s.Dates,
 		Target: s.TargetDaily,
 		Format: format,
 		XAxis:  xAxis,
 	}, width)
-
-	total := trimFloat(s.Total)
-	if s.TotalPct != nil {
-		total = trimFloat(*s.TotalPct) + "%"
-	}
-	meta := "total " + total
-	if s.Previous != nil {
-		meta += " · prev " + trimFloat(*s.Previous)
-	}
-	if s.TargetDaily > 0 {
-		meta += " · target " + trimFloat(s.TargetDaily) + "/d"
-	}
-	return chart + "\n" + r.dim(meta)
 }
 
 // analyzeStashPreset ports Visualizers::Area#preset_value_format /
