@@ -4,6 +4,16 @@ All notable changes to pito-tui are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); from 1.0.0 onward the
 project follows [Semantic Versioning](https://semver.org/).
 
+## [4.2.0] — 2026-07-22
+
+### Added
+
+- **The description wears the web's colors** — the detail card parser
+  used to drop the description div's classes on the floor; a mapped
+  color hint now paints through to the terminal, so pito 4.1.0's red
+  missing-description line renders red here too. Plain descriptions
+  render byte-identical to before.
+
 ## [4.1.0] — 2026-07-21
 
 ### Changed

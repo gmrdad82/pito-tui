@@ -137,6 +137,33 @@ func TestShowVidAndChannelCards(t *testing.T) {
 	}
 }
 
+// TestVidDescriptionMissingWearsDangerColor covers T2: the web renders the
+// missing-description state INSIDE the same div the parser already reads
+// (pito-video-detail__description--missing text-red whitespace-pre-wrap) —
+// the parsed card must keep that class and detailCard must paint the danger
+// color through, not just the plain prose.
+func TestVidDescriptionMissingWearsDangerColor(t *testing.T) {
+	withTrueColor(t)
+	fragment := `<div class="pito-video-linked-game-card">` +
+		`<div class="grid grid-cols-[max-content_1fr] gap-x-2 gap-y-1">` +
+		`<span class="text-fg-dim">Title</span><span class="text-fg">Some Vid</span>` +
+		`</div>` +
+		`<div class="pito-video-detail__description pito-video-detail__description--missing text-red whitespace-pre-wrap">No description yet — the algorithm judges silently.</div>` +
+		`</div>`
+	card, ok := parseDetailCard(fragment)
+	if !ok {
+		t.Fatal("fragment did not parse as a detail card")
+	}
+	if !strings.Contains(card.descClass, "text-red") {
+		t.Fatalf("descClass must carry the missing-description text-red hint: %q", card.descClass)
+	}
+	out := New(100, WithTruecolor(true)).detailCard(card)
+	want := "\x1b[38;5;203mNo description yet — the algorithm judges silently.\x1b[m"
+	if !strings.Contains(out, want) {
+		t.Errorf("missing description must wear ColorErr:\n%q\nwant substring %q", out, want)
+	}
+}
+
 // TestShowVidDescriptionParagraphsAreSpaced covers W2 finding 1: the
 // fixture's description div is "whitespace-pre-wrap" prose with the
 // author's blank lines marking 4 paragraphs (no <p> tags — verified

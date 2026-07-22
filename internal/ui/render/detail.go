@@ -47,6 +47,10 @@ type detailCard struct {
 	ttb        *ttbData
 	descLabel  string
 	descText   string
+	// descClass is the __description div's own class attribute — carries
+	// state hints like the missing-description "text-red" (classStyle maps
+	// it onto ColorErr); empty/unmapped classes render as a no-op.
+	descClass string
 	// Tags moved out of the kv grid into their own hairline section
 	// (pito db74203f) — video cards only today.
 	tagsLabel string
@@ -124,6 +128,7 @@ func (c *detailCard) walk(n *html.Node) {
 			return
 		case strings.Contains(class, "__description"):
 			c.descText = descriptionText(n)
+			c.descClass = class
 			if c.descLabel == "" {
 				c.descLabel = "Description"
 			}
@@ -456,7 +461,10 @@ func (r *R) detailCard(c *detailCard) string {
 	}
 
 	if c.descText != "" {
-		parts = append(parts, r.hairline(width), r.dim(c.descLabel)+"\n"+c.descText)
+		// classStyle no-ops on an empty/unmapped class (e.g. the ordinary
+		// "text-fg" description) — only a mapped hint like the
+		// missing-description "text-red" actually paints.
+		parts = append(parts, r.hairline(width), r.dim(c.descLabel)+"\n"+classStyle(c.descClass).Render(c.descText))
 	}
 	if c.tagsText != "" {
 		parts = append(parts, r.hairline(width), r.dim(c.tagsLabel)+"\n"+c.tagsText)
