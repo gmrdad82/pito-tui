@@ -4,7 +4,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use pito_tui::activity::{LINGER, State};
-use pito_tui::capture::{Difference, Recorder, Script, Walk, capture, compare};
+use pito_tui::capture::{Difference, Recorder, Script, Walk, capture, compare, compare_dirs};
 use pito_tui::command::{Exit, Heard};
 use pito_tui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use pito_tui::footer::{Input, InputBar, Key};
@@ -496,6 +496,60 @@ fn frames_recorded_before_the_shell_compare_against_it_by_screen_and_script_name
             .unwrap()
             .is_empty()
     );
+}
+
+#[test]
+fn two_recorded_folders_compare_cell_by_cell_and_a_recorder_against_one_reports_the_same() {
+    let root = Path::new(env!("CARGO_TARGET_TMPDIR")).join("compare-dirs");
+    let _ = fs::remove_dir_all(&root);
+    let record = |recorder: &mut Recorder, accent: Color, guard: (u16, u16)| {
+        let app = accented(accent);
+        for (width, height) in [(40, 12), (60, 16)] {
+            let screen = app().shot(width, height, &[], true);
+            recorder.screen(0, "One", &screen).unwrap();
+        }
+        let guarded = app().shot(guard.0, guard.1, &[ctrl_c()], true);
+        recorder.record("Quit guard", &guarded).unwrap();
+    };
+    let (before, after) = (root.join("before"), root.join("after"));
+    record(&mut Recorder::new(&before).unwrap(), Color::Blue, (40, 12));
+    record(&mut Recorder::new(&after).unwrap(), Color::Blue, (40, 12));
+    assert_eq!(compare_dirs(&before, &after).unwrap(), []);
+
+    let changed = root.join("changed");
+    record(&mut Recorder::new(&changed).unwrap(), Color::Red, (60, 16));
+    let differences = compare_dirs(&before, &changed).unwrap();
+    assert!(differences.iter().any(|difference| matches!(
+        difference,
+        Difference::Cell { scenario, size: (40, 12), .. } if scenario == "00-one"
+    )));
+    assert!(differences.contains(&Difference::Added {
+        scenario: "quit-guard".into(),
+        size: (60, 16),
+    }));
+    assert_eq!(
+        differences.last(),
+        Some(&Difference::Removed {
+            scenario: "quit-guard".into(),
+            size: (40, 12),
+        })
+    );
+
+    let mut against = Recorder::against(&before).unwrap();
+    record(&mut against, Color::Red, (60, 16));
+    assert_eq!(against.frames(), 3);
+    assert!(
+        against
+            .record("quit guard", &accented(Color::Red)().frame(60, 16))
+            .is_err()
+    );
+    let mut same = against.finish().unwrap();
+    let mut differences = differences;
+    same.sort_by_key(ToString::to_string);
+    differences.sort_by_key(ToString::to_string);
+    assert_eq!(same, differences);
+    assert!(compare_dirs(&before, &root.join("absent")).is_err());
+    assert!(Recorder::against(root.join("absent")).is_err());
 }
 
 #[test]

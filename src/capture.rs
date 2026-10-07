@@ -364,6 +364,92 @@ fn cells(scenario: &str, size: (u16, u16), before: &Frame, after: &Frame) -> Vec
     out
 }
 
+struct Saved {
+    scenario: String,
+    size: (u16, u16),
+    path: PathBuf,
+}
+
+fn frames(dir: &Path) -> io::Result<Vec<Saved>> {
+    let mut out = Vec::new();
+    for folder in fs::read_dir(dir)? {
+        let folder = folder?.path();
+        if !folder.is_dir() {
+            continue;
+        }
+        let scenario = folder
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        for frame in fs::read_dir(&folder)? {
+            let path = frame?.path();
+            let size = path
+                .file_name()
+                .and_then(|name| dump::size(&name.to_string_lossy()));
+            if let Some(size) = size {
+                let scenario = scenario.clone();
+                out.push(Saved {
+                    scenario,
+                    size,
+                    path,
+                });
+            }
+        }
+    }
+    out.sort_by(|a, b| (&a.scenario, a.size).cmp(&(&b.scenario, b.size)));
+    Ok(out)
+}
+
+#[derive(Debug)]
+struct Against {
+    dir: PathBuf,
+    seen: HashSet<PathBuf>,
+    differences: Vec<Difference>,
+}
+
+impl Against {
+    fn new(dir: &Path) -> Self {
+        Against {
+            dir: dir.to_path_buf(),
+            seen: HashSet::new(),
+            differences: Vec::new(),
+        }
+    }
+
+    fn path(&self, scenario: &str, size: (u16, u16)) -> PathBuf {
+        self.dir.join(scenario).join(file(size))
+    }
+
+    fn frame(&mut self, scenario: &str, size: (u16, u16), after: &Frame) -> io::Result<()> {
+        let path = self.path(scenario, size);
+        match fs::read_to_string(&path) {
+            Ok(text) => {
+                let before = decode(&text)?;
+                self.differences
+                    .extend(cells(scenario, size, &before, after));
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                let scenario = scenario.to_string();
+                self.differences.push(Difference::Added { scenario, size });
+            }
+            Err(error) => return Err(error),
+        }
+        self.seen.insert(path);
+        Ok(())
+    }
+
+    fn finish(mut self) -> io::Result<Vec<Difference>> {
+        let mut removed: Vec<Difference> = frames(&self.dir)?
+            .into_iter()
+            .filter(|saved| !self.seen.contains(&saved.path))
+            .map(|Saved { scenario, size, .. }| Difference::Removed { scenario, size })
+            .collect();
+        removed.sort_by_key(ToString::to_string);
+        self.differences.extend(removed);
+        Ok(self.differences)
+    }
+}
+
 fn fresh(dir: &Path) -> io::Result<()> {
     if dir.exists() && fs::read_dir(dir)?.next().is_some() {
         let taken = dir.display().to_string();
@@ -376,6 +462,7 @@ fn fresh(dir: &Path) -> io::Result<()> {
 pub struct Recorder {
     dir: PathBuf,
     frames: usize,
+    against: Option<Against>,
 }
 
 impl Recorder {
@@ -383,7 +470,21 @@ impl Recorder {
         let dir = dir.into();
         fresh(&dir)?;
         fs::create_dir_all(&dir)?;
-        Ok(Recorder { dir, frames: 0 })
+        Ok(Recorder {
+            dir,
+            frames: 0,
+            against: None,
+        })
+    }
+
+    pub fn against(dir: impl Into<PathBuf>) -> io::Result<Self> {
+        let dir = dir.into();
+        fs::read_dir(&dir)?;
+        Ok(Recorder {
+            against: Some(Against::new(&dir)),
+            dir,
+            frames: 0,
+        })
     }
 
     pub fn screen(&mut self, index: usize, name: &str, buffer: &Buffer) -> io::Result<()> {
@@ -398,10 +499,24 @@ impl Recorder {
         self.frames
     }
 
+    pub fn finish(self) -> io::Result<Vec<Difference>> {
+        self.against.map_or(Ok(Vec::new()), Against::finish)
+    }
+
     fn write(&mut self, scenario: &str, buffer: &Buffer) -> io::Result<()> {
+        let size = (buffer.area.width, buffer.area.height);
+        if let Some(against) = &mut self.against {
+            let path = against.path(scenario, size);
+            if against.seen.contains(&path) {
+                let taken = path.display().to_string();
+                return Err(io::Error::new(io::ErrorKind::AlreadyExists, taken));
+            }
+            against.frame(scenario, size, &decode(&encode(buffer))?)?;
+            self.frames += 1;
+            return Ok(());
+        }
         let folder = self.dir.join(scenario);
         fs::create_dir_all(&folder)?;
-        let size = (buffer.area.width, buffer.area.height);
         fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -436,49 +551,22 @@ pub fn compare<E: Send + 'static>(
     walk: &Walk,
     app: impl Fn() -> Tui<E>,
 ) -> io::Result<Vec<Difference>> {
-    let mut out = Vec::new();
-    let mut seen: HashSet<PathBuf> = HashSet::new();
+    let mut against = Against::new(dir);
     for (scenario, run) in runs(walk, &app) {
         for &size in &walk.sizes {
-            let path = dir.join(&scenario).join(file(size));
-            seen.insert(path.clone());
             let after = decode(&encode(&render(&app, walk, &run, size)))?;
-            match fs::read_to_string(&path) {
-                Ok(text) => out.extend(cells(&scenario, size, &decode(&text)?, &after)),
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                    let scenario = scenario.clone();
-                    out.push(Difference::Added { scenario, size });
-                }
-                Err(error) => return Err(error),
-            }
+            against.frame(&scenario, size, &after)?;
         }
     }
-    let mut removed = Vec::new();
-    for folder in fs::read_dir(dir)? {
-        let folder = folder?.path();
-        if !folder.is_dir() {
-            continue;
-        }
-        let scenario = folder
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        for frame in fs::read_dir(&folder)? {
-            let path = frame?.path();
-            let size = path
-                .file_name()
-                .and_then(|name| dump::size(&name.to_string_lossy()));
-            if let Some(size) = size
-                && !seen.contains(&path)
-            {
-                removed.push(Difference::Removed {
-                    scenario: scenario.clone(),
-                    size,
-                });
-            }
-        }
+    against.finish()
+}
+
+pub fn compare_dirs(before: &Path, after: &Path) -> io::Result<Vec<Difference>> {
+    fs::read_dir(before)?;
+    let mut against = Against::new(before);
+    for saved in frames(after)? {
+        let frame = decode(&fs::read_to_string(&saved.path)?)?;
+        against.frame(&saved.scenario, saved.size, &frame)?;
     }
-    removed.sort_by_key(ToString::to_string);
-    out.extend(removed);
-    Ok(out)
+    against.finish()
 }

@@ -4,6 +4,19 @@ Every release of pito-tui, newest first. Versions follow [Semantic
 Versioning](https://semver.org/) as Cargo reads it before 1.0: a change in the
 middle number may break an app, a change in the last one never does.
 
+## 0.3.7 (2026-10-08)
+
+- `capture::compare_dirs(before, after)` compares two capture folders frame
+  by frame and cell by cell, with the same `Difference` list `compare`
+  gives: each cell that differs, each frame only `after` holds (`Added`)
+  and each one only `before` holds (`Removed`). Either folder may come from
+  `capture::capture` or from a `Recorder`.
+- `Recorder::against(dir)` compares each frame with the one of the same
+  name in an existing capture instead of writing it, and `finish()` lists
+  the differences. An app that keeps its own loop draws its states into one
+  `&mut Recorder` for both `--capture` and `--compare`; "Proving the
+  switch" in the README shows it.
+
 ## 0.3.6 (2026-10-07)
 
 - No command outlives the loop that started it. When `Tui::run` or `run_in`

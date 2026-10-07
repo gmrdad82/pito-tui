@@ -23,7 +23,7 @@ the app, in any language.
 ## Install
 
 ```toml
-pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v0.3.6" }
+pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v0.3.7" }
 ```
 
 That one line brings ratatui 0.30, crossterm 0.29, pito-header v0.2.0,
@@ -240,7 +240,9 @@ cargo run --example demo -- --dump 100x24 --keys "tab down enter"
   compare, and delete the captures. It is not a test to keep, and it pins
   no wording. An app still on its own loop records the same frames from its
   own headless buffers with `capture::Recorder`, so `compare` proves its
-  move onto the shell.
+  move onto the shell; an app that keeps its own loop compares its states
+  against a capture with `Recorder::against`, and any two captures compare
+  with `capture::compare_dirs`.
 
 ## Use
 
@@ -379,8 +381,10 @@ progress::bar(fraction, cells) -> "⣿⣿⣀⣀", percent(fraction), share(fract
 capture::Walk::new() .sizes([(w, h)]) .screens(bool) .script(Script::new(name, [KeyEvent]) .loading() .at(Duration))
 capture::capture(dir, &Walk, Fn() -> Tui<E>) -> io::Result<frames>
 capture::compare(dir, &Walk, Fn() -> Tui<E>) -> io::Result<Vec<Difference>>   // Cell { scenario, size, x, y, before, after } | Added | Removed
+capture::compare_dirs(before dir, after dir) -> io::Result<Vec<Difference>>   // two captures, frame by frame
 capture::Recorder::new(dir) -> io::Result<Recorder>        // frames from an app's own buffers, written as capture writes them
-  .screen(index, name, &Buffer) .record(script name, &Buffer) -> io::Result<()>, frames()
+capture::Recorder::against(dir) -> io::Result<Recorder>    // the same frames compared with a capture instead
+  .screen(index, name, &Buffer) .record(script name, &Buffer) -> io::Result<()>, frames(), finish() -> io::Result<Vec<Difference>>
 
 Palette::new(accent: Color)                                // every token a pub field and a builder
   .base .ink .muted .accent .selected .good .bad .rule .line .glass .shimmer (Style)
@@ -492,7 +496,7 @@ shell deletes that glue; the app's screens and data stay as they are.
 | A picker drawn over a screen, its keys and its answer | `Cx::pick(Pick)` and `Screen::picked` |
 | A long-log or trace pane: scroll, page, ends, find, copy, a cache of built rows | `Log`; a long list takes pito-list's `Shared` |
 | Age and duration text, Braille bars, percent, spinners, label redraw timing | `clock`, `progress`, `Activity::estimate` |
-| Frames compared cell by cell before and after a change, by hand | `capture::capture` and `capture::compare` behind `--capture` and `--compare`, and `capture::Recorder` for the frames from before the move |
+| Frames compared cell by cell before and after a change, by hand | `capture::capture` and `capture::compare` behind `--capture` and `--compare`, `capture::Recorder` for the frames from before the move or from an app that keeps its own loop, and `capture::compare_dirs` for two captures |
 | A tone module mapped to four crates' `Styles` | `Palette`, and `Cx::palette` at runtime |
 | A loading wrapper around the hourglass | `Phase::Loading(label)` |
 | The too-small guard, a centred message, OSC 52, text helpers | `min_size` and `Words::too_small`, `message`, `Cx::copy`, `text` |
@@ -594,6 +598,16 @@ them, scenario names and sizes matched.
   so two states never share a name by accident.
 - Both builds draw from the same fixture data at the same moment, as any
   capture does.
+- `Recorder::against(dir)` takes the same calls but compares each frame
+  with the one of the same name in `dir`, an existing capture, instead of
+  writing it; `finish()` then lists the differences, as `compare` does. So
+  one function that draws every state into a `&mut Recorder` gives an app
+  both `--capture DIR` (`Recorder::new`) and `--compare DIR`
+  (`Recorder::against`), as below.
+- `capture::compare_dirs(before, after)` compares two captures already on
+  disk, frame by frame and cell by cell: each frame in both, each one only
+  `after` holds (`Added`) and each one only `before` holds (`Removed`).
+  Either may come from `capture::capture` or from a `Recorder`.
 
 ```rust,no_run
 use std::path::Path;
@@ -618,14 +632,36 @@ fn shot(state: &str, (width, height): (u16, u16)) -> Buffer {
     terminal.backend().buffer().clone()
 }
 
-fn main() -> std::io::Result<()> {
-    let mut recorder = Recorder::new(Path::new("tmp/before"))?;
+fn states(recorder: &mut Recorder) -> std::io::Result<()> {
     for size in [(80, 24), (120, 34)] {
         recorder.screen(0, "Home", &shot("home", size))?;
         recorder.screen(1, "Next", &shot("next", size))?;
         recorder.record("Next drilled in", &shot("next/detail", size))?;
     }
-    println!("{} frames", recorder.frames());
+    Ok(())
+}
+
+fn main() -> std::io::Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+    match args.get(1..3) {
+        Some([flag, dir]) if flag == "--capture" => {
+            let mut recorder = Recorder::new(Path::new(dir))?;
+            states(&mut recorder)?;
+            println!("{} frames", recorder.frames());
+        }
+        Some([flag, dir]) if flag == "--compare" => {
+            let mut recorder = Recorder::against(Path::new(dir))?;
+            states(&mut recorder)?;
+            let differences = recorder.finish()?;
+            for difference in &differences {
+                println!("{difference}");
+            }
+            if !differences.is_empty() {
+                std::process::exit(1);
+            }
+        }
+        _ => {}
+    }
     Ok(())
 }
 ```
@@ -636,6 +672,12 @@ in", keys))` and the new build's `Fn() -> Tui<E>` lists each cell that
 differs, each frame only the new build draws (`Added`) and each one it no
 longer reaches (`Removed`). An empty list proves the switch; then delete the
 directory.
+
+An app that keeps its own loop (its own `Term`, `listen`, `Waker`, `Pace`
+and `wait_until`) proves a change the same way without moving: `--capture
+tmp/before` with the old build, then `--compare tmp/before` with the new
+one, or `--capture tmp/after` with the new one and
+`capture::compare_dirs(Path::new("tmp/before"), Path::new("tmp/after"))`.
 
 ### An app that already has a section trait
 
