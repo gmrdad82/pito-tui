@@ -719,6 +719,8 @@ issue.
 
 The code is MIT licensed: see [LICENSE](LICENSE), by Catalin Ilinca. The PITO
 name and its logos, and the names and logos of every PITO app and game, are ©
-Catalin Ilinca, all rights reserved, and are not covered by the MIT licence.
+Catalin Ilinca, all rights reserved, and are not covered by the MIT licence;
+see [TRADEMARKS.md](TRADEMARKS.md). The GIFs in `docs/` are captures of the
+demo, under the MIT licence like the code ([docs/NOTICE](docs/NOTICE)).
 The look of the crates it brings is in the style of HEY's terminal UI; see
 [NOTICE.md](NOTICE.md).
