@@ -23,7 +23,7 @@ the app, in any language.
 ## Install
 
 ```toml
-pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v0.3.1" }
+pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v0.3.2" }
 ```
 
 That one line brings ratatui 0.30, crossterm 0.29, pito-header v0.2.0,
@@ -455,7 +455,10 @@ shell deletes that glue; the app's screens and data stay as they are.
    with the same `id`; `cx.activities(..)` replaces the whole list, which
    suits an app that reads its work as a list, and `cx.forget(id)` drops
    one. The app's own panel and its screen go; their data stays where it
-   was. The demo's fake jobs (`Home` in `examples/demo.rs`) are the pattern.
+   was. The activity screen always comes after the app's screens, wherever
+   `Tui::activities` sits in the builder chain, so the screens keep the
+   indices `go`, `waker` and `event` use. The demo's fake jobs (`Home` in
+   `examples/demo.rs`) are the pattern.
 8. **The loop goes.** Replace the app's `run` with `Tui::run()`; delete
    the pacer, the terminal setup and restore, the restoring panic hooks,
    the input thread and the key routing. The app's crash hook stays where
@@ -496,8 +499,8 @@ them, scenario names and sizes matched.
   `capture` does.
 - `screen(index, name, &buffer)` saves a screen the way a walk names it:
   `index` is its place among the new build's screens, in the order the app
-  adds them with `Tui::screen` (the activity screen sits where
-  `Tui::activities` is called), and `name` its section's name.
+  adds them with `Tui::screen` (the activity screen comes after all of
+  them), and `name` its section's name.
 - `record(name, &buffer)` saves a deeper state under the name the new
   build's `capture::Script` carries, so `record("Next drilled in", ..)`
   meets `Script::new("Next drilled in", keys)`.

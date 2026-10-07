@@ -317,6 +317,37 @@ fn activities_sit_on_the_footer_and_open_over_any_screen_with_only_the_back_keys
     assert!(tui.find::<Probe<2>>().unwrap().keys.is_empty());
 }
 
+#[test]
+fn the_activity_screen_comes_after_every_screen_whichever_order_the_builder_takes() {
+    let jobs = || Activities::new(Section::new("Jobs")).keys(&[Key::Char('o')]);
+    let one = || Probe::<1>::default();
+    let two = || Probe::<2>::default();
+    let base = || Tui::<u32>::new("probe", "1.2.3", Color::Blue);
+    let builds = [
+        base()
+            .activities(jobs())
+            .screen(Section::new("One"), one())
+            .screen(Section::new("Two"), two()),
+        base()
+            .screen(Section::new("One"), one())
+            .activities(jobs())
+            .screen(Section::new("Two"), two()),
+        base()
+            .screen(Section::new("One"), one())
+            .screen(Section::new("Two"), two())
+            .activities(jobs()),
+    ];
+    for mut tui in builds {
+        assert_eq!(tui.names(), ["One", "Two", "Jobs"]);
+        tui.start();
+        assert_eq!(tui.current(), Some(0));
+        assert!(tui.go(1));
+        assert_eq!(tui.find::<Probe<2>>().unwrap().started, 1);
+        tui.key(press(KeyCode::Char('o')));
+        assert_eq!(tui.current(), Some(2));
+    }
+}
+
 #[derive(Default)]
 struct Clock {
     due: Option<Instant>,

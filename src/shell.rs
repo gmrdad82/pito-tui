@@ -181,8 +181,13 @@ impl<E: Send + 'static> Tui<E> {
     pub fn screen(mut self, section: Section, screen: impl Screen<E>) -> Self {
         let group = self.groups.pop().unwrap_or_else(|| Group::new(""));
         self.groups.push(group.section(section));
-        self.tabs.push(self.screens.len());
-        self.screens.push(Slot::new(Box::new(screen), Role::Tab));
+        let index = self.board.unwrap_or(self.screens.len());
+        self.tabs.push(index);
+        self.screens
+            .insert(index, Slot::new(Box::new(screen), Role::Tab));
+        if let Some(board) = self.board.as_mut() {
+            *board += 1;
+        }
         self.renav();
         self
     }

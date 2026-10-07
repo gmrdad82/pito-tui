@@ -4,6 +4,14 @@ Every release of pito-tui, newest first. Versions follow [Semantic
 Versioning](https://semver.org/) as Cargo reads it before 1.0: a change in the
 middle number may break an app, a change in the last one never does.
 
+## 0.3.2 (2026-10-07)
+
+- The activity screen never takes a screen's index: it comes after every
+  screen the app adds, whether `Tui::activities` is called before, between
+  or after the `Tui::screen` calls. Called first, it used to take index 0
+  and shift every screen by one for `go`, `waker`, `event`, `names` and
+  capture's frame names.
+
 ## 0.3.1 (2026-10-07)
 
 - `capture::Recorder` writes frames from an app's own buffers exactly as
