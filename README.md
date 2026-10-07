@@ -23,7 +23,7 @@ the app, in any language.
 ## Install
 
 ```toml
-pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v0.3.3" }
+pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v0.3.4" }
 ```
 
 That one line brings ratatui 0.30, crossterm 0.29, pito-header v0.2.0,
@@ -123,6 +123,8 @@ cargo run --example demo -- --dump 100x24 --keys "tab down enter"
   `enter` opening one into its detail lines. Every word on them is the
   app's (`Activities`), and the data stays the app's: the shell only draws,
   pages and takes the keys, and its time is the loop's moment.
+  `Cx::activities` replaces the app's own list and leaves the commands'
+  activities (below) where they are.
 - **Commands on the band.** `Cx::run(id, label, Command)` runs a child
   command and follows the `--progress json` lines the PITO command-line
   tools print (version 1: one object a line with `state` start, progress,
@@ -140,6 +142,23 @@ cargo run --example demo -- --dump 100x24 --keys "tab down enter"
   printed after that no longer change it. `command::read` parses one line.
   While a command runs it counts as busy for the quit guard. Headless runs
   never spawn a command, and a stop there marks a queued one stopped.
+- **The app hears its commands.** The screen that ran a command hears it in
+  `Screen::heard(id, command::Heard, cx)`: every line in the order it came,
+  as `Heard::Line { stream, text, progress }` (the raw text, the stream it
+  came on, and the parsed progress when it came on the stream the app
+  follows, so the app reads its own fields from `text`), then once
+  `Heard::Exit` with a `command::Exit`: `Code(n)`, `Signal(n)`, `Stopped`,
+  or `Error(text)` when it never started or couldn't be waited on.
+  `Exit::state` maps it to done, failed or stopped. Lines arrive in batches,
+  at most every 100 ms. The band follows the progress lines until the app
+  posts its own activity for that id (`Cx::activity`): from then on the band
+  shows the app's label, status, progress, state and start, the command's
+  lines only fill its detail, and the shell still holds the process, the
+  stop and the busy count. If the app hasn't ended it by the time the
+  command exits or is stopped, the shell ends it by `Exit::state` and keeps
+  the app's status. `Cx::run_from` keeps the start of an unfinished activity
+  already on the board under that id (one shown waiting first), and
+  `Cx::forget` takes a command's activity off the board for good.
 - **A pick-one prompt.** `Cx::pick(Pick::new(title, options))` puts a small
   list over the screen: arrows (or `j`, `k`, `g`, `G`) move, `enter`
   chooses, `esc` or `q` cancels, every key goes to it while it is open, its
@@ -268,6 +287,7 @@ pub trait Screen<E>: Any {                                 // every method but d
   fn key(&mut self, KeyEvent, &mut Cx<E>);  fn paste(&mut self, &str, &mut Cx<E>);
   fn mouse(&mut self, MouseEvent, Rect, &mut Cx<E>);  fn event(&mut self, E, &mut Cx<E>);
   fn answer(&mut self, yes: bool, &mut Cx<E>);  fn picked(&mut self, Option<usize>, &mut Cx<E>);
+  fn heard(&mut self, id: u64, command::Heard, &mut Cx<E>);  // a command it ran: each line, then the exit
   fn back(&mut self, &mut Cx<E>);
   fn hints(&self) -> Vec<Hint>;  fn facts(&self) -> Vec<(String, Style)>;
   fn status(&self) -> Option<(String, Style)>;
@@ -299,6 +319,8 @@ Activities::new(header::Section)                           // the activity scree
   .more(Fn(usize) -> String) .elapsed(Fn(Duration) -> String) .facts(Fn(&[Activity]) -> Vec<(String, Style)>)
 command::read(line) -> Option<Progress { state, stage, fraction, message, ok }>   // one --progress json line, v 1
 pub enum command::Stream { Stdout, Stderr, Both }          // where Cx::run_from follows the lines; command::GRACE: 2 s
+pub enum command::Heard { Line { stream, text, progress: Option<Progress> }, Exit(command::Exit) }
+pub enum command::Exit { Code(i32), Signal(i32), Stopped, Error(text) }   // .state() -> activity::State
 
 Pick::new(title, [option]) | Pick::rows(title, [list::Row])  .selected(index) .hints([Hint]) .keys(list::Keys) .cancel_keys(..)
 Log::new(label) .placeholder(..) .hint(..) .keys(list::Keys) .search_keys(..) .hit_keys(next, previous) .copy_keys(page, all)
@@ -327,7 +349,8 @@ restore() -> bool                                          // any thread, once: 
   terminal(), modes(), draw(FnOnce(&mut Frame)), mouse(bool)
 Modes::new()  .alternate(true) .paste(true) .mouse(false) .focus(false)
 Pace, FRAME (8.333 ms), wait_until(now, dirty, &Pace, deadlines)
-pub enum Wake<E> { Input(Event), Lost(io::Error), Event(screen, E), Loaded(screen, generation, E), Activity(Activity) }
+pub enum Wake<E> { Input(Event), Lost(io::Error), Event(screen, E), Loaded(screen, generation, E), Activity(Activity),
+  Command(screen, command::Report) }                       // a command's lines and exit, from the shell's runner
 Waker<E>: new(sender, screen), send(E) -> bool, screen();  listen(sender)   // the input thread
 
 Filter::new(label) .placeholder(..) .hint(..) .keys(list::Keys) .start_keys(..) .clear_keys(..) .input(Input)
@@ -354,7 +377,8 @@ bracketed paste only.
 
 `Phase`, `Turn`, `Wake`, `Words`, `Palette`, `Modes`, `Bench`, `Activity`,
 `Activities`, `activity::State`, `Pick`, `log::Turn`, `clock::Units`,
-`command::Progress`, `command::Stream`, `capture::Walk`, `capture::Script`, `capture::Look` and
+`command::Progress`, `command::Stream`, `command::Heard` (and its `Line`), `command::Exit`,
+`capture::Walk`, `capture::Script`, `capture::Look` and
 `capture::Difference` are
 `#[non_exhaustive]`: match the enums with a wildcard arm and build the structs
 with `new()` and their builders, so a later release can add to them in a minor
@@ -416,7 +440,7 @@ shell deletes that glue; the app's screens and data stay as they are.
 | Header assembly: title, help word, a lead beside it, a status fitted to the room, facts, a breadcrumb kept in step | `Screen::lead`, `status_parts`, `facts`, `crumb`, `selected` and `back`, `keep_facts` |
 | Footer assembly: hints, notice, legend, confirm, input, version, height | `Screen::hints`, `input`, `notice`, `legend`, `Cx::say`, `Words::leave`; the version slot is wired |
 | A panel of running work above the footer and a screen listing it, with a detail view | `Activities`, fed by `Cx::activity`, `activities` and `forget` |
-| Code that runs the app's own CLI, parses its `--progress json` lines and stops it | `Cx::run(id, label, Command)` (`Cx::run_from` when the lines come on stderr), `Cx::stop(id)`, and `command::read` for a single line |
+| Code that runs the app's own CLI, parses its `--progress json` lines and stops it | `Cx::run(id, label, Command)` (`Cx::run_from` when the lines come on stderr), `Cx::stop(id)`, `Screen::heard` for each line and the exit, and `command::read` for a single line |
 | A picker drawn over a screen, its keys and its answer | `Cx::pick(Pick)` and `Screen::picked` |
 | A long-log or trace pane: scroll, page, ends, find, copy, a cache of built rows | `Log`; a long list takes pito-list's `Shared` |
 | Age and duration text, Braille bars, percent, spinners, label redraw timing | `clock`, `progress`, `Activity::estimate` |
@@ -495,7 +519,9 @@ shell deletes that glue; the app's screens and data stay as they are.
     log and trace panes a `Log` (a long list a pito-list `Shared`), its
     age and duration text `clock`, its bars and spinners `progress`, and the
     code that ran its own CLI and read the progress lines `Cx::run` (or
-    `Cx::run_from` for lines on stderr), with `Cx::stop` for its stop.
+    `Cx::run_from` for lines on stderr), with `Cx::stop` for its stop and
+    `Screen::heard` for what it read from the lines and the exit; the app
+    keeps its own words on the band by posting its activity for that id.
 
 ### Proving the switch
 

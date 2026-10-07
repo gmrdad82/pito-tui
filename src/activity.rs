@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -239,11 +240,21 @@ pub(crate) enum Change {
     All(Vec<Activity>),
     Forget(u64),
     Band(bool),
+    Run(Activity),
+    Ran(Activity),
+    End(u64, State),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Owner {
+    Shell,
+    App,
 }
 
 pub(crate) struct Board {
     pub(crate) words: Activities,
     pub(crate) list: Vec<Activity>,
+    runs: HashMap<u64, Owner>,
     rows: List,
     ids: Vec<u64>,
     open: Option<u64>,
@@ -304,6 +315,7 @@ impl Board {
             log: words.log.clone(),
             words,
             list: Vec::new(),
+            runs: HashMap::new(),
             rows: List::new(),
             ids: Vec::new(),
             open: None,
@@ -324,23 +336,80 @@ impl Board {
         activity
     }
 
+    fn place(&mut self, activity: Activity, now: Instant) {
+        let activity = self.stamp(activity, now);
+        match self.kept(activity.id) {
+            Some(at) => self.list[at] = activity,
+            None => self.list.push(activity),
+        }
+    }
+
+    fn put(&mut self, mut activity: Activity, now: Instant) {
+        if let Some(owner) = self.runs.get_mut(&activity.id) {
+            *owner = Owner::App;
+            if let Some(at) = self.kept(activity.id) {
+                activity.detail = Arc::clone(&self.list[at].detail);
+            }
+        }
+        self.place(activity, now);
+    }
+
+    fn run(&mut self, mut activity: Activity, now: Instant) {
+        let waiting = self
+            .kept(activity.id)
+            .map(|at| &self.list[at])
+            .filter(|kept| !kept.state.finished());
+        if let Some(kept) = waiting {
+            activity.started = kept.started;
+        }
+        self.runs.insert(activity.id, Owner::Shell);
+        self.place(activity, now);
+    }
+
+    fn ran(&mut self, activity: Activity) {
+        let (Some(at), Some(&owner)) = (self.kept(activity.id), self.runs.get(&activity.id)) else {
+            return;
+        };
+        let kept = &mut self.list[at];
+        kept.detail = activity.detail;
+        if owner == Owner::Shell {
+            kept.state = activity.state;
+            kept.progress = activity.progress;
+            kept.status = activity.status;
+            kept.ended = activity.ended;
+        }
+    }
+
+    fn end(&mut self, id: u64, state: State, now: Instant) {
+        let Some(at) = self.kept(id).filter(|_| self.runs.contains_key(&id)) else {
+            return;
+        };
+        let kept = &mut self.list[at];
+        if !kept.state.finished() {
+            kept.state = state;
+            kept.progress = None;
+            kept.ended = Some(now);
+        }
+    }
+
     pub(crate) fn change(&mut self, change: Change, now: Instant) {
         match change {
-            Change::Put(activity) => {
-                let activity = self.stamp(activity, now);
-                match self.kept(activity.id) {
-                    Some(at) => self.list[at] = activity,
-                    None => self.list.push(activity),
+            Change::Put(activity) => self.put(activity, now),
+            Change::All(list) => {
+                let runs = &self.runs;
+                self.list.retain(|kept| runs.contains_key(&kept.id));
+                for activity in list {
+                    self.put(activity, now);
                 }
             }
-            Change::All(list) => {
-                self.list = list
-                    .into_iter()
-                    .map(|activity| self.stamp(activity, now))
-                    .collect();
+            Change::Forget(id) => {
+                self.list.retain(|kept| kept.id != id);
+                self.runs.remove(&id);
             }
-            Change::Forget(id) => self.list.retain(|kept| kept.id != id),
             Change::Band(band) => self.words.band = band,
+            Change::Run(activity) => self.run(activity, now),
+            Change::Ran(activity) => self.ran(activity),
+            Change::End(id, state) => self.end(id, state, now),
         }
         if self
             .open
@@ -563,5 +632,72 @@ impl<E: Send + 'static> Screen<E> for Board {
 
     fn facts(&self) -> Vec<(String, Style)> {
         (self.words.facts)(&self.list)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn kept(board: &Board, id: u64) -> &Activity {
+        board.list.iter().find(|kept| kept.id == id).unwrap()
+    }
+
+    fn ran(id: u64, status: &str, line: &str, now: Instant) -> Activity {
+        Activity::new(id, "sim", now)
+            .status(status)
+            .detail([Line::from(line.to_string())])
+    }
+
+    #[test]
+    fn an_app_that_posts_for_a_command_takes_its_band_and_the_command_keeps_its_detail() {
+        let now = Instant::now();
+        let later = now + SECOND;
+        let mut board = Board::new(Activities::new(Section::new("Jobs")), now);
+        board.change(
+            Change::Put(Activity::new(1, "sim", now).state(State::Waiting)),
+            now,
+        );
+        board.change(Change::Put(Activity::new(9, "mine", now)), now);
+        board.change(Change::Run(Activity::new(1, "sim", later)), later);
+        board.change(Change::Run(Activity::new(2, "sim", later)), later);
+        assert_eq!(kept(&board, 1).started, now);
+        assert_eq!(kept(&board, 2).started, later);
+
+        board.change(Change::Ran(ran(1, "build", "one", later)), later);
+        assert_eq!(kept(&board, 1).status, "build");
+
+        let mine = Activity::new(1, "sim", now).status("week 3").progress(0.25);
+        board.change(Change::Put(mine), later);
+        assert_eq!(kept(&board, 1).detail[0].to_string(), "one");
+        board.change(Change::Ran(ran(1, "run", "two", later)), later);
+        let shown = kept(&board, 1);
+        assert_eq!(
+            (shown.status.as_str(), shown.progress),
+            ("week 3", Some(0.25))
+        );
+        assert_eq!(shown.detail[0].to_string(), "two");
+
+        board.change(Change::All(vec![Activity::new(7, "other", now)]), later);
+        let mut ids: Vec<u64> = board.list.iter().map(|kept| kept.id).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, [1, 2, 7]);
+
+        let stopped = Activity::new(1, "sim", now)
+            .state(State::Stopped)
+            .status("stopped from the lab");
+        board.change(Change::Put(stopped), later);
+        board.change(Change::End(1, State::Failed), later);
+        assert_eq!(kept(&board, 1).state, State::Stopped);
+        board.change(Change::Put(Activity::new(2, "sim", now)), later);
+        board.change(Change::End(2, State::Done), later);
+        assert_eq!(
+            (kept(&board, 2).state, kept(&board, 2).ended),
+            (State::Done, Some(later))
+        );
+
+        board.change(Change::Forget(1), later);
+        board.change(Change::Ran(ran(1, "run", "three", later)), later);
+        assert!(board.list.iter().all(|kept| kept.id != 1));
     }
 }

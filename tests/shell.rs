@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use pito_tui::activity::{LINGER, State};
 use pito_tui::capture::{Difference, Recorder, Script, Walk, capture, compare};
+use pito_tui::command::{Exit, Heard};
 use pito_tui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use pito_tui::footer::{Input, InputBar, Key};
 use pito_tui::header::Section;
@@ -318,7 +319,10 @@ fn activities_sit_on_the_footer_and_open_over_any_screen_with_only_the_back_keys
     assert!(tui.find::<Probe<2>>().unwrap().keys.is_empty());
 }
 
-struct Sim;
+#[derive(Default)]
+struct Sim {
+    heard: Vec<(u64, Heard)>,
+}
 
 impl Screen<u32> for Sim {
     fn draw(&mut self, _frame: &mut Frame, _area: Rect, _palette: &Palette) {}
@@ -330,12 +334,16 @@ impl Screen<u32> for Sim {
             _ => {}
         }
     }
+
+    fn heard(&mut self, id: u64, heard: Heard, _cx: &mut Cx<'_, u32>) {
+        self.heard.push((id, heard));
+    }
 }
 
 #[test]
 fn a_stop_shows_the_command_stopped_on_the_band_at_once() {
     let mut tui = Tui::<u32>::new("probe", "1.2.3", Color::Blue)
-        .screen(Section::new("One"), Sim)
+        .screen(Section::new("One"), Sim::default())
         .activities(Activities::new(Section::new("Jobs")));
     tui.start();
     tui.key(press(KeyCode::Char('r')));
@@ -343,6 +351,9 @@ fn a_stop_shows_the_command_stopped_on_the_band_at_once() {
     tui.key(press(KeyCode::Char('s')));
     let text = dump::text(&tui.frame(60, 16));
     assert!(text.contains("■ sim"), "{text}");
+    tui.settle();
+    let sim = tui.find::<Sim>().unwrap();
+    assert_eq!(sim.heard, [(5, Heard::Exit(Exit::Stopped))]);
 }
 
 #[test]

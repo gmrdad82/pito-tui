@@ -9,7 +9,7 @@ use pito_footer::{Confirm, Hint, InputBar, Notice, Tone};
 use ratatui::{Frame, layout::Rect, style::Style, text::Line};
 
 use crate::activity::{Activity, Change};
-use crate::command::{Run, Stream};
+use crate::command::{Heard, Run, Stream};
 use crate::copy::COPY_MAX;
 use crate::palette::Palette;
 use crate::pick::Pick;
@@ -60,6 +60,8 @@ pub trait Screen<E>: Any {
     fn answer(&mut self, _yes: bool, _cx: &mut Cx<'_, E>) {}
 
     fn picked(&mut self, _choice: Option<usize>, _cx: &mut Cx<'_, E>) {}
+
+    fn heard(&mut self, _id: u64, _heard: Heard, _cx: &mut Cx<'_, E>) {}
 
     fn back(&mut self, _cx: &mut Cx<'_, E>) {}
 
@@ -260,8 +262,9 @@ impl<E: Send + 'static> Cx<'_, E> {
         progress: Stream,
     ) {
         let activity = Activity::new(id, label, self.now);
-        self.out.changes.push(Change::Put(activity.clone()));
+        self.out.changes.push(Change::Run(activity.clone()));
         self.out.runs.push(Run {
+            screen: self.screen,
             activity,
             command,
             progress,

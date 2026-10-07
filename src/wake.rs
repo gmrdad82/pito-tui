@@ -5,6 +5,7 @@ use std::thread::{self, JoinHandle};
 use crossterm::event::{self, Event};
 
 use crate::activity::Activity;
+use crate::command::Report;
 
 #[derive(Debug)]
 #[non_exhaustive]
@@ -14,6 +15,7 @@ pub enum Wake<E> {
     Event(usize, E),
     Loaded(usize, u64, E),
     Activity(Activity),
+    Command(usize, Report),
 }
 
 pub struct Waker<E> {

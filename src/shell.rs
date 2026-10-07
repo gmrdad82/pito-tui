@@ -14,8 +14,8 @@ use pito_list::Step;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 
-use crate::activity::{Activities, Activity, Board, Change};
-use crate::command;
+use crate::activity::{Activities, Activity, Board, Change, State};
+use crate::command::{self, Exit, Heard, Report};
 use crate::copy;
 use crate::pace::{Pace, wait_until};
 use crate::palette::Palette;
@@ -556,9 +556,27 @@ impl<E: Send + 'static> Tui<E> {
                 self.out.changes.push(Change::Put(activity));
                 self.apply();
             }
+            Wake::Command(screen, report) => return self.heard(screen, report),
             _ => {}
         }
         Flow::Stay
+    }
+
+    fn heard(&mut self, screen: usize, report: Report) -> Flow {
+        let Report { activity, heard } = report;
+        let id = activity.id;
+        let mut end = None;
+        for heard in heard {
+            if let Heard::Exit(exit) = &heard {
+                end = Some(exit.state());
+            }
+            self.call(screen, |target, cx| target.heard(id, heard, cx));
+        }
+        self.out.changes.push(Change::Ran(activity));
+        self.out
+            .changes
+            .extend(end.map(|state| Change::End(id, state)));
+        self.apply()
     }
 
     fn navigate(&mut self, action: Action) {
@@ -687,7 +705,8 @@ impl<E: Send + 'static> Tui<E> {
         for id in std::mem::take(&mut self.out.stops) {
             for activity in self.stop(id) {
                 if let Some(board) = self.board_mut() {
-                    board.change(Change::Put(activity), moment);
+                    board.change(Change::Ran(activity), moment);
+                    board.change(Change::End(id, State::Stopped), moment);
                 }
             }
         }
@@ -715,6 +734,11 @@ impl<E: Send + 'static> Tui<E> {
         for run in queued {
             let mut activity = run.activity;
             command::halt(&mut activity, moment);
+            let report = Report {
+                activity: activity.clone(),
+                heard: vec![Heard::Exit(Exit::Stopped)],
+            };
+            let _ = self.out.sender.send(Wake::Command(run.screen, report));
             stopped.push(activity);
         }
         stopped

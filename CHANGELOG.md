@@ -4,6 +4,30 @@ Every release of pito-tui, newest first. Versions follow [Semantic
 Versioning](https://semver.org/) as Cargo reads it before 1.0: a change in the
 middle number may break an app, a change in the last one never does.
 
+## 0.3.4 (2026-10-07)
+
+- The screen that ran a command hears it: `Screen::heard(id,
+  command::Heard, cx)` gets every line with its stream and, on the stream
+  the app follows, its parsed progress (`Heard::Line { stream, text,
+  progress }`), then the exit once (`Heard::Exit` with `command::Exit`:
+  `Code`, `Signal`, `Stopped`, or `Error` when it never started).
+  `Exit::state` maps an exit to done, failed or stopped. The runner's posts
+  reach the loop as `Wake::Command`.
+- An app sets what the band shows for a command by posting its own activity
+  for that id: from then on the band shows the app's label, status,
+  progress, state and start, and the command's lines only fill the detail.
+  The shell keeps the process, the stop and the busy count, and ends the
+  activity by its exit if the app hasn't. The runner's posts used to
+  overwrite the app's own.
+- `Cx::activities` replaces the app's own activities and keeps the
+  commands'; it used to wipe them.
+- `Cx::run_from` keeps the start of an unfinished activity already on the
+  board under that id, such as one shown waiting first.
+- `Cx::forget` takes a running command's activity off the board for good;
+  its next lines used to bring it back.
+- A line that isn't UTF-8 is read with its bad bytes replaced; it used to
+  end the reading, so a chatty command could stall on a full pipe.
+
 ## 0.3.3 (2026-10-07)
 
 - `Cx::run_from(id, label, Command, command::Stream)` follows the

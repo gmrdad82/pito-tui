@@ -1,4 +1,5 @@
 use std::io::{self, BufRead, BufReader, Read};
+use std::mem;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
@@ -43,6 +44,62 @@ pub struct Progress {
     pub fraction: Option<f64>,
     pub message: Option<String>,
     pub ok: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum Heard {
+    #[non_exhaustive]
+    Line {
+        stream: Stream,
+        text: String,
+        progress: Option<Progress>,
+    },
+    Exit(Exit),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Exit {
+    Code(i32),
+    Signal(i32),
+    Stopped,
+    Error(String),
+}
+
+impl Exit {
+    pub fn state(&self) -> State {
+        match self {
+            Exit::Code(0) => State::Done,
+            Exit::Stopped => State::Stopped,
+            _ => State::Failed,
+        }
+    }
+
+    fn of(status: io::Result<ExitStatus>) -> Self {
+        match status {
+            Ok(status) => status
+                .code()
+                .map_or_else(|| Exit::Signal(killed(status)), Exit::Code),
+            Err(error) => Exit::Error(error.to_string()),
+        }
+    }
+}
+
+#[cfg(unix)]
+fn killed(status: ExitStatus) -> i32 {
+    std::os::unix::process::ExitStatusExt::signal(&status).unwrap_or_default()
+}
+
+#[cfg(not(unix))]
+fn killed(_status: ExitStatus) -> i32 {
+    0
+}
+
+#[derive(Debug, Clone)]
+pub struct Report {
+    pub(crate) activity: Activity,
+    pub(crate) heard: Vec<Heard>,
 }
 
 pub fn read(line: &str) -> Option<Progress> {
@@ -106,6 +163,7 @@ pub(crate) fn halt(activity: &mut Activity, now: Instant) {
 }
 
 pub(crate) struct Run {
+    pub(crate) screen: usize,
     pub(crate) activity: Activity,
     pub(crate) command: Command,
     pub(crate) progress: Stream,
@@ -129,9 +187,9 @@ impl Handle {
                 return None;
             }
             halt(&mut state.activity, now);
-            let activity = state.post();
+            state.stopped = true;
             state.dirty = true;
-            activity
+            state.snapshot()
         };
         signal(&self.child, false);
         let child = Arc::clone(&self.child);
@@ -175,6 +233,8 @@ fn reap(child: &Mutex<Child>) -> io::Result<ExitStatus> {
 struct Shared {
     activity: Activity,
     lines: Vec<Line<'static>>,
+    heard: Vec<Heard>,
+    stopped: bool,
     dirty: bool,
     done: bool,
 }
@@ -185,11 +245,24 @@ impl Shared {
         self.dirty = true;
     }
 
-    fn post(&mut self) -> Activity {
-        self.dirty = false;
+    fn snapshot(&self) -> Activity {
         let mut activity = self.activity.clone();
         activity.detail = Arc::new(self.lines.clone());
         activity
+    }
+
+    fn post(&mut self) -> Report {
+        self.dirty = false;
+        Report {
+            activity: self.snapshot(),
+            heard: mem::take(&mut self.heard),
+        }
+    }
+
+    fn end(&mut self, exit: Exit) {
+        self.heard.push(Heard::Exit(exit));
+        self.done = true;
+        self.dirty = true;
     }
 }
 
@@ -199,17 +272,32 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn drain(stream: impl Read, shared: &Mutex<Shared>, progress: bool) {
-    for line in BufReader::new(stream).lines().map_while(Result::ok) {
-        let mut state = lock(shared);
-        match read(&line).filter(|_| progress) {
-            Some(read) => {
-                let text = note(&read);
-                follow(&mut state.activity, &read, Instant::now());
-                state.push(text);
-            }
-            None => state.push(line),
+fn drain(stream: impl Read, shared: &Mutex<Shared>, from: Stream, progress: bool) {
+    let mut reader = BufReader::new(stream);
+    let mut bytes = Vec::new();
+    loop {
+        bytes.clear();
+        match reader.read_until(b'\n', &mut bytes) {
+            Ok(0) | Err(_) => return,
+            Ok(_) => {}
         }
+        let line = bytes.strip_suffix(b"\n").unwrap_or(&bytes);
+        let line = line.strip_suffix(b"\r").unwrap_or(line);
+        let line = String::from_utf8_lossy(line).into_owned();
+        let parsed = read(&line).filter(|_| progress);
+        let mut state = lock(shared);
+        match &parsed {
+            Some(parsed) => {
+                follow(&mut state.activity, parsed, Instant::now());
+                state.push(note(parsed));
+            }
+            None => state.push(line.clone()),
+        }
+        state.heard.push(Heard::Line {
+            stream: from,
+            text: line,
+            progress: parsed,
+        });
     }
 }
 
@@ -219,6 +307,7 @@ pub(crate) fn spawn<E: Send + 'static>(
     running: Arc<AtomicUsize>,
 ) -> Option<Handle> {
     let Run {
+        screen,
         activity,
         mut command,
         progress,
@@ -233,6 +322,8 @@ pub(crate) fn spawn<E: Send + 'static>(
     let shared = Arc::new(Mutex::new(Shared {
         activity,
         lines: Vec::new(),
+        heard: Vec::new(),
+        stopped: false,
         dirty: true,
         done: false,
     }));
@@ -243,7 +334,8 @@ pub(crate) fn spawn<E: Send + 'static>(
             state.activity.state = State::Failed;
             state.activity.status = error.to_string();
             state.activity.ended = Some(Instant::now());
-            let _ = sender.send(Wake::Activity(state.post()));
+            state.end(Exit::Error(error.to_string()));
+            let _ = sender.send(Wake::Command(screen, state.post()));
             return None;
         }
     };
@@ -254,14 +346,14 @@ pub(crate) fn spawn<E: Send + 'static>(
     let errors = Arc::clone(&shared);
     let quiet = thread::spawn(move || {
         if let Some(stderr) = stderr {
-            drain(stderr, &errors, progress.stderr());
+            drain(stderr, &errors, Stream::Stderr, progress.stderr());
         }
     });
     let reader = Arc::clone(&shared);
     let reaped = Arc::clone(&child);
     thread::spawn(move || {
         if let Some(stdout) = stdout {
-            drain(stdout, &reader, progress.stdout());
+            drain(stdout, &reader, Stream::Stdout, progress.stdout());
         }
         let _ = quiet.join();
         let status = reap(&reaped);
@@ -272,8 +364,12 @@ pub(crate) fn spawn<E: Send + 'static>(
             state.activity.progress = None;
             state.activity.ended = Some(Instant::now());
         }
-        state.done = true;
-        state.dirty = true;
+        let exit = if state.stopped {
+            Exit::Stopped
+        } else {
+            Exit::of(status)
+        };
+        state.end(exit);
     });
     let handle = Handle {
         id,
@@ -284,11 +380,8 @@ pub(crate) fn spawn<E: Send + 'static>(
         loop {
             thread::sleep(POST);
             let mut state = lock(&shared);
-            if state.dirty {
-                let activity = state.post();
-                if sender.send(Wake::Activity(activity)).is_err() {
-                    break;
-                }
+            if state.dirty && sender.send(Wake::Command(screen, state.post())).is_err() {
+                break;
             }
             if state.done {
                 break;
@@ -344,6 +437,7 @@ mod tests {
         let mut command = Command::new("sh");
         command.args(["-c", script]);
         let run = Run {
+            screen: 0,
             activity: Activity::new(1, "sim", Instant::now()),
             command,
             progress,
@@ -355,19 +449,24 @@ mod tests {
     }
 
     #[cfg(unix)]
-    fn last(inbox: &mpsc::Receiver<Wake<()>>, until: impl Fn(&Activity) -> bool) -> Activity {
+    fn last(
+        inbox: &mpsc::Receiver<Wake<()>>,
+        until: impl Fn(&Activity) -> bool,
+    ) -> (Activity, Vec<Heard>) {
         let limit = Instant::now() + Duration::from_secs(10);
         let mut seen = None;
+        let mut heard = Vec::new();
         while let Ok(wake) = inbox.recv_timeout(limit.saturating_duration_since(Instant::now())) {
-            if let Wake::Activity(activity) = wake {
-                let done = until(&activity);
-                seen = Some(activity);
+            if let Wake::Command(_, report) = wake {
+                heard.extend(report.heard);
+                let done = until(&report.activity);
+                seen = Some(report.activity);
                 if done {
                     break;
                 }
             }
         }
-        seen.unwrap()
+        (seen.unwrap(), heard)
     }
 
     #[cfg(unix)]
@@ -375,11 +474,11 @@ mod tests {
     fn progress_lines_are_followed_on_the_stream_the_app_picks() {
         let script = format!("echo '{FAILED}' >&2; echo plain");
         let (_, inbox, _) = started(&script, Stream::Stderr);
-        let ended = last(&inbox, |_| false);
+        let (ended, _) = last(&inbox, |_| false);
         assert_eq!(ended.state, State::Failed);
         assert!(ended.detail.iter().any(|line| line.to_string() == "plain"));
         let (_, inbox, _) = started(&script, Stream::Stdout);
-        let ended = last(&inbox, |_| false);
+        let (ended, _) = last(&inbox, |_| false);
         assert_eq!(ended.state, State::Done);
         assert!(ended.detail.iter().any(|line| line.to_string() == FAILED));
     }
@@ -395,7 +494,7 @@ mod tests {
                 .iter()
                 .any(|line| line.to_string() == "started")
         };
-        assert!(said(&last(&inbox, said)));
+        assert!(said(&last(&inbox, said).0));
         let asked = Instant::now();
         let stopped = handle.stop(asked).unwrap();
         assert_eq!(
@@ -403,11 +502,42 @@ mod tests {
             (State::Stopped, Some(asked), None)
         );
         assert!(handle.stop(asked).is_none());
-        let ended = last(&inbox, |_| false);
+        let (ended, heard) = last(&inbox, |_| false);
         assert!(asked.elapsed() < GRACE);
         assert_eq!(ended.state, State::Stopped);
+        assert_eq!(heard.last(), Some(&Heard::Exit(Exit::Stopped)));
         assert!(said(&ended));
         assert!(handle.over());
         assert_eq!(running.load(Ordering::SeqCst), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_screen_hears_every_line_with_its_stream_then_the_exit() {
+        let script = format!("echo '{STEP}' >&2; printf 'one\\377\\n'; echo two; exit 3");
+        let (_, inbox, _) = started(&script, Stream::Stderr);
+        let (_, heard) = last(&inbox, |_| false);
+        let lines = |from: Stream| -> Vec<(String, bool)> {
+            heard
+                .iter()
+                .filter_map(|heard| match heard {
+                    Heard::Line {
+                        stream,
+                        text,
+                        progress,
+                    } if *stream == from => Some((text.clone(), progress.is_some())),
+                    _ => None,
+                })
+                .collect()
+        };
+        assert_eq!(
+            lines(Stream::Stdout),
+            [
+                ("one\u{FFFD}".to_string(), false),
+                ("two".to_string(), false)
+            ]
+        );
+        assert_eq!(lines(Stream::Stderr), [(STEP.to_string(), true)]);
+        assert_eq!(heard.last(), Some(&Heard::Exit(Exit::Code(3))));
     }
 }
