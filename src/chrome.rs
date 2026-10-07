@@ -645,13 +645,14 @@ impl<E: Send + 'static> Tui<E> {
         below = below.saturating_add(layout.head_gap).min(bottom);
         let screen = &self.screens[index].screen;
         let again = self.quit.notice().filter(|text| !text.is_empty());
-        let mut hints = match (self.out.modals.last(), &self.out.picking) {
-            (Some(top), _) => top.modal.hints.clone(),
-            (None, Some(picking)) => picking.pick.hints.clone(),
-            (None, None) => screen.hints(),
+        let (mut hints, prompted) = match (self.out.modals.last(), &self.out.picking) {
+            (Some(top), _) => (top.modal.hints.clone(), true),
+            (None, Some(picking)) => (picking.pick.hints.clone(), true),
+            (None, None) => (screen.hints(), false),
         };
         if !self.gated {
-            hints.extend(self.hints.iter().copied());
+            let shown = self.hints.iter().filter(|hint| !prompted || hint.pinned);
+            hints.extend(shown.copied());
         }
         if again.is_some() && !self.quit_hints {
             hints.clear();

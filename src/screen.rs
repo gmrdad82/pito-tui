@@ -420,8 +420,8 @@ impl<E: Send + 'static> Cx<'_, E> {
         self.out.layout = Some(layout);
     }
 
-    pub fn role(&mut self, role: Option<impl Into<Cow<'static, str>>>) {
-        self.out.role = Some(role.map(Into::into));
+    pub fn role(&mut self, role: Option<Cow<'static, str>>) {
+        self.out.role = Some(role);
     }
 
     pub fn show(&mut self, shown: impl Fn(Item) -> bool + 'static) {
