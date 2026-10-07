@@ -23,7 +23,7 @@ the app, in any language.
 ## Install
 
 ```toml
-pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v0.3.0" }
+pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v0.3.1" }
 ```
 
 That one line brings ratatui 0.30, crossterm 0.29, pito-header v0.2.0,
@@ -177,7 +177,9 @@ cargo run --example demo -- --dump 100x24 --keys "tab down enter"
   from the run and data from the app's own fixtures, so the same app gives
   the same frames. It is a safety net for a big change: capture, change,
   compare, and delete the captures. It is not a test to keep, and it pins
-  no wording.
+  no wording. An app still on its own loop records the same frames from its
+  own headless buffers with `capture::Recorder`, so `compare` proves its
+  move onto the shell.
 
 ## Use
 
@@ -301,6 +303,8 @@ progress::bar(fraction, cells) -> "⣿⣿⣀⣀", percent(fraction), share(fract
 capture::Walk::new() .sizes([(w, h)]) .screens(bool) .script(Script::new(name, [KeyEvent]) .loading() .at(Duration))
 capture::capture(dir, &Walk, Fn() -> Tui<E>) -> io::Result<frames>
 capture::compare(dir, &Walk, Fn() -> Tui<E>) -> io::Result<Vec<Difference>>   // Cell { scenario, size, x, y, before, after } | Added | Removed
+capture::Recorder::new(dir) -> io::Result<Recorder>        // frames from an app's own buffers, written as capture writes them
+  .screen(index, name, &Buffer) .record(script name, &Buffer) -> io::Result<()>, frames()
 
 Palette::new(accent: Color)                                // every token a pub field and a builder
   .base .ink .muted .accent .selected .good .bad .rule .line .glass .shimmer (Style)
@@ -407,7 +411,7 @@ shell deletes that glue; the app's screens and data stay as they are.
 | A picker drawn over a screen, its keys and its answer | `Cx::pick(Pick)` and `Screen::picked` |
 | A long-log or trace pane: scroll, page, ends, find, copy, a cache of built rows | `Log`; a long list takes pito-list's `Shared` |
 | Age and duration text, Braille bars, percent, spinners, label redraw timing | `clock`, `progress`, `Activity::estimate` |
-| Frames compared cell by cell before and after a change, by hand | `capture::capture` and `capture::compare` behind `--capture` and `--compare` |
+| Frames compared cell by cell before and after a change, by hand | `capture::capture` and `capture::compare` behind `--capture` and `--compare`, and `capture::Recorder` for the frames from before the move |
 | A tone module mapped to four crates' `Styles` | `Palette`, and `Cx::palette` at runtime |
 | A loading wrapper around the hourglass | `Phase::Loading(label)` |
 | The too-small guard, a centred message, OSC 52, text helpers | `min_size` and `Words::too_small`, `message`, `Cx::copy`, `text` |
@@ -467,9 +471,10 @@ shell deletes that glue; the app's screens and data stay as they are.
    or a walk with fixtures builds the screens from fixture data, so the
    same build gives the same frames. A game that keeps its dev tools out of
    the shipped build puts these behind its own feature.
-10. **Check.** Before the move, capture every screen at the sizes the app
-    cares about with the old build (or the old app's own dumps); after it,
-    compare. The header, footer and spacing should match, since the shell
+10. **Check.** Before the move, record every screen and deeper state at
+    the sizes the app cares about with the old build, through
+    `capture::Recorder` ([Proving the switch](#proving-the-switch)); after
+    it, compare. The header, footer and spacing should match, since the shell
     draws them with the same crates and the same layout (a one-cell side
     margin for the header and footer, two cells for the content, one row
     above the footer). Then delete the captures: they are a safety net for
@@ -478,6 +483,72 @@ shell deletes that glue; the app's screens and data stay as they are.
     log and trace panes a `Log` (a long list a pito-list `Shared`), its
     age and duration text `clock`, its bars and spinners `progress`, and the
     code that ran its own CLI and read the progress lines `Cx::run`.
+
+### Proving the switch
+
+`capture::capture` walks an app that already runs on `Tui`, so it can't
+record the old build. `capture::Recorder` writes the same frames from the
+buffers the app's own headless dump draws: record them with the old build,
+switch to `Tui::run`, and `capture::compare` walks the new build against
+them, scenario names and sizes matched.
+
+- `Recorder::new(dir)` wants a directory that is absent or empty, as
+  `capture` does.
+- `screen(index, name, &buffer)` saves a screen the way a walk names it:
+  `index` is its place among the new build's screens, in the order the app
+  adds them with `Tui::screen` (the activity screen sits where
+  `Tui::activities` is called), and `name` its section's name.
+- `record(name, &buffer)` saves a deeper state under the name the new
+  build's `capture::Script` carries, so `record("Next drilled in", ..)`
+  meets `Script::new("Next drilled in", keys)`.
+- A frame is the whole terminal at one size, as a `TestBackend` holds it
+  after a draw; its size is the buffer's own. Record each state at every
+  size the walk lists. The same state at the same size twice is an error,
+  so two states never share a name by accident.
+- Both builds draw from the same fixture data at the same moment, as any
+  capture does.
+
+```rust,no_run
+use std::path::Path;
+
+use pito_tui::capture::Recorder;
+use pito_tui::ratatui::{Frame, Terminal, backend::TestBackend, buffer::Buffer};
+
+struct OldApp;
+
+impl OldApp {
+    fn open(_state: &str) -> Self {
+        OldApp
+    }
+
+    fn draw(&self, _frame: &mut Frame) {}
+}
+
+fn shot(state: &str, (width, height): (u16, u16)) -> Buffer {
+    let app = OldApp::open(state);
+    let Ok(mut terminal) = Terminal::new(TestBackend::new(width, height));
+    let Ok(_) = terminal.draw(|frame| app.draw(frame));
+    terminal.backend().buffer().clone()
+}
+
+fn main() -> std::io::Result<()> {
+    let mut recorder = Recorder::new(Path::new("tmp/before"))?;
+    for size in [(80, 24), (120, 34)] {
+        recorder.screen(0, "Home", &shot("home", size))?;
+        recorder.screen(1, "Next", &shot("next", size))?;
+        recorder.record("Next drilled in", &shot("next/detail", size))?;
+    }
+    println!("{} frames", recorder.frames());
+    Ok(())
+}
+```
+
+After the switch, `capture::compare` with
+`Walk::new().sizes([(80, 24), (120, 34)]).script(Script::new("Next drilled
+in", keys))` and the new build's `Fn() -> Tui<E>` lists each cell that
+differs, each frame only the new build draws (`Added`) and each one it no
+longer reaches (`Removed`). An empty list proves the switch; then delete the
+directory.
 
 ### An app that already has a section trait
 

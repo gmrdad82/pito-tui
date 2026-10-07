@@ -4,6 +4,17 @@ Every release of pito-tui, newest first. Versions follow [Semantic
 Versioning](https://semver.org/) as Cargo reads it before 1.0: a change in the
 middle number may break an app, a change in the last one never does.
 
+## 0.3.1 (2026-10-07)
+
+- `capture::Recorder` writes frames from an app's own buffers exactly as
+  `capture::capture` does: `Recorder::new(dir)`, then `screen(index, name,
+  &buffer)` for a screen as a walk names it and `record(name, &buffer)` for
+  a state a `capture::Script` of that name reaches, each at the buffer's
+  size. An app still on its own loop records its headless dumps with the
+  old build, moves onto `Tui::run`, and `capture::compare` checks the new
+  build against them. "Adopting pito-tui" has the steps, under "Proving the
+  switch".
+
 ## 0.3.0 (2026-10-07)
 
 - Frames before and after: `capture::capture` walks every screen and the

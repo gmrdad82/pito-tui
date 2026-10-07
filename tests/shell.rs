@@ -3,7 +3,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use pito_tui::activity::{LINGER, State};
-use pito_tui::capture::{Difference, Script, Walk, capture, compare};
+use pito_tui::capture::{Difference, Recorder, Script, Walk, capture, compare};
 use pito_tui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use pito_tui::footer::{Input, InputBar, Key};
 use pito_tui::header::Section;
@@ -391,4 +391,31 @@ fn a_capture_compares_clean_and_reports_each_changed_cell_and_frame() {
     let fewer = Walk::new().sizes([(40, 12)]);
     let removed = compare(&dir, &fewer, accented(Color::Blue)).unwrap();
     assert!(matches!(&removed[..], [Difference::Removed { scenario, .. }] if scenario == "guard"));
+}
+
+#[test]
+fn frames_recorded_before_the_shell_compare_against_it_by_screen_and_script_name() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("recorder");
+    let _ = fs::remove_dir_all(&dir);
+    let walk = Walk::new()
+        .sizes([(40, 12), (60, 16)])
+        .script(Script::new("Quit guard", [ctrl_c()]));
+    let old = accented(Color::Blue);
+    let mut recorder = Recorder::new(&dir).unwrap();
+    for (width, height) in [(40, 12), (60, 16)] {
+        recorder
+            .screen(0, "One", &old().shot(width, height, &[], true))
+            .unwrap();
+        let guard = old().shot(width, height, &[ctrl_c()], true);
+        recorder.record("Quit guard", &guard).unwrap();
+    }
+    assert_eq!(recorder.frames(), 4);
+    assert!(recorder.record("quit guard", &old().frame(40, 12)).is_err());
+    assert!(Recorder::new(&dir).is_err());
+    assert_eq!(compare(&dir, &walk, accented(Color::Blue)).unwrap(), []);
+    assert!(
+        !compare(&dir, &walk, accented(Color::Red))
+            .unwrap()
+            .is_empty()
+    );
 }

@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::fmt;
 use std::fs;
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -161,6 +161,10 @@ fn slug(name: &str) -> String {
     out.trim_end_matches('-').to_string()
 }
 
+fn screen(index: usize, name: &str) -> String {
+    format!("{index:02}-{}", slug(name))
+}
+
 fn file((width, height): (u16, u16)) -> String {
     format!("{width}x{height}")
 }
@@ -170,7 +174,7 @@ fn runs<E: Send + 'static>(walk: &Walk, app: &dyn Fn() -> Tui<E>) -> Vec<(String
     if walk.screens {
         let tui = app();
         for (index, name) in tui.names().into_iter().enumerate() {
-            runs.push((format!("{index:02}-{}", slug(name)), Run::Screen(index)));
+            runs.push((screen(index, name), Run::Screen(index)));
         }
     }
     for (index, script) in walk.scripts.iter().enumerate() {
@@ -360,15 +364,60 @@ fn cells(scenario: &str, size: (u16, u16), before: &Frame, after: &Frame) -> Vec
     out
 }
 
+fn fresh(dir: &Path) -> io::Result<()> {
+    if dir.exists() && fs::read_dir(dir)?.next().is_some() {
+        let taken = dir.display().to_string();
+        return Err(io::Error::new(io::ErrorKind::AlreadyExists, taken));
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+pub struct Recorder {
+    dir: PathBuf,
+    frames: usize,
+}
+
+impl Recorder {
+    pub fn new(dir: impl Into<PathBuf>) -> io::Result<Self> {
+        let dir = dir.into();
+        fresh(&dir)?;
+        fs::create_dir_all(&dir)?;
+        Ok(Recorder { dir, frames: 0 })
+    }
+
+    pub fn screen(&mut self, index: usize, name: &str, buffer: &Buffer) -> io::Result<()> {
+        self.write(&screen(index, name), buffer)
+    }
+
+    pub fn record(&mut self, name: &str, buffer: &Buffer) -> io::Result<()> {
+        self.write(&slug(name), buffer)
+    }
+
+    pub fn frames(&self) -> usize {
+        self.frames
+    }
+
+    fn write(&mut self, scenario: &str, buffer: &Buffer) -> io::Result<()> {
+        let folder = self.dir.join(scenario);
+        fs::create_dir_all(&folder)?;
+        let size = (buffer.area.width, buffer.area.height);
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(folder.join(file(size)))?
+            .write_all(encode(buffer).as_bytes())?;
+        self.frames += 1;
+        Ok(())
+    }
+}
+
 pub fn capture<E: Send + 'static>(
     dir: &Path,
     walk: &Walk,
     app: impl Fn() -> Tui<E>,
 ) -> io::Result<usize> {
-    if dir.exists() && fs::read_dir(dir)?.next().is_some() {
-        let taken = dir.display().to_string();
-        return Err(io::Error::new(io::ErrorKind::AlreadyExists, taken));
-    }
+    fresh(dir)?;
     let mut frames = 0;
     for (scenario, run) in runs(walk, &app) {
         let folder = dir.join(&scenario);
