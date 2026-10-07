@@ -2,12 +2,15 @@
 
 [![CI](https://github.com/gmrdad82/pito-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/gmrdad82/pito-tui/actions/workflows/ci.yml)
 
-The app shell for pito terminal apps, as one ratatui 0.30 crate. An app gives
-it a name, a version and an accent colour, and plugs in its screens; the shell
-does everything around them: the terminal, the loop, the keys, the header, the
-footer, the hourglass while a screen loads, and headless dumps for tests and
-reviews. It brings [pito-header], [pito-footer], [pito-hourglass] and
-[pito-list] with it and re-exports them, so an app pins one crate.
+![The demo: a read under the hourglass, a filtered list, a drill-in with copy, and the accent swap](docs/demo.gif)
+
+The app shell for [PITO](https://pitomd.com) terminal apps, as one ratatui 0.30
+crate. An app gives it a name, a version and an accent colour, and plugs in its
+screens; the shell does everything around them: the terminal, the loop, the
+keys, the header, the footer, the hourglass while a screen loads, and headless
+dumps for tests and reviews. It brings [pito-header], [pito-footer],
+[pito-hourglass] and [pito-list] with it and re-exports them, so an app pins one
+crate.
 
 It has no words of its own: every label, hint and message on screen comes from
 the app, in any language.
@@ -20,7 +23,7 @@ the app, in any language.
 ## Install
 
 ```toml
-pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v0.1.1" }
+pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v0.1.2" }
 ```
 
 That one line brings ratatui 0.30, crossterm 0.29, pito-header v0.2.0,
@@ -86,10 +89,11 @@ cargo run --example demo -- --dump 100x24 --keys "tab down enter"
   the accent, and the bar's own hint comes back when the guard lapses. `?`
   hides the hints; the header then shows the app's help word.
 - **The header, assembled:** the app's name on the title rule, the groups
-  and screens as tabs, the screen's facts and status, and its breadcrumb
-  kept in step: when a screen opens something (`crumb`), the sections row
-  becomes the breadcrumb, and the nav's back key (`esc`, `q`) calls the
-  screen's `back`.
+  and screens as tabs, the screen's facts and status (one styled part or
+  several), and its breadcrumb kept in step: when a screen opens something
+  (`crumb`), the sections row becomes the breadcrumb, and the nav's back key
+  (`esc`, `q`) calls the screen's `back`. The facts row goes while a screen
+  is drilled in, unless the app keeps it (`keep_facts`), on the same row.
 - **A filter over a list.** `Filter` holds a pito-list `List`, a pito-footer
   `Input` and the rows that match; `/` starts typing, `enter` keeps the
   filter, `esc` clears it, and the keys are the app's to change.
@@ -156,7 +160,8 @@ Tui::new(name, version, accent: Color) -> Tui<E>          // E: the app's worker
   .palette(Palette) .words(Words) .hints([Hint<'static>]) .min_size(w, h)
   .group(header::Group) .screen(header::Section, impl Screen<E>)   // screens join the last group
   .nav_keys(NavKeys) .help(Option<Help>) .quit(Mode) .quit_window(Duration)
-  .quit_keys(&[footer::Key]) .stop_keys(&[footer::Key]) .eager(bool) .modes(Modes)
+  .quit_keys(&[footer::Key]) .stop_keys(&[footer::Key]) .eager(bool) .keep_facts(bool)
+  .modes(Modes)
   .header_look(fn(Header) -> Header) .footer_look(fn(Footer) -> Footer)
   .on_key(FnMut(KeyEvent, &mut Cx<E>) -> bool) .after_draw(FnMut(Duration))
   run() -> io::Result<()>, run_in(&mut Term)
@@ -176,7 +181,9 @@ pub trait Screen<E>: Any {                                 // every method but d
   fn mouse(&mut self, MouseEvent, Rect, &mut Cx<E>);  fn event(&mut self, E, &mut Cx<E>);
   fn answer(&mut self, yes: bool, &mut Cx<E>);  fn back(&mut self, &mut Cx<E>);
   fn hints(&self) -> Vec<Hint>;  fn facts(&self) -> Vec<(String, Style)>;
-  fn status(&self) -> Option<(String, Style)>;  fn typing(&self) -> bool;
+  fn status(&self) -> Option<(String, Style)>;
+  fn status_parts(&self) -> Vec<(String, Style)>;          // default: status() as one part
+  fn typing(&self) -> bool;
   fn input(&self) -> Option<InputBar>;  fn crumb(&self) -> Option<String>;
   fn selected(&self) -> usize;  fn busy(&self) -> usize;
   fn animating(&self) -> bool;  fn deadline(&self) -> Option<Instant>;
@@ -219,7 +226,8 @@ Until the app says otherwise, a `Tui` wants at least 40 × 12 cells, uses
 `NavKeys::HEY` (`tab`, `[ ]`, digits, `esc` and `q` back), shows the hints
 with `?` to hide them, quits on a double `ctrl+c` within 2 s and asks first
 while any screen is busy (`Mode::Ask`), stops a load on `esc`, reads a screen
-the first time it is shown (`eager(true)` reads them all at start), and turns
+the first time it is shown (`eager(true)` reads them all at start), hides the
+facts row while a screen is drilled in (`keep_facts(true)` keeps it), and turns
 on raw mode, the alternate screen and bracketed paste only.
 
 `Phase`, `Turn`, `Wake`, `Words`, `Palette`, `Modes` and `Bench` are
@@ -353,7 +361,8 @@ README's example as a doctest) and the release build of the demo.
 and pull request to main. The tests are a safety net for what would hurt if it
 broke: the frame pacing, the terminal restore, the key order, the load
 generations and the dump formats. Each release is listed in
-[CHANGELOG.md](CHANGELOG.md).
+[CHANGELOG.md](CHANGELOG.md). The clip at the top is the demo recorded in a
+pseudo-terminal from [render/terminal.toml](render/terminal.toml) and its tape.
 
 ## Contributing
 
@@ -366,7 +375,7 @@ issue.
 ## Licence
 
 The code is MIT licensed: see [LICENSE](LICENSE), by Catalin Ilinca. The PITO
-name and its logos, and the names and logos of every pito app and game, are ©
+name and its logos, and the names and logos of every PITO app and game, are ©
 Catalin Ilinca, all rights reserved, and are not covered by the MIT licence.
 The look of the crates it brings is in the style of HEY's terminal UI; see
 [NOTICE.md](NOTICE.md).

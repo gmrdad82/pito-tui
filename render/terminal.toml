@@ -1,0 +1,40 @@
+app = "pito-tui"
+bin = "demo"
+grid = [100, 24]
+frame = "window"
+typing = "90ms"
+
+[build]
+command = "cargo build --release --locked --example demo"
+bin_dir = "{target}/release/examples"
+
+[theme]
+name = "pito-tui demo"
+background = "#16161e"
+foreground = "#c0caf5"
+cursor = "#c0caf5"
+selection = "#283457"
+black = "#15161e"
+red = "#f7768e"
+green = "#9ece6a"
+yellow = "#e0af68"
+blue = "#7aa2f7"
+magenta = "#bb9af7"
+cyan = "#7dcfff"
+white = "#a9b1d6"
+brightBlack = "#414868"
+brightRed = "#f7768e"
+brightGreen = "#9ece6a"
+brightYellow = "#e0af68"
+brightBlue = "#7aa2f7"
+brightMagenta = "#bb9af7"
+brightCyan = "#7dcfff"
+brightWhite = "#c0caf5"
+
+[shots.demo]
+kind = "clip"
+line = "The demo: a read under the hourglass, a filtered list, a drill-in with copy, and the accent swap"
+tape = "render/terminal/demo.tape"
+launch = "demo"
+settle = "400ms"
+closure = { crossfade = 0.5 }

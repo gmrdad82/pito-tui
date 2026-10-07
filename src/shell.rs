@@ -75,6 +75,7 @@ pub struct Tui<E> {
     triggers: &'static [Key],
     stop: &'static [Key],
     eager: bool,
+    pub(crate) keep_facts: bool,
     pub(crate) out: Outbox<E>,
     pub(crate) inbox: Receiver<Wake<E>>,
     pub(crate) moment: Instant,
@@ -113,6 +114,7 @@ impl<E: Send + 'static> Tui<E> {
             triggers: QUIT,
             stop: STOP,
             eager: false,
+            keep_facts: false,
             out: Outbox::new(sender),
             inbox,
             moment: Instant::now(),
@@ -198,6 +200,11 @@ impl<E: Send + 'static> Tui<E> {
 
     pub fn eager(mut self, eager: bool) -> Self {
         self.eager = eager;
+        self
+    }
+
+    pub fn keep_facts(mut self, keep: bool) -> Self {
+        self.keep_facts = keep;
         self
     }
 
@@ -386,7 +393,7 @@ impl<E: Send + 'static> Tui<E> {
             && self.top.contains((column, row).into())
         {
             let facts = self.screens[index].screen.facts();
-            let place = self.header(&facts, None).hit(self.top, column, row);
+            let place = self.header(&facts, &[]).hit(self.top, column, row);
             if let Some(place) = place
                 && self.nav.go_to(place.group, place.section).is_some()
             {

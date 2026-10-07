@@ -1,9 +1,9 @@
 [package]
 name = "pito-tui"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["Gamer Dad"]
 edition = "2024"
-description = "The app shell for pito terminal apps: one crate that brings the header, footer, hourglass and list, a palette from one accent colour or a whole set, a panic-safe terminal guard, a 120 fps paced loop, key routing with a double ctrl+c quit guard, and headless dumps"
+description = "The app shell for PITO terminal apps: one crate that brings the header, footer, hourglass and list, a palette from one accent colour or a whole set, a panic-safe terminal guard, a 120 fps paced loop, key routing with a double ctrl+c quit guard, and headless dumps"
 license = "MIT"
 repository = "https://github.com/gmrdad82/pito-tui"
 publish = false

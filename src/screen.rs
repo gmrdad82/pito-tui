@@ -67,6 +67,10 @@ pub trait Screen<E>: Any {
         None
     }
 
+    fn status_parts(&self) -> Vec<(String, Style)> {
+        self.status().into_iter().collect()
+    }
+
     fn typing(&self) -> bool {
         false
     }

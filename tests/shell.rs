@@ -3,9 +3,9 @@ use pito_tui::footer::{Input, InputBar};
 use pito_tui::header::Section;
 use pito_tui::ratatui::{
     Frame,
-    buffer::Buffer,
+    buffer::{Buffer, Cell},
     layout::Rect,
-    style::{Color, Modifier},
+    style::{Color, Modifier, Style},
 };
 use pito_tui::{Cx, Flow, Job, Palette, Phase, Screen, Tui, Words, dump};
 
@@ -128,22 +128,27 @@ fn ctrl_c_twice_quits_and_asks_first_while_work_runs() {
     assert!(one(&mut busy).keys.is_empty());
 }
 
-fn lit(buffer: &Buffer, text: &str) -> bool {
+fn rows(buffer: &Buffer, text: &str, look: impl Fn(&Cell) -> bool) -> usize {
     let area = buffer.area;
-    (area.top()..area.bottom()).any(|y| {
-        let row: String = (area.left()..area.right())
-            .map(|x| buffer[(x, y)].symbol())
-            .collect();
-        row.find(text).is_some_and(|at| {
-            let x = area.left() + u16::try_from(row[..at].chars().count()).unwrap();
-            (x..x + u16::try_from(text.chars().count()).unwrap())
-                .filter(|x| buffer[(*x, y)].symbol() != " ")
-                .all(|x| {
-                    let cell = &buffer[(x, y)];
-                    cell.fg == Color::Blue && cell.modifier == Modifier::BOLD
-                })
+    (area.top()..area.bottom())
+        .filter(|&y| {
+            let row: String = (area.left()..area.right())
+                .map(|x| buffer[(x, y)].symbol())
+                .collect();
+            row.find(text).is_some_and(|at| {
+                let x = area.left() + u16::try_from(row[..at].chars().count()).unwrap();
+                (x..x + u16::try_from(text.chars().count()).unwrap())
+                    .filter(|x| buffer[(*x, y)].symbol() != " ")
+                    .all(|x| look(&buffer[(x, y)]))
+            })
         })
-    })
+        .count()
+}
+
+fn lit(buffer: &Buffer, text: &str) -> bool {
+    rows(buffer, text, |cell| {
+        cell.fg == Color::Blue && cell.modifier == Modifier::BOLD
+    }) > 0
 }
 
 #[test]
@@ -216,4 +221,43 @@ fn a_stopped_load_drops_its_late_answer_and_a_changed_source_reads_again() {
         "the stopped first read comes back too late"
     );
     assert_eq!(one(&mut tui).loaded, [2]);
+}
+
+struct Run;
+
+impl Screen<u32> for Run {
+    fn draw(&mut self, _frame: &mut Frame, _area: Rect, _palette: &Palette) {}
+
+    fn facts(&self) -> Vec<(String, Style)> {
+        let red = Style::new().fg(Color::Red);
+        vec![("3 passed".into(), Style::new()), ("1 failed".into(), red)]
+    }
+
+    fn status_parts(&self) -> Vec<(String, Style)> {
+        let red = Style::new().fg(Color::Red);
+        vec![
+            ("3 passed · ".into(), Style::new()),
+            ("1 failed".into(), red),
+        ]
+    }
+
+    fn crumb(&self) -> Option<String> {
+        Some("build".into())
+    }
+}
+
+#[test]
+fn a_drilled_in_screen_keeps_its_facts_row_on_ask_and_its_status_keeps_each_style() {
+    let red = |cell: &Cell| cell.fg == Color::Red;
+    for (keep, shown) in [(false, 1), (true, 2)] {
+        let mut tui = Tui::<u32>::new("probe", "1.2.3", Color::Blue)
+            .keep_facts(keep)
+            .screen(Section::new("Runs"), Run);
+        tui.start();
+        let frame = tui.frame(60, 16);
+        let text = dump::text(&frame);
+        assert!(text.contains("build"), "{text}");
+        assert_eq!(rows(&frame, "1 failed", red), shown, "{text}");
+        assert_eq!(rows(&frame, "3 passed", red), 0, "{text}");
+    }
 }

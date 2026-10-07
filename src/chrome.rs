@@ -108,7 +108,7 @@ impl<E: Send + 'static> Tui<E> {
     pub(crate) fn header<'a>(
         &'a self,
         facts: &'a [(String, Style)],
-        status: Option<&'a (String, Style)>,
+        status: &'a [(String, Style)],
     ) -> Header<'a> {
         let left = self
             .help
@@ -119,12 +119,21 @@ impl<E: Send + 'static> Tui<E> {
             .styles(self.palette.header())
             .title(Some(self.name.as_ref()))
             .left(left.map(|text| Fact::new(text, self.palette.muted)))
-            .right(status.map(|(text, style)| Fact::new(text, *style)))
+            .right_pairs(status)
             .facts_pairs(facts);
         match self.header_look {
             Some(look) => look(header),
             None => header,
         }
+    }
+
+    fn facts_row<'a>(&'a self, facts: &'a [(String, Style)]) -> Header<'a> {
+        self.header(facts, &[])
+            .title(None)
+            .tabs(false)
+            .crumbs(false)
+            .closing(false)
+            .notice(None)
     }
 
     pub fn draw(&mut self, frame: &mut Frame) {
@@ -150,14 +159,15 @@ impl<E: Send + 'static> Tui<E> {
         let width = area.width.saturating_sub(2 * SIDE);
         let screen = &self.screens[index].screen;
         let facts = screen.facts();
-        let status = screen.status();
-        let header = self.header(&facts, status.as_ref());
+        let status = screen.status_parts();
+        let header = self.header(&facts, &status);
         let top = Rect::new(
             area.x + SIDE,
             area.y + TOP,
             width,
             header.height().min(area.height.saturating_sub(TOP)),
         );
+        let dropped = header.height() == header.facts_pairs(&[]).height();
         frame.render_widget(header, top);
         self.top = top;
         let mut below = top.bottom();
@@ -165,6 +175,11 @@ impl<E: Send + 'static> Tui<E> {
             let rule = Breadcrumb::new(&self.nav).styles(self.palette.header());
             frame.render_widget(rule, Rect::new(top.x, below, width, 1));
             below += 1;
+        } else if self.keep_facts && dropped && below < area.bottom() {
+            let row = self.facts_row(&facts);
+            let height = row.height().min(area.bottom() - below);
+            frame.render_widget(row, Rect::new(top.x, below, width, height));
+            below += height;
         }
         let mut hints = screen.hints();
         hints.extend(self.hints.iter().copied());

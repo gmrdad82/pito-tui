@@ -4,6 +4,17 @@ Every release of pito-tui, newest first. Versions follow [Semantic
 Versioning](https://semver.org/) as Cargo reads it before 1.0: a change in the
 middle number may break an app, a change in the last one never does.
 
+## 0.1.2 (2026-10-07)
+
+- `Screen::status_parts` gives the header's status as several styled parts,
+  so a part such as "1 failed" keeps its own colour beside the rest. It
+  defaults to `Screen::status` as one part, so a screen that sets `status`
+  draws as before.
+- `Tui::keep_facts(true)` keeps a screen's facts row while it is drilled in,
+  on the row it had before; by default the row still goes with the tabs.
+- The README shows the demo running, links to pitomd.com and writes the
+  brand as PITO.
+
 ## 0.1.1 (2026-10-07)
 
 - `pito_tui::restore()` gives the terminal back from any thread, once, for
