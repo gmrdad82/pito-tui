@@ -11,6 +11,7 @@ use pito_header::{Action, Group, Header, Nav, NavKeys, Section, Step};
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 
+use crate::activity::{Activities, Board};
 use crate::copy;
 use crate::pace::{Pace, wait_until};
 use crate::palette::Palette;
@@ -35,24 +36,33 @@ pub enum Flow {
     Quit,
 }
 
+pub(crate) enum Role {
+    Tab,
+    Overlay(Nav),
+}
+
 pub(crate) struct Slot<E> {
     pub(crate) screen: Box<dyn Screen<E>>,
+    pub(crate) role: Role,
     pub(crate) started: bool,
     pub(crate) stale: bool,
     pub(crate) generation: u64,
     pub(crate) reading: Option<u64>,
     pub(crate) since: Option<Instant>,
+    pub(crate) ticked: Option<Instant>,
 }
 
 impl<E> Slot<E> {
-    fn new(screen: Box<dyn Screen<E>>) -> Self {
+    fn new(screen: Box<dyn Screen<E>>, role: Role) -> Self {
         Slot {
             screen,
+            role,
             started: false,
             stale: true,
             generation: 0,
             reading: None,
             since: None,
+            ticked: None,
         }
     }
 }
@@ -68,6 +78,9 @@ pub struct Tui<E> {
     pub(crate) nav: Nav,
     nav_keys: NavKeys,
     pub(crate) screens: Vec<Slot<E>>,
+    tabs: Vec<usize>,
+    pub(crate) open: Option<usize>,
+    pub(crate) board: Option<usize>,
     pub(crate) help: Option<Help>,
     pub(crate) quit: QuitGuard,
     mode: Mode,
@@ -108,6 +121,9 @@ impl<E: Send + 'static> Tui<E> {
             nav: Nav::new(Vec::new()),
             nav_keys: NavKeys::HEY,
             screens: Vec::new(),
+            tabs: Vec::new(),
+            open: None,
+            board: None,
             help: Some(Help::new(true)),
             mode: Mode::Ask,
             window: WINDOW,
@@ -159,9 +175,41 @@ impl<E: Send + 'static> Tui<E> {
     pub fn screen(mut self, section: Section, screen: impl Screen<E>) -> Self {
         let group = self.groups.pop().unwrap_or_else(|| Group::new(""));
         self.groups.push(group.section(section));
-        self.screens.push(Slot::new(Box::new(screen)));
+        self.tabs.push(self.screens.len());
+        self.screens.push(Slot::new(Box::new(screen), Role::Tab));
         self.renav();
         self
+    }
+
+    pub fn activities(mut self, words: Activities) -> Self {
+        let nav = Nav::new(vec![Group::new("").section(words.section.clone())]).keys(NavKeys::NONE);
+        match self.board {
+            Some(index) => {
+                if let Some(board) = self.board_mut() {
+                    board.words = words;
+                }
+                self.screens[index].role = Role::Overlay(nav);
+            }
+            None => {
+                self.board = Some(self.screens.len());
+                let board = Board::new(words, self.moment);
+                self.screens
+                    .push(Slot::new(Box::new(board), Role::Overlay(nav)));
+            }
+        }
+        self
+    }
+
+    pub(crate) fn board(&self) -> Option<&Board> {
+        let slot = self.screens.get(self.board?)?;
+        let any: &dyn Any = slot.screen.as_ref();
+        any.downcast_ref::<Board>()
+    }
+
+    fn board_mut(&mut self) -> Option<&mut Board> {
+        let slot = self.screens.get_mut(self.board?)?;
+        let any: &mut dyn Any = slot.screen.as_mut();
+        any.downcast_mut::<Board>()
     }
 
     pub fn nav_keys(mut self, keys: NavKeys) -> Self {
@@ -258,14 +306,24 @@ impl<E: Send + 'static> Tui<E> {
     }
 
     pub fn current(&self) -> Option<usize> {
-        self.nav.place().number.checked_sub(1)
+        self.open.or_else(|| {
+            let number = self.nav.place().number.checked_sub(1)?;
+            self.tabs.get(number).copied()
+        })
     }
 
     pub fn names(&self) -> Vec<&str> {
-        self.nav
+        let mut tabs = self
+            .nav
             .groups()
             .iter()
-            .flat_map(|group| group.sections().iter().map(Section::name))
+            .flat_map(|group| group.sections().iter().map(Section::name));
+        self.screens
+            .iter()
+            .map(|slot| match &slot.role {
+                Role::Tab => tabs.next().unwrap_or_default(),
+                Role::Overlay(nav) => nav.section().map_or("", Section::name),
+            })
             .collect()
     }
 
@@ -292,8 +350,18 @@ impl<E: Send + 'static> Tui<E> {
     }
 
     pub fn go(&mut self, screen: usize) -> bool {
-        if self.nav.go(screen + 1).is_none() {
-            return false;
+        match self.screens.get(screen).map(|slot| &slot.role) {
+            Some(Role::Tab) => {
+                let Some(number) = self.tabs.iter().position(|tab| *tab == screen) else {
+                    return false;
+                };
+                if self.nav.go(number + 1).is_none() {
+                    return false;
+                }
+                self.open = None;
+            }
+            Some(Role::Overlay(_)) => self.open = Some(screen),
+            None => return false,
         }
         self.enter();
         true
@@ -350,7 +418,26 @@ impl<E: Send + 'static> Tui<E> {
         if self.help.as_mut().is_some_and(|help| help.key(key.into())) {
             return Flow::Stay;
         }
-        if let Some(action) = self.nav.action(key.into()) {
+        if let Some(board) = self.board
+            && self
+                .board()
+                .is_some_and(|shown| shown.words.keys.contains(&key.into()))
+        {
+            if self.open == Some(board) {
+                self.open = None;
+            } else {
+                self.go(board);
+            }
+            return self.apply();
+        }
+        if let Some(open) = self.open {
+            if self.nav_keys.back.contains(&key.into())
+                && !(self.loading(open) && self.stop.contains(&key.into()))
+            {
+                self.leave(open);
+                return self.apply();
+            }
+        } else if let Some(action) = self.nav.action(key.into()) {
             self.navigate(action);
             return self.apply();
         }
@@ -393,10 +480,11 @@ impl<E: Send + 'static> Tui<E> {
             && self.top.contains((column, row).into())
         {
             let facts = self.screens[index].screen.facts();
-            let place = self.header(&facts, &[]).hit(self.top, column, row);
+            let place = self.header(&facts, &[], &[]).hit(self.top, column, row);
             if let Some(place) = place
                 && self.nav.go_to(place.group, place.section).is_some()
             {
+                self.open = None;
                 self.enter();
             }
             return;
@@ -457,10 +545,25 @@ impl<E: Send + 'static> Tui<E> {
         }
     }
 
-    fn enter(&mut self) {
-        let Some(index) = self.current() else {
+    fn leave(&mut self, index: usize) {
+        let Some(Role::Overlay(nav)) = self.screens.get_mut(index).map(|slot| &mut slot.role)
+        else {
             return;
         };
+        if nav.back().is_some() {
+            self.call(index, |screen, cx| screen.back(cx));
+        } else {
+            self.open = None;
+        }
+    }
+
+    fn enter(&mut self) {
+        if let Some(index) = self.current() {
+            self.begin(index);
+        }
+    }
+
+    fn begin(&mut self, index: usize) {
         if self.screens[index].started {
             return;
         }
@@ -473,15 +576,19 @@ impl<E: Send + 'static> Tui<E> {
         let Some(index) = self.current() else {
             return;
         };
-        let screen = &self.screens[index].screen;
-        let crumb = screen.crumb();
-        if self.nav.title() == crumb.as_deref() {
+        let slot = &mut self.screens[index];
+        let crumb = slot.screen.crumb();
+        let nav = match &mut slot.role {
+            Role::Overlay(nav) => nav,
+            _ => &mut self.nav,
+        };
+        if nav.title() == crumb.as_deref() {
             return;
         }
-        let selected = screen.selected();
-        self.nav.close();
+        let selected = slot.screen.selected();
+        nav.close();
         if let Some(crumb) = crumb {
-            self.nav.open(crumb, selected);
+            nav.open(crumb, selected);
         }
     }
 
@@ -538,6 +645,12 @@ impl<E: Send + 'static> Tui<E> {
         for source in std::mem::take(&mut self.out.changed) {
             self.changed(&source);
         }
+        let moment = self.moment;
+        for change in std::mem::take(&mut self.out.changes) {
+            if let Some(board) = self.board_mut() {
+                board.change(change, moment);
+            }
+        }
         if let Some(screen) = self.out.go.take() {
             self.go(screen);
         }
@@ -593,16 +706,51 @@ impl<E: Send + 'static> Tui<E> {
                 self.handle(wake);
                 woke = true;
             }
+            if self.ticks().is_some() {
+                woke = true;
+            }
             if !woke {
                 return;
             }
         }
     }
 
+    pub fn advance(&mut self, by: Duration) -> Flow {
+        self.moment += by;
+        self.quit.tick(self.moment);
+        self.ticks().unwrap_or(Flow::Stay)
+    }
+
     pub(crate) fn tick(&mut self) -> Instant {
         self.moment = Instant::now();
         self.quit.tick(self.moment);
         self.moment
+    }
+
+    fn due(&self, slot: &Slot<E>) -> Option<Instant> {
+        if !(slot.started || self.eager) {
+            return None;
+        }
+        slot.screen
+            .deadline()
+            .filter(|deadline| slot.ticked != Some(*deadline))
+    }
+
+    pub(crate) fn ticks(&mut self) -> Option<Flow> {
+        let mut flow = None;
+        for index in 0..self.screens.len() {
+            let Some(deadline) = self.due(&self.screens[index]) else {
+                continue;
+            };
+            if deadline > self.moment {
+                continue;
+            }
+            self.screens[index].ticked = Some(deadline);
+            self.call(index, |screen, cx| screen.tick(cx));
+            let quit = self.apply() == Flow::Quit || flow == Some(Flow::Quit);
+            flow = Some(if quit { Flow::Quit } else { Flow::Stay });
+        }
+        flow
     }
 
     pub(crate) fn animating(&self) -> bool {
@@ -613,12 +761,11 @@ impl<E: Send + 'static> Tui<E> {
             })
     }
 
-    pub(crate) fn deadlines(&self) -> [Option<Instant>; 2] {
-        let screen = self
-            .current()
-            .and_then(|index| self.screens.get(index))
-            .and_then(|slot| slot.screen.deadline());
-        [self.quit.deadline(), screen]
+    pub(crate) fn deadlines(&self) -> [Option<Instant>; 3] {
+        let screens = self.screens.iter().filter_map(|slot| self.due(slot)).min();
+        let open = self.open.is_some() && self.open == self.board;
+        let board = self.board().and_then(|board| board.wake(self.moment, open));
+        [self.quit.deadline(), screens, board]
     }
 
     pub fn run(mut self) -> io::Result<()> {
@@ -676,6 +823,9 @@ impl<E: Send + 'static> Tui<E> {
                 next = self.inbox.try_recv().ok();
             }
             self.tick();
+            if self.ticks() == Some(Flow::Quit) {
+                return Ok(());
+            }
             self.pump();
             for text in std::mem::take(&mut self.out.copies) {
                 copy::copy(&text);

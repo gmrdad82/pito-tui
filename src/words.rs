@@ -12,6 +12,7 @@ pub struct Words {
     pub yes: Text,
     pub no: Text,
     pub choose: Text,
+    pub leave: Text,
     pub too_small: Text,
     pub waiting: Text,
     pub busy: Arc<dyn Fn(usize) -> String + Send + Sync>,
@@ -25,6 +26,7 @@ impl Words {
             yes: Cow::Borrowed(""),
             no: Cow::Borrowed(""),
             choose: Cow::Borrowed(""),
+            leave: Cow::Borrowed(""),
             too_small: Cow::Borrowed(""),
             waiting: Cow::Borrowed(""),
             busy: Arc::new(|_| String::new()),
@@ -53,6 +55,11 @@ impl Words {
 
     pub fn choose(mut self, text: impl Into<Text>) -> Self {
         self.choose = text.into();
+        self
+    }
+
+    pub fn leave(mut self, text: impl Into<Text>) -> Self {
+        self.leave = text.into();
         self
     }
 
@@ -86,6 +93,7 @@ impl fmt::Debug for Words {
             .field("yes", &self.yes)
             .field("no", &self.no)
             .field("choose", &self.choose)
+            .field("leave", &self.leave)
             .field("too_small", &self.too_small)
             .field("waiting", &self.waiting)
             .finish_non_exhaustive()

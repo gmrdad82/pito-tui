@@ -86,6 +86,36 @@ pub fn wrap(text: &str, width: usize) -> Vec<String> {
     lines
 }
 
+pub fn hard_wrap(text: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return Vec::new();
+    }
+    let mut lines = Vec::new();
+    for paragraph in text.split('\n') {
+        let paragraph = clean(paragraph);
+        let mut rest = paragraph.trim_end();
+        if rest.is_empty() {
+            lines.push(String::new());
+            continue;
+        }
+        while !rest.is_empty() {
+            let (head, tail) = split(rest, width);
+            let (head, tail) = if head.is_empty() {
+                let cut = rest
+                    .grapheme_indices(true)
+                    .nth(1)
+                    .map_or(rest.len(), |(index, _)| index);
+                rest.split_at(cut)
+            } else {
+                (head, tail)
+            };
+            lines.push(head.to_string());
+            rest = tail;
+        }
+    }
+    lines
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,5 +130,7 @@ mod tests {
         assert_eq!(wrap("the quick brown fox", 9), ["the quick", "brown fox"]);
         assert_eq!(wrap("abcdefghij", 4), ["abcd", "efgh", "ij"]);
         assert_eq!(wrap("日本語", 1), ["日", "本", "語"]);
+        assert_eq!(hard_wrap("the quick brown", 6), ["the qu", "ick br", "own"]);
+        assert_eq!(hard_wrap("a日本\n\nb", 2), ["a", "日", "本", "", "b"]);
     }
 }

@@ -58,7 +58,9 @@ impl<E: Send + 'static> Tui<E> {
         let start = self.moment;
         let mut out = Vec::with_capacity(names.len());
         for (index, screen) in names.into_iter().enumerate() {
-            self.go(index);
+            if !self.go(index) {
+                continue;
+            }
             self.settle();
             let mut total = Duration::ZERO;
             let mut worst = Duration::ZERO;
@@ -80,6 +82,7 @@ impl<E: Send + 'static> Tui<E> {
                 worst,
             });
         }
+        self.open = None;
         out
     }
 }

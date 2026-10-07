@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/gmrdad82/pito-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/gmrdad82/pito-tui/actions/workflows/ci.yml)
 
-![The demo: a read under the hourglass, a filtered list, a drill-in with copy, and the accent swap](docs/demo.gif)
+![The demo: fake jobs on the activity band and screen, a read under the hourglass, a filtered list, a drill-in with copy, and the accent swap](docs/demo.gif)
 
 The app shell for [PITO](https://pitomd.com) terminal apps, as one ratatui 0.30
 crate. An app gives it a name, a version and an accent colour, and plugs in its
@@ -23,7 +23,7 @@ the app, in any language.
 ## Install
 
 ```toml
-pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v0.1.2" }
+pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v0.2.0" }
 ```
 
 That one line brings ratatui 0.30, crossterm 0.29, pito-header v0.2.0,
@@ -54,18 +54,26 @@ cargo run --example demo -- --dump 100x24 --keys "tab down enter"
   the hourglass (pito-hourglass) with the screen's own words; a stop key
   (`esc` unless the app picks others) stops waiting. `Cx::changed(source)`
   marks every screen that reads that source stale, and they read again.
+- **Timed work without a key.** A screen's `deadline` wakes the loop, and
+  when the loop's moment reaches it the shell calls the screen's `tick`,
+  once for each deadline the screen gives, whichever screen is showing: a
+  poll every few seconds, a read that timed out. The same happens in
+  `settle` and when `Tui::advance` moves the clock of a headless run.
 - **A 120 fps paced loop that never blocks the UI thread.** An input thread
   and the app's workers wake one channel; the loop drains every wake in a
   batch, redraws only when something changed, no more often than every
   8.3 ms, and otherwise sleeps until the next wake or deadline (the quit
-  notice running out, a screen's own deadline). Every frame is a
+  notice running out, a screen's own deadline, the next frame of an
+  activity's spinner). Every frame is a
   synchronized update, so the terminal never shows half of one. Idle, it
   draws nothing.
 - **Keys in a fixed order:** a key release is ignored; then the quit guard
   (a double `ctrl+c`, asking first while work runs, with the app's words);
   then an open confirm; then a screen that is typing into an input; then
-  the help toggle (`?`); then the nav keys; then the stop key while a
-  screen loads; then the app's own keys (`on_key`); then the screen.
+  the help toggle (`?`); then the key that opens the activity screen; then
+  the nav keys (only the back keys while the activity screen is open); then
+  the stop key while a screen loads; then the app's own keys (`on_key`);
+  then the screen.
 - **A terminal that is always given back.** `Term` turns on raw mode, the
   alternate screen and bracketed paste (mouse capture and focus events only
   when the app asks), remembers each one it turned on, and turns exactly
@@ -82,29 +90,54 @@ cargo run --example demo -- --dump 100x24 --keys "tab down enter"
   selected, good, bad, rule, line, glass, shimmer). `Cx::palette` swaps it
   while the app runs, and the hourglass follows.
 - **The footer, assembled:** the screen's hints and the app's, the notice
-  line (the quit guard's, or what a screen said with `Cx::say`), the
-  confirm bar, the input bar, and the app's name and version at the right
-  end of the row of keys (pito-footer's version slot). While an input bar
-  or a confirm is open, the quit guard's word takes the bar's hint row, in
-  the accent, and the bar's own hint comes back when the guard lapses. `?`
-  hides the hints; the header then shows the app's help word.
-- **The header, assembled:** the app's name on the title rule, the groups
-  and screens as tabs, the screen's facts and status (one styled part or
-  several), and its breadcrumb kept in step: when a screen opens something
-  (`crumb`), the sections row becomes the breadcrumb, and the nav's back key
-  (`esc`, `q`) calls the screen's `back`. The facts row goes while a screen
-  is drilled in, unless the app keeps it (`keep_facts`), on the same row.
+  line, the confirm bar, the input bar, and the app's name and version at
+  the right end of the row of keys (pito-footer's version slot). The notice
+  line is the first that speaks of: the quit guard, what a screen said with
+  `Cx::say` (gone at the next key), the screen's own `notice` (in any tone,
+  for as long as the screen keeps it, such as an error until the next
+  action), and the screen's `legend` while the hints show. While an input
+  bar or a confirm is open, the quit guard's word takes the bar's hint row,
+  in the accent, and the bar's own hint comes back when the guard lapses.
+  The quit question has its own hint (`Words::leave`), falling back to the
+  confirm's (`Words::choose`). `?` hides the hints; the header then shows
+  the app's help word.
+- **The header, assembled:** the app's name on the title rule, with the help
+  word and the screen's `lead` on its left and the screen's status on its
+  right, each in styled parts and each told the room it has, so a screen
+  can drop a part that won't fit rather than see it cut; the groups and
+  screens as tabs; the screen's facts; and its breadcrumb kept in step:
+  when a screen opens something (`crumb`), the sections row becomes the
+  breadcrumb, and the nav's back key (`esc`, `q`) calls the screen's
+  `back`. The facts row goes while a screen is drilled in, unless the app
+  keeps it (`keep_facts`), on the same row.
+- **Activities.** The app hands the shell what it has running (`Cx::activity`,
+  `Cx::activities`, `Cx::forget`): each with a label, a state (running,
+  waiting, done, failed), a progress fraction or none (a spinner then), when
+  it started and ended, a short status line and the detail lines it opens
+  into (a log, its steps). The shell draws them as a band flush on the
+  footer, the newest first, taking up to half the room, with a finished one
+  fading for 3 s before it goes; the app turns the band on and off
+  (`Cx::band`). A key the app picks opens the activity screen over any
+  screen, outside the tabs: the tabs unlit, only the back keys, its own
+  breadcrumb row ("Operations / update pfx"), every activity listed, and
+  `enter` opening one into its detail lines. Every word on them is the
+  app's (`Activities`), and the data stays the app's: the shell only draws,
+  pages and takes the keys, and its time is the loop's moment.
 - **A filter over a list.** `Filter` holds a pito-list `List`, a pito-footer
   `Input` and the rows that match; `/` starts typing, `enter` keeps the
   filter, `esc` clears it, and the keys are the app's to change.
 - **The rest of the glue:** a too-small guard with the app's message, OSC 52
   copy (`Cx::copy`, up to 48 KiB), a y/n confirm whose answer comes back to
   the screen that asked, an optional callback after every draw with the time
-  it took, and width-aware text helpers (`text::clip`, `fit`, `wrap`).
+  it took, and width-aware text helpers (`text::clip`, `fit`, `wrap` at
+  spaces, `hard_wrap` at the width).
 - **Headless.** `Tui::shot` draws the app at any size after a list of keys,
-  `dump::text` and `dump::ansi` print the result, `dump::keys` reads a
-  `--keys` string and `Tui::bench` times every screen. The app wires them
-  to its own flags.
+  `Tui::advance` moves the run's clock (the hourglass as if it had run that
+  long, deadlines ticking), `dump::text` and `dump::ansi` print the result,
+  `dump::keys` reads a `--keys` string and `Tui::bench` times every screen,
+  moving the clock a frame at a time. Time never comes from the wall clock
+  there: drawing reads the loop's moment, which a screen sees in `moment`
+  before each frame. The app wires them to its own flags.
 
 ## Use
 
@@ -150,8 +183,9 @@ fn main() -> std::io::Result<()> {
 ```
 
 `examples/demo.rs` is the fuller starting point: two screens, a read with
-the hourglass, a filtered list, a drill-in with a breadcrumb and copy, an
-app-wide key that swaps the palette, and the headless flags.
+the hourglass, a filtered list, a drill-in with a breadcrumb and copy, fake
+jobs with progress on the activity band and screen (`j` starts one, `o`
+lists them), an app-wide key that swaps the palette, and the headless flags.
 
 ## The API
 
@@ -161,19 +195,20 @@ Tui::new(name, version, accent: Color) -> Tui<E>          // E: the app's worker
   .group(header::Group) .screen(header::Section, impl Screen<E>)   // screens join the last group
   .nav_keys(NavKeys) .help(Option<Help>) .quit(Mode) .quit_window(Duration)
   .quit_keys(&[footer::Key]) .stop_keys(&[footer::Key]) .eager(bool) .keep_facts(bool)
-  .modes(Modes)
+  .modes(Modes) .activities(Activities)
   .header_look(fn(Header) -> Header) .footer_look(fn(Footer) -> Footer)
   .on_key(FnMut(KeyEvent, &mut Cx<E>) -> bool) .after_draw(FnMut(Duration))
   run() -> io::Result<()>, run_in(&mut Term)
   key(KeyEvent) -> Flow, paste(&str), mouse(MouseEvent), event(screen, E), handle(Wake<E>) -> Flow
   loaded(screen, generation, E) -> bool, changed(source), go(screen) -> bool, start()
-  pump(), settle(), draw(&mut Frame), busy(), current(), names()
+  pump(), settle(), advance(Duration) -> Flow, draw(&mut Frame), busy(), current(), names()
   find::<T>(), find_mut::<T>(), sender(), waker(screen), set_palette(..), set_words(..)
   frame(w, h) -> Buffer, shot(w, h, &[KeyEvent], settle) -> Buffer, bench(w, h, frames) -> Vec<Bench>
 pub enum Flow { Stay, Quit }
 
 pub trait Screen<E>: Any {                                 // every method but draw has a default
   fn draw(&mut self, &mut Frame, Rect, &Palette);
+  fn moment(&mut self, now: Instant);                      // the loop's moment, before each draw
   fn phase(&self) -> Phase;                                // Ready | Loading(label) | Trouble(lines)
   fn load(&mut self) -> Option<Job<E>>;  fn loaded(&mut self, E, &mut Cx<E>);
   fn sources(&self) -> &[&str];  fn cancel(&mut self);  fn start(&mut self, &mut Cx<E>);
@@ -182,25 +217,36 @@ pub trait Screen<E>: Any {                                 // every method but d
   fn answer(&mut self, yes: bool, &mut Cx<E>);  fn back(&mut self, &mut Cx<E>);
   fn hints(&self) -> Vec<Hint>;  fn facts(&self) -> Vec<(String, Style)>;
   fn status(&self) -> Option<(String, Style)>;
-  fn status_parts(&self) -> Vec<(String, Style)>;          // default: status() as one part
+  fn status_parts(&self, room: u16) -> Vec<(String, Style)>;  // default: status() as one part
+  fn lead(&self, room: u16) -> Vec<(String, Style)>;      // beside the help word
+  fn notice(&self) -> Option<Notice>;  fn legend(&self) -> Option<&str>;
   fn typing(&self) -> bool;
   fn input(&self) -> Option<InputBar>;  fn crumb(&self) -> Option<String>;
   fn selected(&self) -> usize;  fn busy(&self) -> usize;
   fn animating(&self) -> bool;  fn deadline(&self) -> Option<Instant>;
+  fn tick(&mut self, &mut Cx<E>);                          // once when the moment reaches a deadline
 }
 pub type Job<E> = Box<dyn FnOnce() -> E + Send>;
 
 Cx<'_, E>: screen(), now(), detach(FnOnce() -> E), waker() -> Waker<E>,
   say(text, footer::Tone), hush(), confirm(question), confirm_with(question, Confirm),
   copy(text) -> bool, go(screen), quit(), reload(), changed(source),
-  palette(Palette), words(Words), hints(Vec<Hint<'static>>)
+  palette(Palette), words(Words), hints(Vec<Hint<'static>>),
+  activity(Activity), activities([Activity]), forget(id), band(bool)
+
+Activity::new(id: u64, label, started: Instant)            // every field pub, and a builder each
+  .state(activity::State) .progress(f64 or None) .ended(Instant) .status(text) .detail([Line])
+pub enum activity::State { Running, Waiting, Done, Failed }  // activity::LINGER: 3 s once finished
+Activities::new(header::Section)                           // the activity screen's name and words
+  .keys(&[footer::Key]) .band(bool) .hints([Hint]) .detail_hints([Hint]) .empty(text)
+  .more(Fn(usize) -> String) .elapsed(Fn(Duration) -> String) .facts(Fn(&[Activity]) -> Vec<(String, Style)>)
 
 Palette::new(accent: Color)                                // every token a pub field and a builder
   .base .ink .muted .accent .selected .good .bad .rule .line .glass .shimmer (Style)
   header() -> header::Styles, footer() -> footer::Styles, list() -> list::Styles,
   hourglass(elapsed, label, hint) -> Hourglass
 Words::new()                                               // every word empty until the app sets it
-  .help .again .yes .no .choose .too_small .waiting (text)  .busy(Fn(usize) -> String)
+  .help .again .yes .no .choose .leave .too_small .waiting (text)  .busy(Fn(usize) -> String)
 
 Term::enter(Modes) -> io::Result<Term>                     // restored on drop and on a UI-thread panic
 restore() -> bool                                          // any thread, once: true if it gave the terminal back
@@ -218,7 +264,7 @@ matches(text, query) -> bool                               // every word of the 
 
 dump::size("120x34"), dump::keys("tab / foo enter ctrl+c") -> Result<Vec<KeyEvent>, word>,
 dump::text(&Buffer), dump::ansi(&Buffer);  Bench { screen, frames, average, worst }
-text::clean, cells, split, clip, fit, wrap;  message(frame, area, text);  copy(text), base64(bytes)
+text::clean, cells, split, clip, fit, wrap, hard_wrap;  message(frame, area, text);  copy(text), base64(bytes)
 TOP, SIDE, PAD, GAP                                        // the shell's spacing, in cells
 ```
 
@@ -227,10 +273,13 @@ Until the app says otherwise, a `Tui` wants at least 40 × 12 cells, uses
 with `?` to hide them, quits on a double `ctrl+c` within 2 s and asks first
 while any screen is busy (`Mode::Ask`), stops a load on `esc`, reads a screen
 the first time it is shown (`eager(true)` reads them all at start), hides the
-facts row while a screen is drilled in (`keep_facts(true)` keeps it), and turns
-on raw mode, the alternate screen and bracketed paste only.
+facts row while a screen is drilled in (`keep_facts(true)` keeps it), has no
+activity band or screen until the app gives it `Activities` (the band then
+shows unless `band(false)`), and turns on raw mode, the alternate screen and
+bracketed paste only.
 
-`Phase`, `Turn`, `Wake`, `Words`, `Palette`, `Modes` and `Bench` are
+`Phase`, `Turn`, `Wake`, `Words`, `Palette`, `Modes`, `Bench`, `Activity`,
+`Activities` and `activity::State` are
 `#[non_exhaustive]`: match the enums with a wildcard arm and build the structs
 with `new()` and their builders, so a later release can add to them in a minor
 version.
@@ -248,9 +297,10 @@ shell deletes that glue; the app's screens and data stay as they are.
   app's to use inside a screen, through `pito_tui::list` and
   `pito_tui::footer`.
 - Its words, every one, in any language: `Words` for the shell's few
-  places (the help word, the quit notice and question, Yes and No, the
-  confirm's hint line, the too-small message, the hint under the
-  hourglass), the global hints, and each screen's hints, facts, labels and
+  places (the help word, the quit notice and question and its hint line,
+  Yes and No, the confirm's hint line, the too-small message, the hint
+  under the hourglass), `Activities` for the activity band and screen, the
+  global hints, and each screen's hints, facts, notices, labels and
   messages. An empty word is simply not drawn.
 - Its keys beyond the shell's: anything a screen's `key` takes, and
   app-wide actions through `on_key`. The shell's own keys are the app's to
@@ -282,12 +332,14 @@ shell deletes that glue; the app's screens and data stay as they are.
 | `ratatui::init` and `ratatui::restore`, bracketed-paste and mouse toggles, panic hooks that restore the terminal | `Tui::run` (or `Term::enter` for a loop of its own) |
 | An input thread feeding a channel, an enum with an input arm, `recv_timeout` | `listen` and `Wake<E>`, inside `run` |
 | A frame pacer, a dirty flag, deadlines, draining a batch of wakes | `run`: `Pace` at 120 fps, synchronized updates, `deadline` and `animating` per screen |
+| Polls on a timer, slow reads timed out, a clock threaded into drawing | `Screen::deadline` and `tick`, `Screen::moment`, `Tui::advance` headless |
 | Code that hands the app's asks to threads and routes their answers back | `Screen::load` (tracked by generation) and `Cx::detach` (one-off work) |
 | Key routing: release, quit guard, confirm, input, help, nav | `Tui::key`, in that order |
 | Quit guard wiring: busy count, wording, tick, deadline, notice, bar | `Screen::busy`, `Words::again` and `Words::busy`, `quit`, `quit_window` |
 | A confirm gathered from several places | `Cx::confirm` and `Screen::answer` |
-| Header assembly: title, help word, facts, a breadcrumb kept in step | `Screen::facts`, `status`, `crumb`, `selected` and `back` |
-| Footer assembly: hints, notice, confirm, input, version, height | `Screen::hints`, `input`, `Cx::say`; the version slot is wired |
+| Header assembly: title, help word, a lead beside it, a status fitted to the room, facts, a breadcrumb kept in step | `Screen::lead`, `status_parts`, `facts`, `crumb`, `selected` and `back`, `keep_facts` |
+| Footer assembly: hints, notice, legend, confirm, input, version, height | `Screen::hints`, `input`, `notice`, `legend`, `Cx::say`, `Words::leave`; the version slot is wired |
+| A panel of running work above the footer and a screen listing it, with a detail view | `Activities`, fed by `Cx::activity`, `activities` and `forget` |
 | A tone module mapped to four crates' `Styles` | `Palette`, and `Cx::palette` at runtime |
 | A loading wrapper around the hourglass | `Phase::Loading(label)` |
 | The too-small guard, a centred message, OSC 52, text helpers | `min_size` and `Words::too_small`, `message`, `Cx::copy`, `text` |
@@ -320,22 +372,34 @@ shell deletes that glue; the app's screens and data stay as they are.
    and comes back to the same screen's `event`. A long-lived watcher takes
    `cx.waker()` (or `tui.waker(index)` before `run`) and posts with
    `send`. A watcher that sees a source change sends an event whose screen
-   calls `cx.changed("source")`.
-7. **The loop goes.** Replace the app's `run` with `Tui::run()`; delete
+   calls `cx.changed("source")`. A poll on a timer is a screen's `deadline`
+   with the poll in its `tick`, which gives the next deadline.
+7. **Activities.** If the app shows what it has running (operations,
+   exports, simulations), give `Tui::activities` an `Activities` with the
+   screen's name (`Section::new("Operations")`), the key that opens it, its
+   hints and its words (the empty message, the overflow line, the elapsed
+   time, the facts). Whichever screen hears about the work calls
+   `cx.activity(Activity::new(id, label, started)...)` each time it changes,
+   with the same `id`; `cx.activities(..)` replaces the whole list, which
+   suits an app that reads its work as a list, and `cx.forget(id)` drops
+   one. The app's own panel and its screen go; their data stays where it
+   was. The demo's fake jobs (`Home` in `examples/demo.rs`) are the pattern.
+8. **The loop goes.** Replace the app's `run` with `Tui::run()`; delete
    the pacer, the terminal setup and restore, the restoring panic hooks,
    the input thread and the key routing. The app's crash hook stays where
    it is, installed before `run`; if it ends the process, it calls
    `pito_tui::restore()` before it exits.
-8. **Headless flags.** Wire `--dump WxH` to `dump::size` and `Tui::shot`,
+9. **Headless flags.** Wire `--dump WxH` to `dump::size` and `Tui::shot`,
    `--keys` to `dump::keys`, `--ansi` to `dump::ansi`, `--loading` to
-   `shot(.., settle: false)` and `--bench N` to `Tui::bench`; `main` in
-   `examples/demo.rs` does exactly this. A dump with fixtures builds the
-   screens from fixture data before `shot`.
-9. **Check.** Dump every screen at the sizes the app cares about and
-   compare them with the old dumps; the header, footer and spacing should
-   match, since the shell draws them with the same crates and the same
-   layout (a one-cell side margin for the header and footer, two cells for
-   the content, one row above the footer).
+   `shot(.., settle: false)`, `--at MS` to `Tui::advance` and a second
+   `frame`, and `--bench N` to `Tui::bench`; `main` in `examples/demo.rs`
+   does exactly this. A dump with fixtures builds the screens from fixture
+   data before `shot`.
+10. **Check.** Dump every screen at the sizes the app cares about and
+    compare them with the old dumps; the header, footer and spacing should
+    match, since the shell draws them with the same crates and the same
+    layout (a one-cell side margin for the header and footer, two cells for
+    the content, one row above the footer).
 
 ### An app that already has a section trait
 
@@ -348,9 +412,10 @@ becomes `Cx::say`; its pending confirm becomes `Cx::confirm` with `answer`;
 its asks become `Cx::detach`. A job that needs a connection or a client opens
 or clones its own inside the closure, since it runs on a worker.
 
-An overlay that sits over every section becomes a screen of its own (in its
-own group if it should read as one), or stays the app's drawing inside a
-screen with `crumb` naming where the user is.
+An overlay that lists the app's running work becomes `Activities`. Any other
+overlay that sits over every section becomes a screen of its own (in its own
+group if it should read as one), or stays the app's drawing inside a screen
+with `crumb` naming where the user is.
 
 ## Development
 

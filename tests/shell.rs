@@ -1,13 +1,17 @@
+use std::time::{Duration, Instant};
+
+use pito_tui::activity::{LINGER, State};
 use pito_tui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use pito_tui::footer::{Input, InputBar};
+use pito_tui::footer::{Input, InputBar, Key};
 use pito_tui::header::Section;
 use pito_tui::ratatui::{
     Frame,
     buffer::{Buffer, Cell},
     layout::Rect,
     style::{Color, Modifier, Style},
+    text::Line,
 };
-use pito_tui::{Cx, Flow, Job, Palette, Phase, Screen, Tui, Words, dump};
+use pito_tui::{Activities, Activity, Cx, Flow, Job, Palette, Phase, Screen, Tui, Words, dump};
 
 #[derive(Default)]
 struct Probe<const ID: u8> {
@@ -233,7 +237,7 @@ impl Screen<u32> for Run {
         vec![("3 passed".into(), Style::new()), ("1 failed".into(), red)]
     }
 
-    fn status_parts(&self) -> Vec<(String, Style)> {
+    fn status_parts(&self, _room: u16) -> Vec<(String, Style)> {
         let red = Style::new().fg(Color::Red);
         vec![
             ("3 passed · ".into(), Style::new()),
@@ -260,4 +264,97 @@ fn a_drilled_in_screen_keeps_its_facts_row_on_ask_and_its_status_keeps_each_styl
         assert_eq!(rows(&frame, "1 failed", red), shown, "{text}");
         assert_eq!(rows(&frame, "3 passed", red), 0, "{text}");
     }
+}
+
+struct Feed;
+
+impl Screen<u32> for Feed {
+    fn draw(&mut self, _frame: &mut Frame, _area: Rect, _palette: &Palette) {}
+
+    fn start(&mut self, cx: &mut Cx<'_, u32>) {
+        let now = cx.now();
+        cx.activity(Activity::new(2, "sync", now).state(State::Done));
+        cx.activity(
+            Activity::new(1, "build", now + Duration::from_millis(1))
+                .progress(0.5)
+                .detail([Line::from("step one")]),
+        );
+    }
+}
+
+#[test]
+fn activities_sit_on_the_footer_and_open_over_any_screen_with_only_the_back_keys() {
+    let mut tui = Tui::<u32>::new("probe", "1.2.3", Color::Blue)
+        .activities(Activities::new(Section::new("Jobs")).keys(&[Key::Char('o')]))
+        .screen(Section::new("One"), Feed)
+        .screen(Section::new("Two"), Probe::<2>::default());
+    tui.start();
+    let text = dump::text(&tui.frame(60, 16));
+    let lines: Vec<&str> = text.lines().collect();
+    let last = lines.iter().position(|line| line.contains("sync")).unwrap();
+    assert!(lines[last - 1].contains("build"), "{text}");
+    assert!(lines[last + 1].trim_start().starts_with('─'), "{text}");
+    tui.advance(LINGER);
+    assert!(!dump::text(&tui.frame(60, 16)).contains("sync"));
+
+    tui.key(press(KeyCode::Char('o')));
+    tui.key(press(KeyCode::Char('2')));
+    tui.key(press(KeyCode::Tab));
+    assert_eq!(tui.current().map(|index| tui.names()[index]), Some("Jobs"));
+    tui.key(press(KeyCode::Enter));
+    let text = dump::text(&tui.frame(60, 16));
+    assert!(
+        text.contains("Jobs / build") && text.contains("step one"),
+        "{text}"
+    );
+    tui.key(press(KeyCode::Esc));
+    assert_eq!(tui.current().map(|index| tui.names()[index]), Some("Jobs"));
+    tui.key(press(KeyCode::Esc));
+    assert_eq!(tui.current().map(|index| tui.names()[index]), Some("One"));
+    assert!(tui.find::<Probe<2>>().unwrap().keys.is_empty());
+}
+
+#[derive(Default)]
+struct Clock {
+    due: Option<Instant>,
+    ticks: usize,
+}
+
+impl Screen<u32> for Clock {
+    fn draw(&mut self, _frame: &mut Frame, _area: Rect, _palette: &Palette) {}
+
+    fn start(&mut self, cx: &mut Cx<'_, u32>) {
+        self.due = Some(cx.now() + Duration::from_secs(1));
+    }
+
+    fn deadline(&self) -> Option<Instant> {
+        self.due
+    }
+
+    fn tick(&mut self, cx: &mut Cx<'_, u32>) {
+        self.ticks += 1;
+        if self.ticks == 1 {
+            self.due = Some(cx.now() + Duration::from_secs(1));
+        }
+    }
+}
+
+#[test]
+fn a_deadline_ticks_its_screen_once_when_the_moment_reaches_it() {
+    let mut tui = Tui::<u32>::new("probe", "1.2.3", Color::Blue)
+        .screen(Section::new("Clock"), Clock::default());
+    tui.start();
+    tui.settle();
+    tui.advance(Duration::from_millis(999));
+    assert_eq!(tui.find::<Clock>().unwrap().ticks, 0);
+    tui.advance(Duration::from_millis(1));
+    assert_eq!(tui.find::<Clock>().unwrap().ticks, 1);
+    tui.advance(Duration::from_secs(1));
+    tui.advance(Duration::from_secs(5));
+    tui.settle();
+    assert_eq!(
+        tui.find::<Clock>().unwrap().ticks,
+        2,
+        "a deadline left in the past ticks once"
+    );
 }

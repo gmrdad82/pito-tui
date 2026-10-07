@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use pito_footer::{ConfirmBar, Footer, Hint, Notice, Words as Choice};
-use pito_header::{Breadcrumb, Fact, Header};
+use pito_header::{Breadcrumb, Drill, Header};
 use ratatui::{
     Frame,
     buffer::Buffer,
@@ -12,13 +12,27 @@ use ratatui::{
 };
 
 use crate::screen::{Phase, Screen};
-use crate::shell::Tui;
+use crate::shell::{Role, Tui};
+use crate::text::cells;
 use crate::words::Words;
 
 pub const TOP: u16 = 1;
 pub const SIDE: u16 = 1;
 pub const PAD: u16 = 2;
 pub const GAP: u16 = 1;
+
+const SIDES: u16 = 6;
+const LEAD: &str = " · ";
+
+fn width(text: &str) -> u16 {
+    u16::try_from(cells(text)).unwrap_or(u16::MAX)
+}
+
+fn room(line: u16, title: &str) -> u16 {
+    let wide = width(title).saturating_add(2).min(line);
+    let side = ((line - wide) / 2).saturating_sub(2);
+    if side < SIDES { 0 } else { side - 2 }
+}
 
 pub fn message<'a>(frame: &mut Frame, area: Rect, text: impl Into<Text<'a>>) {
     let top = area.height / 3;
@@ -34,12 +48,12 @@ pub fn message<'a>(frame: &mut Frame, area: Rect, text: impl Into<Text<'a>>) {
     frame.render_widget(paragraph, inner);
 }
 
-fn choice(words: &Words) -> Choice<'_> {
+fn choice<'a>(words: &'a Words, hint: &'a str) -> Choice<'a> {
     let choice = Choice::new(&words.yes, &words.no);
-    if words.choose.is_empty() {
+    if hint.is_empty() {
         choice
     } else {
-        choice.hint(&words.choose)
+        choice.hint(hint)
     }
 }
 
@@ -71,21 +85,34 @@ impl<E: Send + 'static> Tui<E> {
         screen: &'a dyn Screen<E>,
         again: Option<&'a str>,
     ) -> Footer<'a> {
-        let notice = again.map(Notice::accent).or_else(|| {
-            self.out
-                .said
-                .as_ref()
-                .map(|(text, tone)| Notice::new(text, *tone))
-        });
-        let mut choice = choice(&self.words);
+        let hints_open = self.help.is_none_or(|help| help.open());
+        let notice = again
+            .map(Notice::accent)
+            .or_else(|| {
+                self.out
+                    .said
+                    .as_ref()
+                    .map(|(text, tone)| Notice::new(text, *tone))
+            })
+            .or_else(|| screen.notice())
+            .or_else(|| screen.legend().filter(|_| hints_open).map(Notice::legend));
+        let words = &self.words;
+        let leave = if words.leave.is_empty() {
+            &words.choose
+        } else {
+            &words.leave
+        };
+        let mut asked = choice(words, &words.choose);
+        let mut leaving = choice(words, leave);
         if let Some(text) = again {
-            choice = choice.hint(text);
+            asked = asked.hint(text);
+            leaving = leaving.hint(text);
         }
-        let confirm = self.quit.bar(choice).or_else(|| {
+        let confirm = self.quit.bar(leaving).or_else(|| {
             self.out
                 .asking
                 .as_ref()
-                .map(|asking| ConfirmBar::new(&asking.question, &asking.confirm, choice))
+                .map(|asking| ConfirmBar::new(&asking.question, &asking.confirm, asked))
         });
         let input = screen
             .input()
@@ -105,30 +132,50 @@ impl<E: Send + 'static> Tui<E> {
         }
     }
 
-    pub(crate) fn header<'a>(
-        &'a self,
-        facts: &'a [(String, Style)],
-        status: &'a [(String, Style)],
-    ) -> Header<'a> {
-        let left = self
+    fn left(&self, screen: &dyn Screen<E>, room: u16) -> Vec<(String, Style)> {
+        let help = self
             .help
             .filter(|help| !help.open())
             .map(|_| self.words.help.as_ref())
             .filter(|text| !text.is_empty());
+        let taken = help.map_or(0, |text| width(text).saturating_add(width(LEAD)));
+        let lead = screen.lead(room.saturating_sub(taken));
+        let mut left = Vec::new();
+        if let Some(text) = help {
+            left.push((text.to_string(), self.palette.muted));
+            if lead.iter().any(|(text, _)| !text.is_empty()) {
+                left.push((LEAD.to_string(), self.palette.muted));
+            }
+        }
+        left.extend(lead);
+        left
+    }
+
+    pub(crate) fn header<'a>(
+        &'a self,
+        facts: &'a [(String, Style)],
+        left: &'a [(String, Style)],
+        status: &'a [(String, Style)],
+    ) -> Header<'a> {
         let header = Header::new(&self.nav)
             .styles(self.palette.header())
             .title(Some(self.name.as_ref()))
-            .left(left.map(|text| Fact::new(text, self.palette.muted)))
+            .left_pairs(left)
             .right_pairs(status)
             .facts_pairs(facts);
-        match self.header_look {
+        let header = match self.header_look {
             Some(look) => look(header),
             None => header,
+        };
+        if self.open.is_some() {
+            header.lit(false).drill(Drill::Rows).crumbs(false)
+        } else {
+            header
         }
     }
 
     fn facts_row<'a>(&'a self, facts: &'a [(String, Style)]) -> Header<'a> {
-        self.header(facts, &[])
+        self.header(facts, &[], &[])
             .title(None)
             .tabs(false)
             .crumbs(false)
@@ -149,6 +196,8 @@ impl<E: Send + 'static> Tui<E> {
         let Some(index) = self.current() else {
             return;
         };
+        let moment = self.moment;
+        self.screens[index].screen.moment(moment);
         let loading = self.loading(index);
         let slot = &mut self.screens[index];
         match (loading, slot.since) {
@@ -159,8 +208,10 @@ impl<E: Send + 'static> Tui<E> {
         let width = area.width.saturating_sub(2 * SIDE);
         let screen = &self.screens[index].screen;
         let facts = screen.facts();
-        let status = screen.status_parts();
-        let header = self.header(&facts, &status);
+        let room = room(width, &self.name);
+        let left = self.left(screen.as_ref(), room);
+        let status = screen.status_parts(room);
+        let header = self.header(&facts, &left, &status);
         let top = Rect::new(
             area.x + SIDE,
             area.y + TOP,
@@ -171,8 +222,15 @@ impl<E: Send + 'static> Tui<E> {
         frame.render_widget(header, top);
         self.top = top;
         let mut below = top.bottom();
-        if self.nav.depth() == 0 && below < area.bottom() {
-            let rule = Breadcrumb::new(&self.nav).styles(self.palette.header());
+        let overlay = self
+            .open
+            .and_then(|open| match &self.screens.get(open)?.role {
+                Role::Overlay(nav) => Some(nav),
+                Role::Tab => None,
+            });
+        if below < area.bottom() && (overlay.is_some() || self.nav.depth() == 0) {
+            let nav = overlay.unwrap_or(&self.nav);
+            let rule = Breadcrumb::new(nav).styles(self.palette.header());
             frame.render_widget(rule, Rect::new(top.x, below, width, 1));
             below += 1;
         } else if self.keep_facts && dropped && below < area.bottom() {
@@ -197,11 +255,23 @@ impl<E: Send + 'static> Tui<E> {
                 .render(place, &mut plain);
             light(frame.buffer_mut(), &plain, self.palette.accent);
         }
+        let inner = area.width.saturating_sub(2 * PAD);
+        let mut floor = bottom;
+        if let Some(board) = self.board().filter(|_| self.open.is_none()) {
+            let room = bottom.saturating_sub(below) / 2;
+            let shown = board.banded(moment).len();
+            let rows = u16::try_from(shown).unwrap_or(u16::MAX).min(room);
+            if rows > 0 {
+                floor = bottom - rows;
+                let place = Rect::new(area.x + PAD, floor, inner, rows);
+                board.band(frame, place, &self.palette, moment);
+            }
+        }
         let content = Rect::new(
             area.x + PAD,
             below,
-            area.width.saturating_sub(2 * PAD),
-            bottom.saturating_sub(below + GAP),
+            inner,
+            floor.saturating_sub(below + GAP),
         );
         self.content = content;
         let elapsed = self.screens[index].since.map_or(Duration::ZERO, |since| {

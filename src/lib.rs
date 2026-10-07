@@ -1,5 +1,6 @@
 #![doc = include_str!("../README.md")]
 
+pub mod activity;
 mod chrome;
 mod copy;
 pub mod dump;
@@ -14,6 +15,7 @@ pub mod text;
 mod wake;
 mod words;
 
+pub use activity::{Activities, Activity};
 pub use chrome::{GAP, PAD, SIDE, TOP, message};
 pub use copy::{COPY_MAX, base64, copy};
 pub use filter::{Filter, Turn, matches};

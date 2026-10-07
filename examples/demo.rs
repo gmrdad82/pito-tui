@@ -1,14 +1,19 @@
+use std::cmp::Ordering;
 use std::env;
 use std::process::ExitCode;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use pito_tui::activity::State;
 use pito_tui::crossterm::event::{KeyCode, KeyEvent};
-use pito_tui::footer::{Hint, InputBar, Tone};
+use pito_tui::footer::{Hint, InputBar, Key, Tone};
 use pito_tui::header::Section;
 use pito_tui::list::{Cell, Column, Row};
 use pito_tui::ratatui::{Frame, layout::Rect, style::Color, style::Style, text::Line};
-use pito_tui::{Cx, Filter, Job, Palette, Phase, Screen, Tui, Turn, Words, dump, matches, message};
+use pito_tui::{
+    Activities, Activity, Cx, Filter, Job, Palette, Phase, Screen, Tui, Turn, Words, dump, matches,
+    message,
+};
 
 const NAME: &str = "demo";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -19,6 +24,9 @@ const ACCENTS: [Color; 3] = [
 ];
 const LOAD: Duration = Duration::from_millis(900);
 const SIZE: (u16, u16) = (120, 34);
+const JOB: Duration = Duration::from_secs(5);
+const TICK: Duration = Duration::from_millis(100);
+const STAGES: [&str; 5] = ["fetch", "compile", "link", "test", "package"];
 
 const STEPS: [Step; 5] = [
     Step::new(
@@ -64,7 +72,36 @@ enum Msg {
     Steps(Vec<Step>),
 }
 
-struct Home;
+#[derive(Default)]
+struct Home {
+    runs: Vec<(u64, Instant)>,
+    made: u64,
+    due: Option<Instant>,
+}
+
+fn build(id: u64, started: Instant, now: Instant) -> Activity {
+    let label = format!("build #{id}");
+    let gone = now.saturating_duration_since(started);
+    let fraction = (gone.as_secs_f64() / JOB.as_secs_f64()).min(1.0);
+    let at = ((fraction * STAGES.len() as f64) as usize).min(STAGES.len());
+    let detail = STAGES.iter().enumerate().map(|(index, stage)| {
+        let sign = match index.cmp(&at) {
+            Ordering::Less => "✓",
+            Ordering::Equal => "›",
+            Ordering::Greater => "·",
+        };
+        Line::from(format!("{sign} {stage}"))
+    });
+    let activity = Activity::new(id, label, started).detail(detail);
+    if at == STAGES.len() {
+        return activity
+            .state(State::Done)
+            .ended(started + JOB)
+            .status("built");
+    }
+    let status = format!("{} · {} of {}", STAGES[at], at + 1, STAGES.len());
+    activity.progress(fraction).status(status)
+}
 
 impl Screen<Msg> for Home {
     fn draw(&mut self, frame: &mut Frame, area: Rect, palette: &Palette) {
@@ -75,8 +112,40 @@ impl Screen<Msg> for Home {
         message(frame, area, lines);
     }
 
+    fn key(&mut self, key: KeyEvent, cx: &mut Cx<'_, Msg>) {
+        if key.code != KeyCode::Char('j') {
+            return;
+        }
+        self.made += 1;
+        let now = cx.now();
+        self.runs.push((self.made, now));
+        self.due = Some(now + TICK);
+        cx.activity(build(self.made, now, now));
+    }
+
+    fn deadline(&self) -> Option<Instant> {
+        self.due
+    }
+
+    fn tick(&mut self, cx: &mut Cx<'_, Msg>) {
+        let now = cx.now();
+        for (id, started) in &self.runs {
+            cx.activity(build(*id, *started, now));
+        }
+        self.runs
+            .retain(|(_, started)| now.saturating_duration_since(*started) < JOB);
+        self.due = (!self.runs.is_empty()).then(|| now + TICK);
+    }
+
+    fn busy(&self) -> usize {
+        self.runs.len()
+    }
+
     fn hints(&self) -> Vec<Hint<'_>> {
-        vec![Hint::new("tab", "next screen")]
+        vec![
+            Hint::new("tab", "next screen"),
+            Hint::new("j", "start a job"),
+        ]
     }
 }
 
@@ -255,11 +324,43 @@ fn words() -> Words {
         .waiting("esc stops waiting")
 }
 
+fn elapsed(took: Duration) -> String {
+    let seconds = took.as_secs();
+    if seconds < 60 {
+        format!("{seconds}s")
+    } else {
+        format!("{}m {:02}s", seconds / 60, seconds % 60)
+    }
+}
+
+fn jobs() -> Activities {
+    Activities::new(Section::new("Jobs"))
+        .keys(&[Key::Char('o')])
+        .hints([
+            Hint::new("↑↓", "move"),
+            Hint::new("enter", "open").rank(1),
+            Hint::new("esc", "back"),
+        ])
+        .detail_hints([Hint::new("↑↓", "scroll"), Hint::new("esc", "back")])
+        .empty("No jobs yet. j on Home starts one.")
+        .more(|hidden| format!("+{hidden} more · o shows them all"))
+        .elapsed(elapsed)
+        .facts(|jobs| {
+            let running = jobs.iter().filter(|job| !job.state.finished()).count();
+            let mut facts = vec![(format!("{} started", jobs.len()), Style::new())];
+            if running > 0 {
+                facts.push((format!("{running} running"), Style::new()));
+            }
+            facts
+        })
+}
+
 fn tui() -> Tui<Msg> {
     let mut accent = 0;
     Tui::new(NAME, VERSION, ACCENTS[accent])
         .words(words())
         .hints([
+            Hint::new("o", "jobs").rank(3),
             Hint::new("a", "accent").rank(5),
             Hint::new("?", "help").rank(4),
             Hint::new("ctrl+c", "twice quit").pinned(),
@@ -273,8 +374,9 @@ fn tui() -> Tui<Msg> {
             cx.palette(Palette::new(ACCENTS[accent]));
             true
         })
-        .screen(Section::new("Home"), Home)
+        .screen(Section::new("Home"), Home::default())
         .screen(Section::new("What to do next").short("Next"), Next::new())
+        .activities(jobs())
 }
 
 fn main() -> ExitCode {
@@ -318,7 +420,16 @@ fn main() -> ExitCode {
                 return ExitCode::from(2);
             }
         };
-        let buffer = tui().shot(width, height, &keys, !on("--loading"));
+        let mut tui = tui();
+        let mut buffer = tui.shot(width, height, &keys, !on("--loading"));
+        if let Some(at) = value("--at") {
+            let Ok(at) = at.parse::<u64>() else {
+                eprintln!("{NAME}: --at takes milliseconds");
+                return ExitCode::from(2);
+            };
+            tui.advance(Duration::from_millis(at));
+            buffer = tui.frame(width, height);
+        }
         if on("--ansi") {
             print!("{}", dump::ansi(&buffer));
         } else {

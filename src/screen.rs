@@ -4,9 +4,10 @@ use std::sync::mpsc::Sender;
 use std::time::Instant;
 
 use crossterm::event::{KeyEvent, MouseEvent};
-use pito_footer::{Confirm, Hint, InputBar, Tone};
+use pito_footer::{Confirm, Hint, InputBar, Notice, Tone};
 use ratatui::{Frame, layout::Rect, style::Style, text::Line};
 
+use crate::activity::{Activity, Change};
 use crate::copy::COPY_MAX;
 use crate::palette::Palette;
 use crate::wake::{Wake, Waker};
@@ -24,6 +25,8 @@ pub enum Phase<'a> {
 
 pub trait Screen<E>: Any {
     fn draw(&mut self, frame: &mut Frame, area: Rect, palette: &Palette);
+
+    fn moment(&mut self, _now: Instant) {}
 
     fn phase(&self) -> Phase<'_> {
         Phase::Ready
@@ -67,8 +70,20 @@ pub trait Screen<E>: Any {
         None
     }
 
-    fn status_parts(&self) -> Vec<(String, Style)> {
+    fn status_parts(&self, _room: u16) -> Vec<(String, Style)> {
         self.status().into_iter().collect()
+    }
+
+    fn lead(&self, _room: u16) -> Vec<(String, Style)> {
+        Vec::new()
+    }
+
+    fn notice(&self) -> Option<Notice<'_>> {
+        None
+    }
+
+    fn legend(&self) -> Option<&str> {
+        None
     }
 
     fn typing(&self) -> bool {
@@ -98,6 +113,8 @@ pub trait Screen<E>: Any {
     fn deadline(&self) -> Option<Instant> {
         None
     }
+
+    fn tick(&mut self, _cx: &mut Cx<'_, E>) {}
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,6 +131,7 @@ pub(crate) struct Outbox<E> {
     pub(crate) said: Option<(Cow<'static, str>, Tone)>,
     pub(crate) asking: Option<Asking>,
     pub(crate) go: Option<usize>,
+    pub(crate) changes: Vec<Change>,
     pub(crate) quit: bool,
     pub(crate) reload: Vec<usize>,
     pub(crate) changed: Vec<String>,
@@ -131,6 +149,7 @@ impl<E> Outbox<E> {
             said: None,
             asking: None,
             go: None,
+            changes: Vec::new(),
             quit: false,
             reload: Vec::new(),
             changed: Vec::new(),
@@ -195,6 +214,23 @@ impl<E: Send + 'static> Cx<'_, E> {
 
     pub fn go(&mut self, screen: usize) {
         self.out.go = Some(screen);
+    }
+
+    pub fn activity(&mut self, activity: Activity) {
+        self.out.changes.push(Change::Put(activity));
+    }
+
+    pub fn activities(&mut self, activities: impl IntoIterator<Item = Activity>) {
+        let all = activities.into_iter().collect();
+        self.out.changes.push(Change::All(all));
+    }
+
+    pub fn forget(&mut self, id: u64) {
+        self.out.changes.push(Change::Forget(id));
+    }
+
+    pub fn band(&mut self, shown: bool) {
+        self.out.changes.push(Change::Band(shown));
     }
 
     pub fn quit(&mut self) {
