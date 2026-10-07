@@ -4,6 +4,8 @@ use std::thread::{self, JoinHandle};
 
 use crossterm::event::{self, Event};
 
+use crate::activity::Activity;
+
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Wake<E> {
@@ -11,6 +13,7 @@ pub enum Wake<E> {
     Lost(io::Error),
     Event(usize, E),
     Loaded(usize, u64, E),
+    Activity(Activity),
 }
 
 pub struct Waker<E> {

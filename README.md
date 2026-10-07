@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/gmrdad82/pito-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/gmrdad82/pito-tui/actions/workflows/ci.yml)
 
-![The demo: fake jobs on the activity band and screen, a read under the hourglass, a filtered list, a drill-in with copy, and the accent swap](docs/demo.gif)
+![The demo: a job and a real command on the activity band and screen, an accent picked from a list, a find in a 20,000-line log, a read under the hourglass and a drill-in](docs/demo.gif)
 
 The app shell for [PITO](https://pitomd.com) terminal apps, as one ratatui 0.30
 crate. An app gives it a name, a version and an accent colour, and plugs in its
@@ -23,11 +23,11 @@ the app, in any language.
 ## Install
 
 ```toml
-pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v0.2.0" }
+pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v0.3.0" }
 ```
 
 That one line brings ratatui 0.30, crossterm 0.29, pito-header v0.2.0,
-pito-footer v0.4.0, pito-hourglass v0.1.3 and pito-list v0.6.1, reachable as
+pito-footer v0.4.0, pito-hourglass v0.1.3 and pito-list v0.7.0, reachable as
 `pito_tui::ratatui`, `pito_tui::crossterm`, `pito_tui::header`,
 `pito_tui::footer`, `pito_tui::hourglass` and `pito_tui::list`.
 
@@ -123,6 +123,36 @@ cargo run --example demo -- --dump 100x24 --keys "tab down enter"
   `enter` opening one into its detail lines. Every word on them is the
   app's (`Activities`), and the data stays the app's: the shell only draws,
   pages and takes the keys, and its time is the loop's moment.
+- **Commands on the band.** `Cx::run(id, label, Command)` runs a child
+  command and follows the `--progress json` lines the PITO command-line
+  tools print (version 1: one object a line with `state` start, progress,
+  done, fail or end, and `stage`, `fraction`, `msg` and, on the end line,
+  `ok`; unknown fields are ignored), so an app that drives its own CLI shows
+  that command's progress live with no glue. Every line it prints, and its
+  stderr, go into the activity's detail; the activity ends on the `end`
+  line, or with the command's exit status. `command::read` parses one line.
+  While a command runs it counts as busy for the quit guard. Headless runs
+  never spawn a command.
+- **A pick-one prompt.** `Cx::pick(Pick::new(title, options))` puts a small
+  list over the screen: arrows (or `j`, `k`, `g`, `G`) move, `enter`
+  chooses, `esc` or `q` cancels, every key goes to it while it is open, its
+  hints replace the screen's, and the answer comes back to the screen that
+  asked, in `picked`.
+- **A log viewer.** `Log` is a pane a screen embeds for a 20,000-line log or
+  a 10,000-event trace: it holds the lines once (`Arc`), builds only the
+  rows on screen, clips rather than wraps, and scrolls, pages and jumps to
+  either end (`g`, `G`); `/` finds every line holding each word of the
+  query, `n` and `N` step through them, and `y` copies the page and `Y`
+  every line. A list that big wants pito-list's `Shared`, which builds
+  only the rows on screen from the app's own items. The activity screen's
+  detail is a `Log`.
+- **Time, bars and spinners.** `clock::span` ("1m 2s") and `clock::age`
+  ("3m") in the app's own unit words (`clock::Units`), and
+  `clock::next_span` and `next_age`, the moment the text next changes, for a
+  screen's `deadline`; `progress::bar` (a Braille bar, `⣿⣿⣿⣀⣀`),
+  `progress::share` ("41%", or "≈57%" for an estimate) and
+  `progress::spinner`. The activity band draws an estimate's bar faint
+  (`Activity::estimate`).
 - **A filter over a list.** `Filter` holds a pito-list `List`, a pito-footer
   `Input` and the rows that match; `/` starts typing, `enter` keeps the
   filter, `esc` clears it, and the keys are the app's to change.
@@ -138,6 +168,16 @@ cargo run --example demo -- --dump 100x24 --keys "tab down enter"
   moving the clock a frame at a time. Time never comes from the wall clock
   there: drawing reads the loop's moment, which a screen sees in `moment`
   before each frame. The app wires them to its own flags.
+- **Frames before and after.** `capture::capture` walks every screen on its
+  own, and the app's key scripts for deeper states (a drill-in, a confirm, a
+  search, the quit guard, the hourglass at a given moment), at a list of
+  sizes, and saves every cell (its symbol, colours and modifiers) to a
+  directory; `capture::compare` walks the same again and reports each cell
+  that differs, by screen, size and position, before and after. Time comes
+  from the run and data from the app's own fixtures, so the same app gives
+  the same frames. It is a safety net for a big change: capture, change,
+  compare, and delete the captures. It is not a test to keep, and it pins
+  no wording.
 
 ## Use
 
@@ -185,7 +225,11 @@ fn main() -> std::io::Result<()> {
 `examples/demo.rs` is the fuller starting point: two screens, a read with
 the hourglass, a filtered list, a drill-in with a breadcrumb and copy, fake
 jobs with progress on the activity band and screen (`j` starts one, `o`
-lists them), an app-wide key that swaps the palette, and the headless flags.
+lists them), a real command on the band (`c` runs the demo itself as a
+child printing progress lines), a pick-one prompt (`p` picks the accent), a
+20,000-line log with find and copy (the Log tab), a time label kept fresh by
+a deadline, an app-wide key that swaps the palette, and the headless flags,
+`--capture DIR` and `--compare DIR` among them.
 
 ## The API
 
@@ -214,7 +258,8 @@ pub trait Screen<E>: Any {                                 // every method but d
   fn sources(&self) -> &[&str];  fn cancel(&mut self);  fn start(&mut self, &mut Cx<E>);
   fn key(&mut self, KeyEvent, &mut Cx<E>);  fn paste(&mut self, &str, &mut Cx<E>);
   fn mouse(&mut self, MouseEvent, Rect, &mut Cx<E>);  fn event(&mut self, E, &mut Cx<E>);
-  fn answer(&mut self, yes: bool, &mut Cx<E>);  fn back(&mut self, &mut Cx<E>);
+  fn answer(&mut self, yes: bool, &mut Cx<E>);  fn picked(&mut self, Option<usize>, &mut Cx<E>);
+  fn back(&mut self, &mut Cx<E>);
   fn hints(&self) -> Vec<Hint>;  fn facts(&self) -> Vec<(String, Style)>;
   fn status(&self) -> Option<(String, Style)>;
   fn status_parts(&self, room: u16) -> Vec<(String, Style)>;  // default: status() as one part
@@ -232,14 +277,30 @@ Cx<'_, E>: screen(), now(), detach(FnOnce() -> E), waker() -> Waker<E>,
   say(text, footer::Tone), hush(), confirm(question), confirm_with(question, Confirm),
   copy(text) -> bool, go(screen), quit(), reload(), changed(source),
   palette(Palette), words(Words), hints(Vec<Hint<'static>>),
-  activity(Activity), activities([Activity]), forget(id), band(bool)
+  activity(Activity), activities([Activity]), forget(id), band(bool),
+  run(id, label, process::Command), pick(Pick)
 
 Activity::new(id: u64, label, started: Instant)            // every field pub, and a builder each
-  .state(activity::State) .progress(f64 or None) .ended(Instant) .status(text) .detail([Line])
+  .state(activity::State) .progress(f64 or None) .estimate(bool) .ended(Instant) .status(text)
+  .detail([Line]) .shared(log::Lines)
 pub enum activity::State { Running, Waiting, Done, Failed }  // activity::LINGER: 3 s once finished
 Activities::new(header::Section)                           // the activity screen's name and words
-  .keys(&[footer::Key]) .band(bool) .hints([Hint]) .detail_hints([Hint]) .empty(text)
+  .keys(&[footer::Key]) .band(bool) .hints([Hint]) .detail_hints([Hint]) .log(Log) .empty(text)
   .more(Fn(usize) -> String) .elapsed(Fn(Duration) -> String) .facts(Fn(&[Activity]) -> Vec<(String, Style)>)
+command::read(line) -> Option<Progress { state, stage, fraction, message, ok }>   // one --progress json line, v 1
+
+Pick::new(title, [option]) | Pick::rows(title, [list::Row])  .selected(index) .hints([Hint]) .keys(list::Keys) .cancel_keys(..)
+Log::new(label) .placeholder(..) .hint(..) .keys(list::Keys) .search_keys(..) .hit_keys(next, previous) .copy_keys(page, all)
+  set_lines(log::Lines), lines(), len(), top(), hits(), hit(), query(), typing(), bar() -> Option<InputBar>,
+  key(KeyEvent) -> log::Turn, paste(&str) -> log::Turn, draw(frame, area, &Palette)
+pub enum log::Turn { Pass, Taken, Copy(text) };  pub type log::Lines = Arc<Vec<Line<'static>>>
+clock::Units::new(second, minute, hour, day)               // the app's unit words
+clock::span(Duration, &Units) -> "1m 2s", age(Duration, &Units) -> "3m", next_span(since, now), next_age(since, now)
+progress::bar(fraction, cells) -> "⣿⣿⣀⣀", percent(fraction), share(fraction, estimate) -> "≈57%", spinner(Duration), SPIN
+
+capture::Walk::new() .sizes([(w, h)]) .screens(bool) .script(Script::new(name, [KeyEvent]) .loading() .at(Duration))
+capture::capture(dir, &Walk, Fn() -> Tui<E>) -> io::Result<frames>
+capture::compare(dir, &Walk, Fn() -> Tui<E>) -> io::Result<Vec<Difference>>   // Cell { scenario, size, x, y, before, after } | Added | Removed
 
 Palette::new(accent: Color)                                // every token a pub field and a builder
   .base .ink .muted .accent .selected .good .bad .rule .line .glass .shimmer (Style)
@@ -253,7 +314,7 @@ restore() -> bool                                          // any thread, once: 
   terminal(), modes(), draw(FnOnce(&mut Frame)), mouse(bool)
 Modes::new()  .alternate(true) .paste(true) .mouse(false) .focus(false)
 Pace, FRAME (8.333 ms), wait_until(now, dirty, &Pace, deadlines)
-pub enum Wake<E> { Input(Event), Lost(io::Error), Event(screen, E), Loaded(screen, generation, E) }
+pub enum Wake<E> { Input(Event), Lost(io::Error), Event(screen, E), Loaded(screen, generation, E), Activity(Activity) }
 Waker<E>: new(sender, screen), send(E) -> bool, screen();  listen(sender)   // the input thread
 
 Filter::new(label) .placeholder(..) .hint(..) .keys(list::Keys) .start_keys(..) .clear_keys(..) .input(Input)
@@ -279,7 +340,9 @@ shows unless `band(false)`), and turns on raw mode, the alternate screen and
 bracketed paste only.
 
 `Phase`, `Turn`, `Wake`, `Words`, `Palette`, `Modes`, `Bench`, `Activity`,
-`Activities` and `activity::State` are
+`Activities`, `activity::State`, `Pick`, `log::Turn`, `clock::Units`,
+`command::Progress`, `capture::Walk`, `capture::Script`, `capture::Look` and
+`capture::Difference` are
 `#[non_exhaustive]`: match the enums with a wildcard arm and build the structs
 with `new()` and their builders, so a later release can add to them in a minor
 version.
@@ -340,6 +403,11 @@ shell deletes that glue; the app's screens and data stay as they are.
 | Header assembly: title, help word, a lead beside it, a status fitted to the room, facts, a breadcrumb kept in step | `Screen::lead`, `status_parts`, `facts`, `crumb`, `selected` and `back`, `keep_facts` |
 | Footer assembly: hints, notice, legend, confirm, input, version, height | `Screen::hints`, `input`, `notice`, `legend`, `Cx::say`, `Words::leave`; the version slot is wired |
 | A panel of running work above the footer and a screen listing it, with a detail view | `Activities`, fed by `Cx::activity`, `activities` and `forget` |
+| Code that runs the app's own CLI and parses its `--progress json` lines | `Cx::run(id, label, Command)`, and `command::read` for a single line |
+| A picker drawn over a screen, its keys and its answer | `Cx::pick(Pick)` and `Screen::picked` |
+| A long-log or trace pane: scroll, page, ends, find, copy, a cache of built rows | `Log`; a long list takes pito-list's `Shared` |
+| Age and duration text, Braille bars, percent, spinners, label redraw timing | `clock`, `progress`, `Activity::estimate` |
+| Frames compared cell by cell before and after a change, by hand | `capture::capture` and `capture::compare` behind `--capture` and `--compare` |
 | A tone module mapped to four crates' `Styles` | `Palette`, and `Cx::palette` at runtime |
 | A loading wrapper around the hourglass | `Phase::Loading(label)` |
 | The too-small guard, a centred message, OSC 52, text helpers | `min_size` and `Words::too_small`, `message`, `Cx::copy`, `text` |
@@ -392,14 +460,24 @@ shell deletes that glue; the app's screens and data stay as they are.
 9. **Headless flags.** Wire `--dump WxH` to `dump::size` and `Tui::shot`,
    `--keys` to `dump::keys`, `--ansi` to `dump::ansi`, `--loading` to
    `shot(.., settle: false)`, `--at MS` to `Tui::advance` and a second
-   `frame`, and `--bench N` to `Tui::bench`; `main` in `examples/demo.rs`
-   does exactly this. A dump with fixtures builds the screens from fixture
-   data before `shot`.
-10. **Check.** Dump every screen at the sizes the app cares about and
-    compare them with the old dumps; the header, footer and spacing should
-    match, since the shell draws them with the same crates and the same
-    layout (a one-cell side margin for the header and footer, two cells for
-    the content, one row above the footer).
+   `frame`, `--bench N` to `Tui::bench`, and `--capture DIR` and
+   `--compare DIR` to `capture::capture` and `capture::compare` with a
+   `capture::Walk` of the app's deeper states (exit 1 when a frame
+   differs); `main` and `walk` in `examples/demo.rs` do exactly this. A dump
+   or a walk with fixtures builds the screens from fixture data, so the
+   same build gives the same frames. A game that keeps its dev tools out of
+   the shipped build puts these behind its own feature.
+10. **Check.** Before the move, capture every screen at the sizes the app
+    cares about with the old build (or the old app's own dumps); after it,
+    compare. The header, footer and spacing should match, since the shell
+    draws them with the same crates and the same layout (a one-cell side
+    margin for the header and footer, two cells for the content, one row
+    above the footer). Then delete the captures: they are a safety net for
+    the move, not a test to keep.
+11. **What the app had built in.** Its own pickers become `Cx::pick`, its
+    log and trace panes a `Log` (a long list a pito-list `Shared`), its
+    age and duration text `clock`, its bars and spinners `progress`, and the
+    code that ran its own CLI and read the progress lines `Cx::run`.
 
 ### An app that already has a section trait
 

@@ -1,18 +1,27 @@
 use std::cmp::Ordering;
 use std::env;
-use std::process::ExitCode;
+use std::path::Path;
+use std::process::{Command, ExitCode};
+use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use pito_tui::activity::State;
+use pito_tui::capture::{self, Script, Walk};
+use pito_tui::clock::{self, Units};
 use pito_tui::crossterm::event::{KeyCode, KeyEvent};
 use pito_tui::footer::{Hint, InputBar, Key, Tone};
 use pito_tui::header::Section;
 use pito_tui::list::{Cell, Column, Row};
-use pito_tui::ratatui::{Frame, layout::Rect, style::Color, style::Style, text::Line};
+use pito_tui::ratatui::{
+    Frame,
+    layout::Rect,
+    style::{Color, Modifier, Style},
+    text::Line,
+};
 use pito_tui::{
-    Activities, Activity, Cx, Filter, Job, Palette, Phase, Screen, Tui, Turn, Words, dump, matches,
-    message,
+    Activities, Activity, Cx, Filter, Job, Log, Palette, Phase, Pick, Screen, Tui, Turn, Words,
+    dump, log, matches, message,
 };
 
 const NAME: &str = "demo";
@@ -27,6 +36,9 @@ const SIZE: (u16, u16) = (120, 34);
 const JOB: Duration = Duration::from_secs(5);
 const TICK: Duration = Duration::from_millis(100);
 const STAGES: [&str; 5] = ["fetch", "compile", "link", "test", "package"];
+const LINES: usize = 20_000;
+const PROGRESS: &str = "--progress-demo";
+const STEP: Duration = Duration::from_millis(200);
 
 const STEPS: [Step; 5] = [
     Step::new(
@@ -47,7 +59,7 @@ const STEPS: [Step; 5] = [
     ),
     Step::new(
         "Wire the headless flags",
-        "--dump, --keys, --ansi, --loading and --bench, as main does here",
+        "--dump, --keys, --at, --bench, --capture and --compare, as main does here",
     ),
 ];
 
@@ -77,6 +89,13 @@ struct Home {
     runs: Vec<(u64, Instant)>,
     made: u64,
     due: Option<Instant>,
+    last: Option<Instant>,
+    now: Option<Instant>,
+    accent: usize,
+}
+
+fn units() -> Units {
+    Units::new("s", "m", "h", "d")
 }
 
 fn build(id: u64, started: Instant, now: Instant) -> Activity {
@@ -100,7 +119,7 @@ fn build(id: u64, started: Instant, now: Instant) -> Activity {
             .status("built");
     }
     let status = format!("{} · {} of {}", STAGES[at], at + 1, STAGES.len());
-    activity.progress(fraction).status(status)
+    activity.progress(fraction).estimate(at == 0).status(status)
 }
 
 impl Screen<Msg> for Home {
@@ -112,22 +131,61 @@ impl Screen<Msg> for Home {
         message(frame, area, lines);
     }
 
+    fn moment(&mut self, now: Instant) {
+        self.now = Some(now);
+    }
+
     fn key(&mut self, key: KeyEvent, cx: &mut Cx<'_, Msg>) {
-        if key.code != KeyCode::Char('j') {
-            return;
+        match key.code {
+            KeyCode::Char('j') => {
+                self.made += 1;
+                let now = cx.now();
+                self.runs.push((self.made, now));
+                self.last = Some(now);
+                self.due = Some(now + TICK);
+                cx.activity(build(self.made, now, now));
+            }
+            KeyCode::Char('c') => {
+                self.made += 1;
+                self.last = Some(cx.now());
+                let program = env::current_exe().unwrap_or_else(|_| NAME.into());
+                let mut command = Command::new(program);
+                command.arg(PROGRESS);
+                cx.run(self.made, format!("check #{}", self.made), command);
+            }
+            KeyCode::Char('p') => {
+                let pick = Pick::new("Accent", ["Blue", "Amber", "Pink"])
+                    .selected(self.accent)
+                    .hints([
+                        Hint::new("↑↓", "move"),
+                        Hint::new("enter", "choose"),
+                        Hint::new("esc", "cancel"),
+                    ]);
+                cx.pick(pick);
+            }
+            _ => {}
         }
-        self.made += 1;
-        let now = cx.now();
-        self.runs.push((self.made, now));
-        self.due = Some(now + TICK);
-        cx.activity(build(self.made, now, now));
+    }
+
+    fn picked(&mut self, choice: Option<usize>, cx: &mut Cx<'_, Msg>) {
+        if let Some(accent) = choice {
+            self.accent = accent;
+            cx.palette(Palette::new(ACCENTS[accent]));
+        }
     }
 
     fn deadline(&self) -> Option<Instant> {
-        self.due
+        let label = self
+            .last
+            .zip(self.now)
+            .map(|(last, now)| clock::next_age(last, now));
+        [self.due, label].into_iter().flatten().min()
     }
 
     fn tick(&mut self, cx: &mut Cx<'_, Msg>) {
+        if self.runs.is_empty() {
+            return;
+        }
         let now = cx.now();
         for (id, started) in &self.runs {
             cx.activity(build(*id, *started, now));
@@ -141,10 +199,95 @@ impl Screen<Msg> for Home {
         self.runs.len()
     }
 
+    fn facts(&self) -> Vec<(String, Style)> {
+        let (Some(last), Some(now)) = (self.last, self.now) else {
+            return Vec::new();
+        };
+        let ago = clock::age(now.saturating_duration_since(last), &units());
+        vec![(format!("last started {ago} ago"), Style::new())]
+    }
+
     fn hints(&self) -> Vec<Hint<'_>> {
         vec![
             Hint::new("tab", "next screen"),
-            Hint::new("j", "start a job"),
+            Hint::new("j", "start a job").rank(1),
+            Hint::new("c", "run a command").rank(2),
+            Hint::new("p", "pick an accent").rank(3),
+        ]
+    }
+}
+
+struct Journal {
+    log: Log,
+}
+
+impl Journal {
+    fn new() -> Self {
+        let verbs = ["fetched", "compiled", "linked", "tested", "packed"];
+        let lines: Vec<Line<'static>> = (1..=LINES)
+            .map(|number| {
+                let stage = STAGES[number % STAGES.len()];
+                let verb = verbs[number % verbs.len()];
+                let text = format!("{number:05}  {stage:<8}  {verb} part {number} of {LINES}");
+                if number % 1000 == 0 {
+                    Line::styled(text, Style::new().add_modifier(Modifier::BOLD))
+                } else {
+                    Line::from(text)
+                }
+            })
+            .collect();
+        let mut log = Log::new("Find")
+            .placeholder("type to find in the log")
+            .hint("enter keeps it · esc clears it · n and N step through");
+        log.set_lines(Arc::new(lines));
+        Journal { log }
+    }
+}
+
+impl Screen<Msg> for Journal {
+    fn draw(&mut self, frame: &mut Frame, area: Rect, palette: &Palette) {
+        self.log.draw(frame, area, palette);
+    }
+
+    fn key(&mut self, key: KeyEvent, cx: &mut Cx<'_, Msg>) {
+        if let log::Turn::Copy(text) = self.log.key(key) {
+            if cx.copy(text) {
+                cx.say("Copied.", Tone::Good);
+            } else {
+                cx.say("Too long to copy; y copies the page.", Tone::Alert);
+            }
+        }
+    }
+
+    fn paste(&mut self, text: &str, _cx: &mut Cx<'_, Msg>) {
+        self.log.paste(text);
+    }
+
+    fn typing(&self) -> bool {
+        self.log.typing()
+    }
+
+    fn input(&self) -> Option<InputBar<'_>> {
+        self.log.bar()
+    }
+
+    fn facts(&self) -> Vec<(String, Style)> {
+        let line = format!("line {} of {}", self.log.top() + 1, self.log.len());
+        let mut facts = vec![(line, Style::new())];
+        if !self.log.query().is_empty() {
+            let at = self.log.hit().map_or(0, |hit| hit + 1);
+            facts.push((format!("{at} of {} found", self.log.hits()), Style::new()));
+        }
+        facts
+    }
+
+    fn hints(&self) -> Vec<Hint<'_>> {
+        vec![
+            Hint::new("↑↓", "scroll"),
+            Hint::new("g/G", "ends").rank(2),
+            Hint::new("/", "find").rank(1),
+            Hint::new("n/N", "next").rank(3),
+            Hint::new("y", "copy the page").rank(4),
         ]
     }
 }
@@ -325,12 +468,7 @@ fn words() -> Words {
 }
 
 fn elapsed(took: Duration) -> String {
-    let seconds = took.as_secs();
-    if seconds < 60 {
-        format!("{seconds}s")
-    } else {
-        format!("{}m {:02}s", seconds / 60, seconds % 60)
-    }
+    clock::span(took, &units())
 }
 
 fn jobs() -> Activities {
@@ -341,7 +479,17 @@ fn jobs() -> Activities {
             Hint::new("enter", "open").rank(1),
             Hint::new("esc", "back"),
         ])
-        .detail_hints([Hint::new("↑↓", "scroll"), Hint::new("esc", "back")])
+        .detail_hints([
+            Hint::new("↑↓", "scroll"),
+            Hint::new("/", "find").rank(1),
+            Hint::new("y", "copy").rank(2),
+            Hint::new("esc", "back"),
+        ])
+        .log(
+            Log::new("Find")
+                .placeholder("type to find in the steps")
+                .hint("enter keeps it · esc clears it"),
+        )
         .empty("No jobs yet. j on Home starts one.")
         .more(|hidden| format!("+{hidden} more · o shows them all"))
         .elapsed(elapsed)
@@ -376,11 +524,73 @@ fn tui() -> Tui<Msg> {
         })
         .screen(Section::new("Home"), Home::default())
         .screen(Section::new("What to do next").short("Next"), Next::new())
+        .screen(Section::new("Log"), Journal::new())
         .activities(jobs())
+}
+
+fn walk() -> Walk {
+    let script = |name: &str, keys: &str| Script::new(name, dump::keys(keys).unwrap_or_default());
+    Walk::new()
+        .script(script("filter", "tab / load"))
+        .script(script("drill-in", "tab enter"))
+        .script(script("copied", "tab enter y"))
+        .script(script("quit guard", "ctrl+c"))
+        .script(script("jobs", "j j").at(Duration::from_millis(2500)))
+        .script(script("job detail", "j o enter").at(Duration::from_millis(2500)))
+        .script(script("picker", "p down"))
+        .script(script("command", "c"))
+        .script(script("log find", "3 / 1999 enter n"))
+        .script(
+            script("hourglass", "tab")
+                .loading()
+                .at(Duration::from_millis(500)),
+        )
+}
+
+fn progress() -> ExitCode {
+    let stages = ["resolve", "fetch", "build", "check"];
+    let steps = 4;
+    let total = (stages.len() * steps) as f64;
+    let at = || {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |gone| gone.as_millis())
+    };
+    let say = |stage: &str, state: &str, fraction: Option<f64>, message: Option<String>| {
+        let fraction = fraction.map_or("null".to_string(), |fraction| format!("{fraction:.3}"));
+        let message = message.map_or("null".to_string(), |message| format!("\"{message}\""));
+        let at = at();
+        println!(
+            "{{\"v\":1,\"op\":\"check\",\"app\":\"{NAME}\",\"ref\":null,\"stage\":\"{stage}\",\"state\":\"{state}\",\"fraction\":{fraction},\"msg\":{message},\"at\":{at}}}"
+        );
+    };
+    for (index, stage) in stages.iter().enumerate() {
+        say(stage, "start", None, Some(format!("{stage} starting")));
+        let mut done = 0.0;
+        for step in 1..=steps {
+            thread::sleep(STEP);
+            done = (index * steps + step) as f64 / total;
+            say(
+                stage,
+                "progress",
+                Some(done),
+                Some(format!("{stage} {step} of {steps}")),
+            );
+        }
+        say(stage, "done", Some(done), None);
+    }
+    let at = at();
+    println!(
+        "{{\"v\":1,\"op\":\"check\",\"app\":\"{NAME}\",\"ref\":null,\"state\":\"end\",\"ok\":true,\"msg\":\"every check passed\",\"at\":{at}}}"
+    );
+    ExitCode::SUCCESS
 }
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
+    if args.iter().any(|arg| arg == PROGRESS) {
+        return progress();
+    }
     let value = |name: &str| {
         args.iter()
             .position(|arg| arg == name)
@@ -396,6 +606,37 @@ fn main() -> ExitCode {
         Some(Some(size)) => Some(size),
         None => None,
     };
+    if let Some(dir) = value("--capture") {
+        return match capture::capture(Path::new(dir), &walk(), tui) {
+            Ok(frames) => {
+                println!("{NAME}: {frames} frames captured in {dir}");
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("{NAME}: {dir}: {error}");
+                ExitCode::from(2)
+            }
+        };
+    }
+    if let Some(dir) = value("--compare") {
+        return match capture::compare(Path::new(dir), &walk(), tui) {
+            Ok(differences) if differences.is_empty() => {
+                println!("{NAME}: every frame matches {dir}");
+                ExitCode::SUCCESS
+            }
+            Ok(differences) => {
+                for difference in &differences {
+                    println!("{difference}");
+                }
+                eprintln!("{NAME}: {} differences from {dir}", differences.len());
+                ExitCode::FAILURE
+            }
+            Err(error) => {
+                eprintln!("{NAME}: {dir}: {error}");
+                ExitCode::from(2)
+            }
+        };
+    }
     if let Some(frames) = value("--bench") {
         let Ok(frames) = frames.parse::<usize>() else {
             eprintln!("{NAME}: --bench takes a number of frames");

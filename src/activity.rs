@@ -4,9 +4,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crossterm::event::KeyEvent;
-use pito_footer::{Hint, Key};
+use pito_footer::{Hint, InputBar, Key};
 use pito_header::Section;
-use pito_list::{Cell, Column, Key as Move, List, ListView, Mark, Row, Step};
+use pito_list::{Cell, Column, List, ListView, Mark, Row, Step};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -16,18 +16,15 @@ use ratatui::{
 };
 
 use crate::chrome::message;
+use crate::log::{Lines, Log, Turn};
 use crate::palette::Palette;
+use crate::progress::{SPIN, bar, share, spinner};
 use crate::screen::{Cx, Screen};
 use crate::text::{cells, clip, fit};
 
 pub const LINGER: Duration = Duration::from_secs(3);
-const SPIN: Duration = Duration::from_millis(80);
-
-const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-const LADDER: [char; 8] = ['⡀', '⡄', '⡆', '⡇', '⣇', '⣧', '⣷', '⣿'];
-const TRACK: char = '⣀';
 const BAR: usize = 12;
-const GAUGE: usize = BAR + 5;
+const GAUGE: usize = BAR + 6;
 const GAP: usize = 2;
 const NARROW: usize = 60;
 const SECOND: Duration = Duration::from_secs(1);
@@ -55,10 +52,11 @@ pub struct Activity {
     pub label: String,
     pub state: State,
     pub progress: Option<f64>,
+    pub estimate: bool,
     pub started: Instant,
     pub ended: Option<Instant>,
     pub status: String,
-    pub detail: Vec<Line<'static>>,
+    pub detail: Lines,
 }
 
 impl Activity {
@@ -68,10 +66,11 @@ impl Activity {
             label: label.into(),
             state: State::Running,
             progress: None,
+            estimate: false,
             started,
             ended: None,
             status: String::new(),
-            detail: Vec::new(),
+            detail: Arc::new(Vec::new()),
         }
     }
 
@@ -82,6 +81,11 @@ impl Activity {
 
     pub fn progress(mut self, fraction: impl Into<Option<f64>>) -> Self {
         self.progress = fraction.into();
+        self
+    }
+
+    pub fn estimate(mut self, estimate: bool) -> Self {
+        self.estimate = estimate;
         self
     }
 
@@ -96,7 +100,12 @@ impl Activity {
     }
 
     pub fn detail(mut self, lines: impl IntoIterator<Item = Line<'static>>) -> Self {
-        self.detail = lines.into_iter().collect();
+        self.detail = Arc::new(lines.into_iter().collect());
+        self
+    }
+
+    pub fn shared(mut self, lines: Lines) -> Self {
+        self.detail = lines;
         self
     }
 
@@ -140,6 +149,7 @@ pub struct Activities {
     pub(crate) band: bool,
     pub(crate) hints: Vec<Hint<'static>>,
     pub(crate) detail_hints: Vec<Hint<'static>>,
+    pub(crate) log: Log,
     pub(crate) empty: Cow<'static, str>,
     pub(crate) more: Count,
     pub(crate) elapsed: Elapsed,
@@ -154,6 +164,7 @@ impl Activities {
             band: true,
             hints: Vec::new(),
             detail_hints: Vec::new(),
+            log: Log::new(""),
             empty: Cow::Borrowed(""),
             more: Arc::new(|_| String::new()),
             elapsed: Arc::new(|_| String::new()),
@@ -178,6 +189,11 @@ impl Activities {
 
     pub fn detail_hints(mut self, hints: impl IntoIterator<Item = Hint<'static>>) -> Self {
         self.detail_hints = hints.into_iter().collect();
+        self
+    }
+
+    pub fn log(mut self, log: Log) -> Self {
+        self.log = log;
         self
     }
 
@@ -230,50 +246,39 @@ pub(crate) struct Board {
     rows: List,
     ids: Vec<u64>,
     open: Option<u64>,
-    top: usize,
-    page: usize,
+    log: Log,
     now: Instant,
     palette: Palette,
 }
 
-fn bar(fraction: f64) -> String {
-    let fraction = if fraction.is_nan() {
-        0.0
-    } else {
-        fraction.clamp(0.0, 1.0)
-    };
-    let total = BAR * 8;
-    let steps = ((fraction * total as f64).floor() as usize).min(total);
-    let (full, part) = (steps / 8, steps % 8);
-    let mut text: String = std::iter::repeat_n(LADDER[7], full).collect();
-    if part > 0 {
-        text.push(LADDER[part - 1]);
-    }
-    let used = full + usize::from(part > 0);
-    text.extend(std::iter::repeat_n(TRACK, BAR - used));
-    text
-}
-
 fn gauge(activity: &Activity) -> String {
     match activity.progress.filter(|_| !activity.state.finished()) {
-        Some(fraction) => {
-            let percent = (fraction.clamp(0.0, 1.0) * 100.0).floor() as u32;
-            format!("{} {:>4}", bar(fraction), format!("{percent}%"))
-        }
+        Some(fraction) => format!(
+            "{} {:>5}",
+            bar(fraction, BAR),
+            share(fraction, activity.estimate)
+        ),
         None => String::new(),
     }
 }
 
 fn mark(activity: &Activity, now: Instant, palette: &Palette) -> (&'static str, Style) {
     match activity.state {
-        State::Running => {
-            let gone = now.saturating_duration_since(activity.started).as_nanos();
-            let frame = (gone / SPIN.as_nanos()) as usize % SPINNER.len();
-            (SPINNER[frame], palette.accent)
-        }
+        State::Running => (
+            spinner(now.saturating_duration_since(activity.started)),
+            palette.accent,
+        ),
         State::Waiting => ("⧗", palette.muted),
         State::Done => ("✓", palette.good),
         State::Failed => ("✗", palette.bad),
+    }
+}
+
+fn metered(activity: &Activity, palette: &Palette) -> Style {
+    if activity.estimate {
+        palette.muted
+    } else {
+        palette.accent
     }
 }
 
@@ -294,13 +299,12 @@ fn newest(list: &[Activity]) -> Vec<&Activity> {
 impl Board {
     pub(crate) fn new(words: Activities, now: Instant) -> Self {
         Board {
+            log: words.log.clone(),
             words,
             list: Vec::new(),
             rows: List::new(),
             ids: Vec::new(),
             open: None,
-            top: 0,
-            page: 1,
             now,
             palette: Palette::new(Color::Reset),
         }
@@ -424,7 +428,7 @@ impl Board {
                 if gauged {
                     spans.push(Span::styled(
                         fit(&gauge(activity), GAUGE),
-                        fade(palette.accent),
+                        fade(metered(activity, palette)),
                     ));
                     spans.push(Span::raw(" ".repeat(GAP)));
                     used += GAUGE + GAP;
@@ -462,7 +466,7 @@ impl Board {
                 let (sign, style) = mark(activity, self.now, palette);
                 Row::new([
                     Cell::new(activity.label.clone()),
-                    Cell::new(gauge(activity)).style(palette.accent),
+                    Cell::new(gauge(activity)).style(metered(activity, palette)),
                     Cell::new(activity.status.clone()).style(tone(activity, palette)),
                     Cell::new((self.words.elapsed)(activity.took(self.now))).faint(),
                 ])
@@ -474,31 +478,14 @@ impl Board {
             self.rows.select(index);
         }
     }
-
-    fn scroll(&mut self, key: Move) {
-        let page = self.page.max(1);
-        self.top = match key {
-            Move::Up => self.top.saturating_sub(1),
-            Move::Down => self.top + 1,
-            Move::PageUp => self.top.saturating_sub(page),
-            Move::PageDown => self.top + page,
-            Move::Home => 0,
-            Move::End => usize::MAX,
-            _ => return,
-        };
-    }
 }
 
 impl<E: Send + 'static> Screen<E> for Board {
     fn draw(&mut self, frame: &mut Frame, area: Rect, palette: &Palette) {
-        self.page = usize::from(area.height);
         self.palette = *palette;
-        if let Some(activity) = self.opened() {
-            let lines = activity.detail.clone();
-            let last = lines.len().saturating_sub(self.page);
-            self.top = self.top.min(last);
-            let top = u16::try_from(self.top).unwrap_or(u16::MAX);
-            frame.render_widget(Paragraph::new(lines).scroll((top, 0)), area);
+        if let Some(lines) = self.opened().map(|activity| Arc::clone(&activity.detail)) {
+            self.log.set_lines(lines);
+            self.log.draw(frame, area, palette);
             return;
         }
         if self.list.is_empty() {
@@ -509,7 +496,7 @@ impl<E: Send + 'static> Screen<E> for Board {
         self.sync();
         let columns = [
             Column::new("", 6, 0).fit(28).pinned(),
-            Column::new("", 0, 0).fit(17).priority(1),
+            Column::new("", 0, 0).fit(18).priority(1),
             Column::new("", 8, 0).flex(),
             Column::new("", 2, 0).fit(12).right().pinned(),
         ];
@@ -523,16 +510,33 @@ impl<E: Send + 'static> Screen<E> for Board {
         self.now = now;
     }
 
-    fn key(&mut self, key: KeyEvent, _cx: &mut Cx<'_, E>) {
-        if self.open.is_some() {
-            self.scroll(key.into());
+    fn key(&mut self, key: KeyEvent, cx: &mut Cx<'_, E>) {
+        if let Some(lines) = self.opened().map(|activity| Arc::clone(&activity.detail)) {
+            self.log.set_lines(lines);
+            if let Turn::Copy(text) = self.log.key(key) {
+                cx.copy(text);
+            }
             return;
         }
         self.sync();
         if let Step::Open(index) = self.rows.key(key.into()) {
             self.open = self.ids.get(index).copied();
-            self.top = 0;
+            self.log = self.words.log.clone();
         }
+    }
+
+    fn paste(&mut self, text: &str, _cx: &mut Cx<'_, E>) {
+        if self.open.is_some() {
+            self.log.paste(text);
+        }
+    }
+
+    fn typing(&self) -> bool {
+        self.open.is_some() && self.log.typing()
+    }
+
+    fn input(&self) -> Option<InputBar<'_>> {
+        self.open.and_then(|_| self.log.bar())
     }
 
     fn back(&mut self, _cx: &mut Cx<'_, E>) {

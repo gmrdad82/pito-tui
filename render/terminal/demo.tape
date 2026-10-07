@@ -1,35 +1,39 @@
-Sleep 1s
+Sleep 900ms
 Type "j"
-Sleep 800ms
-Type "j"
-Sleep 1.2s
+Sleep 600ms
+Type "c"
+Sleep 1.4s
 Type "o"
 Sleep 1.2s
 Enter
-Sleep 1.6s
+Sleep 1.8s
 Escape
 Sleep 400ms
 Escape
-Sleep 600ms
-Tab
-Sleep 1.8s
+Sleep 500ms
+Type "p"
+Sleep 700ms
 Down
-Sleep 350ms
+Sleep 500ms
+Enter
+Sleep 900ms
+Type "3"
+Sleep 900ms
 Type "/"
-Sleep 250ms
-Type "load"
+Sleep 300ms
+Type "1999"
 Sleep 600ms
 Enter
 Sleep 500ms
-Enter
-Sleep 1.2s
-Type "y"
-Sleep 1.2s
-Escape
-Sleep 400ms
-Escape
-Sleep 600ms
-Type "a"
+Type "n"
 Sleep 1s
-Type "a"
+Type "G"
+Sleep 900ms
+Type "2"
+Sleep 1.8s
+Down
+Sleep 400ms
+Enter
+Sleep 1.1s
+Escape
 Sleep 1s

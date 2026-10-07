@@ -1,6 +1,9 @@
+use std::fs;
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use pito_tui::activity::{LINGER, State};
+use pito_tui::capture::{Difference, Script, Walk, capture, compare};
 use pito_tui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use pito_tui::footer::{Input, InputBar, Key};
 use pito_tui::header::Section;
@@ -357,4 +360,35 @@ fn a_deadline_ticks_its_screen_once_when_the_moment_reaches_it() {
         2,
         "a deadline left in the past ticks once"
     );
+}
+
+fn accented(accent: Color) -> impl Fn() -> Tui<u32> {
+    move || {
+        Tui::new("probe", "1.2.3", accent)
+            .words(Words::new().help("? keys").again("again to leave"))
+            .screen(Section::new("One"), Probe::<1>::default())
+    }
+}
+
+#[test]
+fn a_capture_compares_clean_and_reports_each_changed_cell_and_frame() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("capture");
+    let _ = fs::remove_dir_all(&dir);
+    let walk = Walk::new()
+        .sizes([(40, 12)])
+        .script(Script::new("guard", [ctrl_c()]));
+    assert_eq!(capture(&dir, &walk, accented(Color::Blue)).unwrap(), 2);
+    assert!(capture(&dir, &walk, accented(Color::Blue)).is_err());
+    assert_eq!(compare(&dir, &walk, accented(Color::Blue)).unwrap(), []);
+
+    let changed = compare(&dir, &walk, accented(Color::Red)).unwrap();
+    assert!(!changed.is_empty());
+    assert!(changed.iter().all(|difference| matches!(
+        difference,
+        Difference::Cell { after, .. } if after.fg == "Red" || after.fg == "Reset"
+    )));
+
+    let fewer = Walk::new().sizes([(40, 12)]);
+    let removed = compare(&dir, &fewer, accented(Color::Blue)).unwrap();
+    assert!(matches!(&removed[..], [Difference::Removed { scenario, .. }] if scenario == "guard"));
 }

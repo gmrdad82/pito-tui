@@ -4,6 +4,40 @@ Every release of pito-tui, newest first. Versions follow [Semantic
 Versioning](https://semver.org/) as Cargo reads it before 1.0: a change in the
 middle number may break an app, a change in the last one never does.
 
+## 0.3.0 (2026-10-07)
+
+- Frames before and after: `capture::capture` walks every screen and the
+  app's key scripts (`capture::Walk`, `capture::Script`, loading or moved to
+  a given moment) at a list of sizes and saves every cell to a directory;
+  `capture::compare` reports each cell that differs, by screen, size and
+  position, before and after, and each frame added or gone. The demo wires
+  `--capture DIR` and `--compare DIR`. A safety net for big changes, not a
+  test to keep.
+- `Cx::run(id, label, Command)` runs a child command and feeds the
+  `--progress json` lines it prints (version 1) into the activity band and
+  screen live, its output and stderr into the activity's detail, ending on
+  the `end` line or the exit status; a running command counts as busy.
+  `command::read` parses one line. `Wake::Activity` carries its updates.
+- `Cx::pick(Pick)` and `Screen::picked`: a pick-one list over the screen,
+  arrows and `enter` to choose, `esc` to cancel.
+- `Log`: a pane for a long log or trace that builds only the rows on screen,
+  with paging, both ends, find with `n` and `N`, and copy (`y` the page,
+  `Y` everything). The activity screen's detail is a `Log`, and
+  `Activities::log` gives it the app's words.
+- `clock`: `span` and `age` in the app's unit words, and `next_span` and
+  `next_age` for the deadline that keeps a label fresh. `progress`: the
+  Braille `bar`, `percent`, `share` (with "≈" for an estimate) and the
+  `spinner`. `Activity::estimate` draws a bar faint.
+- Breaking: `Activity::detail` is a shared `log::Lines`
+  (`Arc<Vec<Line<'static>>>`); `Activity::detail(lines)` still builds it,
+  and `Activity::shared(lines)` hands over one the app already holds.
+- pito-list moves to v0.7.0, which adds `Shared`, a source over the app's
+  own items that builds only the rows on screen. pito-tui now depends on
+  `serde_json` for the progress lines.
+- The demo adds a Log tab (20,000 lines), `c` (the demo running itself as a
+  child that prints progress lines), `p` (an accent picked from a list) and
+  a time label on Home kept fresh by a deadline.
+
 ## 0.2.0 (2026-10-07)
 
 - Breaking: `Screen::status_parts` takes the room the status has on the

@@ -239,7 +239,10 @@ impl<E: Send + 'static> Tui<E> {
             frame.render_widget(row, Rect::new(top.x, below, width, height));
             below += height;
         }
-        let mut hints = screen.hints();
+        let mut hints = match &self.out.picking {
+            Some(picking) => picking.pick.hints.clone(),
+            None => screen.hints(),
+        };
         hints.extend(self.hints.iter().copied());
         let again = self.quit.notice().filter(|text| !text.is_empty());
         let footer = self.footer(&hints, screen.as_ref(), again);
@@ -282,16 +285,14 @@ impl<E: Send + 'static> Tui<E> {
                 let waiting = Some(self.words.waiting.as_ref());
                 let hourglass = self.palette.hourglass(elapsed, &label, waiting);
                 frame.render_widget(hourglass, content);
-                return;
             }
-            Phase::Trouble(lines) => {
-                message(frame, content, lines.into_owned());
-                return;
-            }
-            _ => {}
+            Phase::Trouble(lines) => message(frame, content, lines.into_owned()),
+            _ => self.screens[index]
+                .screen
+                .draw(frame, content, &self.palette),
         }
-        self.screens[index]
-            .screen
-            .draw(frame, content, &self.palette);
+        if let Some(picking) = self.out.picking.as_mut() {
+            picking.pick.draw(frame, content, &self.palette);
+        }
     }
 }

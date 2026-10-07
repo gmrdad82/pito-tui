@@ -33,7 +33,7 @@ brightWhite = "#c0caf5"
 
 [shots.demo]
 kind = "clip"
-line = "The demo: fake jobs on the activity band and screen, a read under the hourglass, a filtered list, a drill-in with copy, and the accent swap"
+line = "The demo: a job and a real command on the activity band and screen, an accent picked from a list, a find in a 20,000-line log, a read under the hourglass and a drill-in"
 tape = "render/terminal/demo.tape"
 launch = "demo"
 settle = "400ms"

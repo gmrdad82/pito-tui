@@ -1,17 +1,21 @@
 use std::any::Any;
 use std::borrow::Cow;
 use std::io;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use crossterm::event::{Event, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
 use pito_footer::{Answer, Footer, Guard, Help, Hint, Key, Mode, QuitGuard, WINDOW, Wording};
-use pito_header::{Action, Group, Header, Nav, NavKeys, Section, Step};
+use pito_header::{Action, Group, Header, Nav, NavKeys, Section, Step as Move};
+use pito_list::Step;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 
-use crate::activity::{Activities, Board};
+use crate::activity::{Activities, Board, Change};
+use crate::command;
 use crate::copy;
 use crate::pace::{Pace, wait_until};
 use crate::palette::Palette;
@@ -81,6 +85,7 @@ pub struct Tui<E> {
     tabs: Vec<usize>,
     pub(crate) open: Option<usize>,
     pub(crate) board: Option<usize>,
+    running: Arc<AtomicUsize>,
     pub(crate) help: Option<Help>,
     pub(crate) quit: QuitGuard,
     mode: Mode,
@@ -124,6 +129,7 @@ impl<E: Send + 'static> Tui<E> {
             tabs: Vec::new(),
             open: None,
             board: None,
+            running: Arc::new(AtomicUsize::new(0)),
             help: Some(Help::new(true)),
             mode: Mode::Ask,
             window: WINDOW,
@@ -381,7 +387,8 @@ impl<E: Send + 'static> Tui<E> {
     }
 
     pub fn busy(&self) -> usize {
-        self.screens.iter().map(|slot| slot.screen.busy()).sum()
+        let screens: usize = self.screens.iter().map(|slot| slot.screen.busy()).sum();
+        screens + self.running.load(Ordering::SeqCst)
     }
 
     pub fn key(&mut self, key: KeyEvent) -> Flow {
@@ -405,6 +412,21 @@ impl<E: Send + 'static> Tui<E> {
                 self.out.asking = None;
                 let yes = matches!(answer, Answer::Yes);
                 self.call(screen, |screen, cx| screen.answer(yes, cx));
+            }
+            return self.apply();
+        }
+        if let Some(picking) = self.out.picking.as_mut() {
+            let choice = if picking.pick.cancel.contains(&key.into()) {
+                Some(None)
+            } else if let Step::Open(index) = picking.pick.rows.key(key.into()) {
+                Some(Some(index))
+            } else {
+                None
+            };
+            if let Some(choice) = choice {
+                let screen = picking.screen;
+                self.out.picking = None;
+                self.call(screen, |screen, cx| screen.picked(choice, cx));
             }
             return self.apply();
         }
@@ -462,7 +484,7 @@ impl<E: Send + 'static> Tui<E> {
     }
 
     pub fn paste(&mut self, text: &str) {
-        if self.out.asking.is_some() || self.quit.asking().is_some() {
+        if self.out.asking.is_some() || self.out.picking.is_some() || self.quit.asking().is_some() {
             return;
         }
         if let Some(index) = self.current() {
@@ -523,6 +545,10 @@ impl<E: Send + 'static> Tui<E> {
             Wake::Loaded(screen, generation, event) => {
                 self.loaded(screen, generation, event);
             }
+            Wake::Activity(activity) => {
+                self.out.changes.push(Change::Put(activity));
+                self.apply();
+            }
             _ => {}
         }
         Flow::Stay
@@ -531,14 +557,14 @@ impl<E: Send + 'static> Tui<E> {
     fn navigate(&mut self, action: Action) {
         match action {
             Action::Back => {
-                if let Some(Step::Back { .. }) = self.nav.apply(Action::Back)
+                if let Some(Move::Back { .. }) = self.nav.apply(Action::Back)
                     && let Some(index) = self.current()
                 {
                     self.call(index, |screen, cx| screen.back(cx));
                 }
             }
             action => {
-                if let Some(Step::Moved(_)) = self.nav.apply(action) {
+                if let Some(Move::Moved(_)) = self.nav.apply(action) {
                     self.enter();
                 }
             }
@@ -688,6 +714,9 @@ impl<E: Send + 'static> Tui<E> {
             thread::spawn(move || {
                 let _ = sender.send(Wake::Event(screen, job()));
             });
+        }
+        for run in self.out.runs.drain(..) {
+            command::spawn(run, self.out.sender.clone(), Arc::clone(&self.running));
         }
     }
 

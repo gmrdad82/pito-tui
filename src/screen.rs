@@ -1,5 +1,6 @@
 use std::any::Any;
 use std::borrow::Cow;
+use std::process::Command;
 use std::sync::mpsc::Sender;
 use std::time::Instant;
 
@@ -8,8 +9,10 @@ use pito_footer::{Confirm, Hint, InputBar, Notice, Tone};
 use ratatui::{Frame, layout::Rect, style::Style, text::Line};
 
 use crate::activity::{Activity, Change};
+use crate::command::Run;
 use crate::copy::COPY_MAX;
 use crate::palette::Palette;
+use crate::pick::Pick;
 use crate::wake::{Wake, Waker};
 use crate::words::Words;
 
@@ -55,6 +58,8 @@ pub trait Screen<E>: Any {
     fn event(&mut self, _event: E, _cx: &mut Cx<'_, E>) {}
 
     fn answer(&mut self, _yes: bool, _cx: &mut Cx<'_, E>) {}
+
+    fn picked(&mut self, _choice: Option<usize>, _cx: &mut Cx<'_, E>) {}
 
     fn back(&mut self, _cx: &mut Cx<'_, E>) {}
 
@@ -124,14 +129,21 @@ pub(crate) struct Asking {
     pub(crate) confirm: Confirm,
 }
 
+pub(crate) struct Picking {
+    pub(crate) screen: usize,
+    pub(crate) pick: Pick,
+}
+
 pub(crate) struct Outbox<E> {
     pub(crate) sender: Sender<Wake<E>>,
     pub(crate) jobs: Vec<(usize, Job<E>)>,
     pub(crate) copies: Vec<String>,
     pub(crate) said: Option<(Cow<'static, str>, Tone)>,
     pub(crate) asking: Option<Asking>,
+    pub(crate) picking: Option<Picking>,
     pub(crate) go: Option<usize>,
     pub(crate) changes: Vec<Change>,
+    pub(crate) runs: Vec<Run>,
     pub(crate) quit: bool,
     pub(crate) reload: Vec<usize>,
     pub(crate) changed: Vec<String>,
@@ -148,8 +160,10 @@ impl<E> Outbox<E> {
             copies: Vec::new(),
             said: None,
             asking: None,
+            picking: None,
             go: None,
             changes: Vec::new(),
+            runs: Vec::new(),
             quit: false,
             reload: Vec::new(),
             changed: Vec::new(),
@@ -203,6 +217,13 @@ impl<E: Send + 'static> Cx<'_, E> {
         });
     }
 
+    pub fn pick(&mut self, pick: Pick) {
+        self.out.picking = Some(Picking {
+            screen: self.screen,
+            pick,
+        });
+    }
+
     pub fn copy(&mut self, text: impl Into<String>) -> bool {
         let text = text.into();
         if text.len() > COPY_MAX {
@@ -223,6 +244,12 @@ impl<E: Send + 'static> Cx<'_, E> {
     pub fn activities(&mut self, activities: impl IntoIterator<Item = Activity>) {
         let all = activities.into_iter().collect();
         self.out.changes.push(Change::All(all));
+    }
+
+    pub fn run(&mut self, id: u64, label: impl Into<String>, command: Command) {
+        let activity = Activity::new(id, label, self.now);
+        self.out.changes.push(Change::Put(activity.clone()));
+        self.out.runs.push(Run { activity, command });
     }
 
     pub fn forget(&mut self, id: u64) {
