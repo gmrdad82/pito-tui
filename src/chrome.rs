@@ -104,7 +104,7 @@ impl<E: Send + 'static> Tui<E> {
         };
         let mut asked = choice(words, &words.choose);
         let mut leaving = choice(words, leave);
-        if let Some(text) = again {
+        if let Some(text) = again.filter(|_| self.lit_again) {
             asked = asked.hint(text);
             leaving = leaving.hint(text);
         }
@@ -138,6 +138,9 @@ impl<E: Send + 'static> Tui<E> {
             .filter(|help| !help.open())
             .map(|_| self.words.help.as_ref())
             .filter(|text| !text.is_empty());
+        if let Some(left) = screen.left(room, help) {
+            return left;
+        }
         let taken = help.map_or(0, |text| width(text).saturating_add(width(LEAD)));
         let lead = screen.lead(room.saturating_sub(taken));
         let mut left = Vec::new();
@@ -225,7 +228,7 @@ impl<E: Send + 'static> Tui<E> {
         let overlay = self
             .open
             .and_then(|open| match &self.screens.get(open)?.role {
-                Role::Overlay(nav) => Some(nav),
+                Role::Overlay(nav, _) => Some(nav),
                 Role::Tab => None,
             });
         if below < area.bottom() && (overlay.is_some() || self.nav.depth() == 0) {
@@ -252,7 +255,10 @@ impl<E: Send + 'static> Tui<E> {
         let bottom = area.bottom().saturating_sub(height);
         let place = Rect::new(area.x + SIDE, bottom, width, height);
         frame.render_widget(footer, place);
-        if again.is_some() && (screen.input().is_some() || self.out.asking.is_some()) {
+        if again.is_some()
+            && self.lit_again
+            && (screen.input().is_some() || self.out.asking.is_some())
+        {
             let mut plain = Buffer::empty(place);
             self.footer(&hints, screen.as_ref(), Some(""))
                 .render(place, &mut plain);
@@ -260,10 +266,17 @@ impl<E: Send + 'static> Tui<E> {
         }
         let inner = area.width.saturating_sub(2 * PAD);
         let mut floor = bottom;
-        if let Some(board) = self.board().filter(|_| self.open.is_none()) {
-            let room = bottom.saturating_sub(below) / 2;
+        let room = bottom.saturating_sub(below);
+        if let Some(band) = self.band.as_mut() {
+            let rows = band.height(room, moment).min(room.saturating_sub(GAP));
+            if rows > 0 {
+                floor = bottom - rows;
+                let place = Rect::new(area.x + PAD, floor, inner, rows);
+                band.draw(frame, place, &self.palette, moment);
+            }
+        } else if let Some(board) = self.board().filter(|_| self.open.is_none()) {
             let shown = board.banded(moment).len();
-            let rows = u16::try_from(shown).unwrap_or(u16::MAX).min(room);
+            let rows = u16::try_from(shown).unwrap_or(u16::MAX).min(room / 2);
             if rows > 0 {
                 floor = bottom - rows;
                 let place = Rect::new(area.x + PAD, floor, inner, rows);

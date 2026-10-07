@@ -23,7 +23,7 @@ the app, in any language.
 ## Install
 
 ```toml
-pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v0.3.4" }
+pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v0.3.5" }
 ```
 
 That one line brings ratatui 0.30, crossterm 0.29, pito-header v0.2.0,
@@ -45,7 +45,9 @@ cargo run --example demo -- --dump 100x24 --keys "tab down enter"
   (facts, a status, a breadcrumb) and the footer (hints, an input bar). The
   shell lays them out as numbered tabs in groups (pito-header), switches
   between them with the app's nav keys, and starts a screen the first time
-  it is shown.
+  it is shown. A screen hears each time the nav brings it up (`entered`):
+  a tab, group or digit key, the digit of the screen already shown too, a
+  click on its tab, or `go`; not the first screen at start.
 - **Loads that can't land late.** A screen hands the shell its read
   (`load`), the shell runs it on a worker and delivers the answer
   (`loaded`) only if it is still the newest one: each read carries a
@@ -69,11 +71,14 @@ cargo run --example demo -- --dump 100x24 --keys "tab down enter"
   draws nothing.
 - **Keys in a fixed order:** a key release is ignored; then the quit guard
   (a double `ctrl+c`, asking first while work runs, with the app's words);
-  then an open confirm; then a screen that is typing into an input; then
-  the help toggle (`?`); then the key that opens the activity screen; then
-  the nav keys (only the back keys while the activity screen is open); then
-  the stop key while a screen loads; then the app's own keys (`on_key`);
-  then the screen.
+  then an open confirm, unless the key is one the app lets through
+  (`through_keys`, such as `ctrl+r` for a refresh), which goes to `on_key`
+  and the screen with the confirm left open; then a screen that is typing
+  into an input; then the help toggle (`?`); then the keys that open an
+  overlay (the activity screen or the app's own); then the nav keys (only
+  the back keys while an overlay is open); then the stop key while a screen
+  loads; then the app's own keys (`on_key`); then the screen. `Cx::key`
+  tells a callback which key led to it, so `back` knows `esc` from `q`.
 - **A terminal that is always given back.** `Term` turns on raw mode, the
   alternate screen and bracketed paste (mouse capture and focus events only
   when the app asks), remembers each one it turned on, and turns exactly
@@ -97,7 +102,9 @@ cargo run --example demo -- --dump 100x24 --keys "tab down enter"
   for as long as the screen keeps it, such as an error until the next
   action), and the screen's `legend` while the hints show. While an input
   bar or a confirm is open, the quit guard's word takes the bar's hint row,
-  in the accent, and the bar's own hint comes back when the guard lapses.
+  in the accent, and the bar's own hint comes back when the guard lapses;
+  with `lit_again(false)` it takes an input bar's hint row in the bar's own
+  hint style, and a confirm keeps its own hint.
   The quit question has its own hint (`Words::leave`), falling back to the
   confirm's (`Words::choose`). `?` hides the hints; the header then shows
   the app's help word.
@@ -109,7 +116,10 @@ cargo run --example demo -- --dump 100x24 --keys "tab down enter"
   when a screen opens something (`crumb`), the sections row becomes the
   breadcrumb, and the nav's back key (`esc`, `q`) calls the screen's
   `back`. The facts row goes while a screen is drilled in, unless the app
-  keeps it (`keep_facts`), on the same row.
+  keeps it (`keep_facts`), on the same row. A screen that wants the whole
+  left side, the help word joined to its lead in its own style, gives it
+  in `left(room, help)`: `help` is the help word when the shell would show
+  it (the hints hidden), and `None` keeps the shell's join.
 - **Activities.** The app hands the shell what it has running (`Cx::activity`,
   `Cx::activities`, `Cx::forget`): each with a label, a state (running,
   waiting, done, failed, stopped), a progress fraction or none (a spinner then), when
@@ -125,6 +135,18 @@ cargo run --example demo -- --dump 100x24 --keys "tab down enter"
   pages and takes the keys, and its time is the loop's moment.
   `Cx::activities` replaces the app's own list and leaves the commands'
   activities (below) where they are.
+- **The app's own band and overlays.** `Tui::band(impl Band)` draws the
+  band from the app's own data in place of the activity band: the shell
+  asks its `height` for the room between the header and the footer (and
+  never gives it the content's blank row), places it flush on the footer
+  with that blank row above, draws it on every screen and under every
+  overlay, picker and confirm, and wakes for its `deadline`.
+  `Tui::overlay(section, keys, screen)` opens an app's own screen the way
+  the activity screen opens: by its keys over any screen, the tabs unlit,
+  only the back keys, its own breadcrumb row (the section's name, then the
+  screen's crumb: "Operations / update pfx"), and its confirms and picks
+  answered to it. Overlays come after every tab, in the order added; a
+  screen that wants a digit to switch tabs from it calls `Cx::go`.
 - **Commands on the band.** `Cx::run(id, label, Command)` runs a child
   command and follows the `--progress json` lines the PITO command-line
   tools print (version 1: one object a line with `state` start, progress,
@@ -163,18 +185,24 @@ cargo run --example demo -- --dump 100x24 --keys "tab down enter"
   list over the screen: arrows (or `j`, `k`, `g`, `G`) move, `enter`
   chooses, `esc` or `q` cancels, every key goes to it while it is open, its
   hints replace the screen's, and the answer comes back to the screen that
-  asked, in `picked`.
+  asked, in `picked`. `Pick::full(true)` fills the screen's area instead of
+  a box: the title as a heading, a blank row, then the list;
+  `Pick::columns` lays the rows out in the app's own columns.
 - **A log viewer.** `Log` is a pane a screen embeds for a 20,000-line log or
   a 10,000-event trace: it holds the lines once (`Arc`), builds only the
   rows on screen, clips rather than wraps, and scrolls, pages and jumps to
   either end (`g`, `G`); `/` finds every line holding each word of the
   query, `n` and `N` step through them, and `y` copies the page and `Y`
-  every line. A list that big wants pito-list's `Shared`, which builds
+  every line. At the bottom it follows new lines, unless `follow(false)`
+  keeps its place. A list that big wants pito-list's `Shared`, which builds
   only the rows on screen from the app's own items. The activity screen's
   detail is a `Log`.
-- **Time, bars and spinners.** `clock::span` ("1m 2s") and `clock::age`
-  ("3m") in the app's own unit words (`clock::Units`), and
-  `clock::next_span` and `next_age`, the moment the text next changes, for a
+- **Time, bars and spinners.** `clock::span` ("1m 2s", "2d 1h") and
+  `clock::span_hours` ("49h 3m", never days, for a "took") and
+  `clock::age` ("3m") in the app's own unit words (`clock::Units`, with
+  optional words for under a second, "under 1s", for an age under a minute,
+  "just now", and a year unit for ages of 365 days and more), and
+  `clock::next_span` and `next_age`, the moment the text may next change, for a
   screen's `deadline`; `progress::bar` (a Braille bar, `⣿⣿⣿⣀⣀`),
   `progress::share` ("41%", or "≈57%" for an estimate) and
   `progress::spinner`. The activity band draws an estimate's bar faint
@@ -267,7 +295,8 @@ Tui::new(name, version, accent: Color) -> Tui<E>          // E: the app's worker
   .group(header::Group) .screen(header::Section, impl Screen<E>)   // screens join the last group
   .nav_keys(NavKeys) .help(Option<Help>) .quit(Mode) .quit_window(Duration)
   .quit_keys(&[footer::Key]) .stop_keys(&[footer::Key]) .eager(bool) .keep_facts(bool)
-  .modes(Modes) .activities(Activities)
+  .modes(Modes) .activities(Activities) .overlay(header::Section, &[footer::Key], impl Screen<E>)
+  .band(impl Band) .lit_again(bool) .through_keys(&[footer::Key])
   .header_look(fn(Header) -> Header) .footer_look(fn(Footer) -> Footer)
   .on_key(FnMut(KeyEvent, &mut Cx<E>) -> bool) .after_draw(FnMut(Duration))
   run() -> io::Result<()>, run_in(&mut Term)
@@ -284,6 +313,7 @@ pub trait Screen<E>: Any {                                 // every method but d
   fn phase(&self) -> Phase;                                // Ready | Loading(label) | Trouble(lines)
   fn load(&mut self) -> Option<Job<E>>;  fn loaded(&mut self, E, &mut Cx<E>);
   fn sources(&self) -> &[&str];  fn cancel(&mut self);  fn start(&mut self, &mut Cx<E>);
+  fn entered(&mut self, &mut Cx<E>);                       // each time the nav brings it up
   fn key(&mut self, KeyEvent, &mut Cx<E>);  fn paste(&mut self, &str, &mut Cx<E>);
   fn mouse(&mut self, MouseEvent, Rect, &mut Cx<E>);  fn event(&mut self, E, &mut Cx<E>);
   fn answer(&mut self, yes: bool, &mut Cx<E>);  fn picked(&mut self, Option<usize>, &mut Cx<E>);
@@ -293,6 +323,7 @@ pub trait Screen<E>: Any {                                 // every method but d
   fn status(&self) -> Option<(String, Style)>;
   fn status_parts(&self, room: u16) -> Vec<(String, Style)>;  // default: status() as one part
   fn lead(&self, room: u16) -> Vec<(String, Style)>;      // beside the help word
+  fn left(&self, room: u16, help: Option<&str>) -> Option<Vec<(String, Style)>>;  // the whole left side
   fn notice(&self) -> Option<Notice>;  fn legend(&self) -> Option<&str>;
   fn typing(&self) -> bool;
   fn input(&self) -> Option<InputBar>;  fn crumb(&self) -> Option<String>;
@@ -301,8 +332,13 @@ pub trait Screen<E>: Any {                                 // every method but d
   fn tick(&mut self, &mut Cx<E>);                          // once when the moment reaches a deadline
 }
 pub type Job<E> = Box<dyn FnOnce() -> E + Send>;
+pub trait Band {                                           // the app's own band, Tui::band
+  fn height(&self, room: u16, now: Instant) -> u16;
+  fn draw(&mut self, &mut Frame, Rect, &Palette, now: Instant);
+  fn deadline(&self, now: Instant) -> Option<Instant>;     // default None
+}
 
-Cx<'_, E>: screen(), now(), detach(FnOnce() -> E), waker() -> Waker<E>,
+Cx<'_, E>: screen(), now(), key() -> Option<KeyEvent>, detach(FnOnce() -> E), waker() -> Waker<E>,
   say(text, footer::Tone), hush(), confirm(question), confirm_with(question, Confirm),
   copy(text) -> bool, go(screen), quit(), reload(), changed(source),
   palette(Palette), words(Words), hints(Vec<Hint<'static>>),
@@ -323,12 +359,14 @@ pub enum command::Heard { Line { stream, text, progress: Option<Progress> }, Exi
 pub enum command::Exit { Code(i32), Signal(i32), Stopped, Error(text) }   // .state() -> activity::State
 
 Pick::new(title, [option]) | Pick::rows(title, [list::Row])  .selected(index) .hints([Hint]) .keys(list::Keys) .cancel_keys(..)
-Log::new(label) .placeholder(..) .hint(..) .keys(list::Keys) .search_keys(..) .hit_keys(next, previous) .copy_keys(page, all)
+  .columns([list::Column]) .full(bool)
+Log::new(label) .placeholder(..) .hint(..) .keys(list::Keys) .search_keys(..) .hit_keys(next, previous) .copy_keys(page, all) .follow(bool)
   set_lines(log::Lines), lines(), len(), top(), hits(), hit(), query(), typing(), bar() -> Option<InputBar>,
   key(KeyEvent) -> log::Turn, paste(&str) -> log::Turn, draw(frame, area, &Palette)
 pub enum log::Turn { Pass, Taken, Copy(text) };  pub type log::Lines = Arc<Vec<Line<'static>>>
-clock::Units::new(second, minute, hour, day)               // the app's unit words
-clock::span(Duration, &Units) -> "1m 2s", age(Duration, &Units) -> "3m", next_span(since, now), next_age(since, now)
+clock::Units::new(second, minute, hour, day) .year(..) .under(..) .now(..)   // the app's unit words
+clock::span(Duration, &Units) -> "1m 2s", span_hours(..) -> "49h 3m", age(Duration, &Units) -> "3m",
+  next_span(since, now), next_age(since, now)
 progress::bar(fraction, cells) -> "⣿⣿⣀⣀", percent(fraction), share(fraction, estimate) -> "≈57%", spinner(Duration), SPIN
 
 capture::Walk::new() .sizes([(w, h)]) .screens(bool) .script(Script::new(name, [KeyEvent]) .loading() .at(Duration))
@@ -372,7 +410,9 @@ while any screen is busy (`Mode::Ask`), stops a load on `esc`, reads a screen
 the first time it is shown (`eager(true)` reads them all at start), hides the
 facts row while a screen is drilled in (`keep_facts(true)` keeps it), has no
 activity band or screen until the app gives it `Activities` (the band then
-shows unless `band(false)`), and turns on raw mode, the alternate screen and
+shows unless `band(false)`) or its own `Band`, lights the quit word in the
+accent over an input bar or a confirm (`lit_again`), lets no key past an open
+confirm (`through_keys`), and turns on raw mode, the alternate screen and
 bracketed paste only.
 
 `Phase`, `Turn`, `Wake`, `Words`, `Palette`, `Modes`, `Bench`, `Activity`,
@@ -439,7 +479,8 @@ shell deletes that glue; the app's screens and data stay as they are.
 | A confirm gathered from several places | `Cx::confirm` and `Screen::answer` |
 | Header assembly: title, help word, a lead beside it, a status fitted to the room, facts, a breadcrumb kept in step | `Screen::lead`, `status_parts`, `facts`, `crumb`, `selected` and `back`, `keep_facts` |
 | Footer assembly: hints, notice, legend, confirm, input, version, height | `Screen::hints`, `input`, `notice`, `legend`, `Cx::say`, `Words::leave`; the version slot is wired |
-| A panel of running work above the footer and a screen listing it, with a detail view | `Activities`, fed by `Cx::activity`, `activities` and `forget` |
+| A panel of running work above the footer and a screen listing it, with a detail view | `Activities`, fed by `Cx::activity`, `activities` and `forget`; or the app's own `Band` and `Tui::overlay` screen |
+| A screen of its own opened over any other by a key, with unlit tabs and its own breadcrumb | `Tui::overlay(section, keys, screen)` |
 | Code that runs the app's own CLI, parses its `--progress json` lines and stops it | `Cx::run(id, label, Command)` (`Cx::run_from` when the lines come on stderr), `Cx::stop(id)`, `Screen::heard` for each line and the exit, and `command::read` for a single line |
 | A picker drawn over a screen, its keys and its answer | `Cx::pick(Pick)` and `Screen::picked` |
 | A long-log or trace pane: scroll, page, ends, find, copy, a cache of built rows | `Log`; a long list takes pito-list's `Shared` |

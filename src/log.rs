@@ -34,6 +34,7 @@ pub struct Log {
     typing: bool,
     hits: Vec<usize>,
     hit: Option<usize>,
+    follow: bool,
     label: Cow<'static, str>,
     placeholder: Cow<'static, str>,
     hint: Cow<'static, str>,
@@ -62,6 +63,7 @@ impl Log {
             typing: false,
             hits: Vec::new(),
             hit: None,
+            follow: true,
             label: label.into(),
             placeholder: Cow::Borrowed(""),
             hint: Cow::Borrowed(""),
@@ -81,6 +83,11 @@ impl Log {
 
     pub fn hint(mut self, text: impl Into<Cow<'static, str>>) -> Self {
         self.hint = text.into();
+        self
+    }
+
+    pub fn follow(mut self, follow: bool) -> Self {
+        self.follow = follow;
         self
     }
 
@@ -114,7 +121,7 @@ impl Log {
         if Arc::ptr_eq(&self.lines, &lines) {
             return;
         }
-        let following = self.top >= self.last();
+        let following = self.follow && self.top >= self.last();
         self.lines = lines;
         if following && self.top > 0 {
             self.top = self.last();

@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
     layout::Rect,
     text::Line,
-    widgets::{Block, BorderType, Clear},
+    widgets::{Block, BorderType, Clear, Paragraph},
 };
 
 use crate::palette::Palette;
@@ -15,6 +15,7 @@ use crate::text::cells;
 const CANCEL: &[Key] = &[Key::Esc, Key::Char('q')];
 const GAP: usize = 2;
 const NARROWEST: usize = 24;
+const HEADING: u16 = 2;
 
 #[non_exhaustive]
 pub struct Pick {
@@ -22,6 +23,8 @@ pub struct Pick {
     pub(crate) rows: List,
     pub(crate) hints: Vec<Hint<'static>>,
     pub(crate) cancel: &'static [Key],
+    columns: Vec<Column<'static>>,
+    full: bool,
 }
 
 impl Pick {
@@ -41,6 +44,8 @@ impl Pick {
             rows: List::new().with_rows(rows).keys(Keys::VIM),
             hints: Vec::new(),
             cancel: CANCEL,
+            columns: Vec::new(),
+            full: false,
         }
     }
 
@@ -64,9 +69,54 @@ impl Pick {
         self
     }
 
+    pub fn columns(mut self, columns: impl IntoIterator<Item = Column<'static>>) -> Self {
+        self.columns = columns.into_iter().collect();
+        self
+    }
+
+    pub fn full(mut self, full: bool) -> Self {
+        self.full = full;
+        self
+    }
+
+    fn laid(&self, count: usize) -> Vec<Column<'static>> {
+        if !self.columns.is_empty() {
+            return self.columns.clone();
+        }
+        let mut columns = vec![Column::new("", 4, 0).flex()];
+        columns.extend((1..count).map(|_| Column::new("", 0, 0).fit(40).right()));
+        columns
+    }
+
+    fn fill(&mut self, frame: &mut Frame, area: Rect, palette: &Palette, count: usize) {
+        frame.render_widget(Clear, area);
+        frame.render_widget(Block::new().style(palette.base), area);
+        let heading = Line::styled(self.title.to_string(), palette.selected);
+        let top = Rect {
+            height: area.height.min(1),
+            ..area
+        };
+        frame.render_widget(Paragraph::new(heading), top);
+        let below = area.height.min(HEADING);
+        let list = Rect {
+            y: area.y + below,
+            height: area.height - below,
+            ..area
+        };
+        let columns = self.laid(count);
+        let view = ListView::new(&mut self.rows, &columns)
+            .styles(palette.list())
+            .header(false);
+        frame.render_widget(view, list);
+    }
+
     pub(crate) fn draw(&mut self, frame: &mut Frame, area: Rect, palette: &Palette) {
         let rows = self.rows.rows();
         let count = rows.iter().map(|row| row.cells().len()).max().unwrap_or(1);
+        if self.full {
+            self.fill(frame, area, palette, count);
+            return;
+        }
         let widest = rows
             .iter()
             .map(|row| {
@@ -96,8 +146,7 @@ impl Pick {
             .title(title);
         let inner = block.inner(place);
         frame.render_widget(block, place);
-        let mut columns = vec![Column::new("", 4, 0).flex()];
-        columns.extend((1..count).map(|_| Column::new("", 0, 0).fit(40).right()));
+        let columns = self.laid(count);
         let view = ListView::new(&mut self.rows, &columns)
             .styles(palette.list())
             .header(false);

@@ -19,7 +19,7 @@ use crate::command::{self, Exit, Heard, Report};
 use crate::copy;
 use crate::pace::{Pace, wait_until};
 use crate::palette::Palette;
-use crate::screen::{Cx, Job, Outbox, Phase, Screen};
+use crate::screen::{Band, Cx, Job, Outbox, Phase, Screen};
 use crate::term::{Modes, Term};
 use crate::wake::{Wake, Waker, listen};
 use crate::words::Words;
@@ -42,7 +42,7 @@ pub enum Flow {
 
 pub(crate) enum Role {
     Tab,
-    Overlay(Nav),
+    Overlay(Nav, &'static [Key]),
 }
 
 pub(crate) struct Slot<E> {
@@ -85,6 +85,9 @@ pub struct Tui<E> {
     tabs: Vec<usize>,
     pub(crate) open: Option<usize>,
     pub(crate) board: Option<usize>,
+    pub(crate) band: Option<Box<dyn Band>>,
+    pressed: Option<KeyEvent>,
+    through: &'static [Key],
     running: Arc<AtomicUsize>,
     commands: Vec<command::Handle>,
     pub(crate) help: Option<Help>,
@@ -95,6 +98,7 @@ pub struct Tui<E> {
     stop: &'static [Key],
     eager: bool,
     pub(crate) keep_facts: bool,
+    pub(crate) lit_again: bool,
     pub(crate) out: Outbox<E>,
     pub(crate) inbox: Receiver<Wake<E>>,
     pub(crate) moment: Instant,
@@ -130,6 +134,9 @@ impl<E: Send + 'static> Tui<E> {
             tabs: Vec::new(),
             open: None,
             board: None,
+            band: None,
+            pressed: None,
+            through: &[],
             running: Arc::new(AtomicUsize::new(0)),
             commands: Vec::new(),
             help: Some(Help::new(true)),
@@ -139,6 +146,7 @@ impl<E: Send + 'static> Tui<E> {
             stop: STOP,
             eager: false,
             keep_facts: false,
+            lit_again: true,
             out: Outbox::new(sender),
             inbox,
             moment: Instant::now(),
@@ -183,7 +191,7 @@ impl<E: Send + 'static> Tui<E> {
     pub fn screen(mut self, section: Section, screen: impl Screen<E>) -> Self {
         let group = self.groups.pop().unwrap_or_else(|| Group::new(""));
         self.groups.push(group.section(section));
-        let index = self.board.unwrap_or(self.screens.len());
+        let index = self.tabs.len();
         self.tabs.push(index);
         self.screens
             .insert(index, Slot::new(Box::new(screen), Role::Tab));
@@ -194,22 +202,37 @@ impl<E: Send + 'static> Tui<E> {
         self
     }
 
+    pub fn overlay(
+        mut self,
+        section: Section,
+        keys: &'static [Key],
+        screen: impl Screen<E>,
+    ) -> Self {
+        let role = Role::Overlay(lone(section), keys);
+        self.screens.push(Slot::new(Box::new(screen), role));
+        self
+    }
+
     pub fn activities(mut self, words: Activities) -> Self {
-        let nav = Nav::new(vec![Group::new("").section(words.section.clone())]).keys(NavKeys::NONE);
+        let role = Role::Overlay(lone(words.section.clone()), words.keys);
         match self.board {
             Some(index) => {
                 if let Some(board) = self.board_mut() {
                     board.words = words;
                 }
-                self.screens[index].role = Role::Overlay(nav);
+                self.screens[index].role = role;
             }
             None => {
                 self.board = Some(self.screens.len());
                 let board = Board::new(words, self.moment);
-                self.screens
-                    .push(Slot::new(Box::new(board), Role::Overlay(nav)));
+                self.screens.push(Slot::new(Box::new(board), role));
             }
         }
+        self
+    }
+
+    pub fn band(mut self, band: impl Band + 'static) -> Self {
+        self.band = Some(Box::new(band));
         self
     }
 
@@ -259,6 +282,11 @@ impl<E: Send + 'static> Tui<E> {
         self
     }
 
+    pub fn through_keys(mut self, keys: &'static [Key]) -> Self {
+        self.through = keys;
+        self
+    }
+
     pub fn eager(mut self, eager: bool) -> Self {
         self.eager = eager;
         self
@@ -266,6 +294,11 @@ impl<E: Send + 'static> Tui<E> {
 
     pub fn keep_facts(mut self, keep: bool) -> Self {
         self.keep_facts = keep;
+        self
+    }
+
+    pub fn lit_again(mut self, lit: bool) -> Self {
+        self.lit_again = lit;
         self
     }
 
@@ -335,7 +368,7 @@ impl<E: Send + 'static> Tui<E> {
             .iter()
             .map(|slot| match &slot.role {
                 Role::Tab => tabs.next().unwrap_or_default(),
-                Role::Overlay(nav) => nav.section().map_or("", Section::name),
+                Role::Overlay(nav, _) => nav.section().map_or("", Section::name),
             })
             .collect()
     }
@@ -373,7 +406,7 @@ impl<E: Send + 'static> Tui<E> {
                 }
                 self.open = None;
             }
-            Some(Role::Overlay(_)) => self.open = Some(screen),
+            Some(Role::Overlay(..)) => self.open = Some(screen),
             None => return false,
         }
         self.enter();
@@ -389,7 +422,9 @@ impl<E: Send + 'static> Tui<E> {
     }
 
     pub fn start(&mut self) {
-        self.enter();
+        if let Some(index) = self.current() {
+            self.begin(index);
+        }
         self.follow();
     }
 
@@ -402,6 +437,19 @@ impl<E: Send + 'static> Tui<E> {
         if key.kind == KeyEventKind::Release {
             return Flow::Stay;
         }
+        self.pressed = Some(key);
+        let flow = self.route(key);
+        self.pressed = None;
+        flow
+    }
+
+    fn overlay_for(&self, key: Key) -> Option<usize> {
+        self.screens
+            .iter()
+            .position(|slot| matches!(&slot.role, Role::Overlay(_, keys) if keys.contains(&key)))
+    }
+
+    fn route(&mut self, key: KeyEvent) -> Flow {
         let busy = self.busy();
         match self.quit.key(key.into(), self.moment, busy > 0) {
             Guard::Quit => return Flow::Quit,
@@ -413,7 +461,8 @@ impl<E: Send + 'static> Tui<E> {
         }
         self.out.said = None;
         self.follow();
-        if let Some(asking) = self.out.asking.as_mut() {
+        let through = self.through.contains(&key.into());
+        if let Some(asking) = self.out.asking.as_mut().filter(|_| !through) {
             if let Some(answer) = asking.confirm.key(key.into()) {
                 let screen = asking.screen;
                 self.out.asking = None;
@@ -447,15 +496,14 @@ impl<E: Send + 'static> Tui<E> {
         if self.help.as_mut().is_some_and(|help| help.key(key.into())) {
             return Flow::Stay;
         }
-        if let Some(board) = self.board
-            && self
-                .board()
-                .is_some_and(|shown| shown.words.keys.contains(&key.into()))
-        {
-            if self.open == Some(board) {
+        if through && self.out.asking.is_some() {
+            return self.press(index, key);
+        }
+        if let Some(overlay) = self.overlay_for(key.into()) {
+            if self.open == Some(overlay) {
                 self.open = None;
             } else {
-                self.go(board);
+                self.go(overlay);
             }
             return self.apply();
         }
@@ -474,10 +522,15 @@ impl<E: Send + 'static> Tui<E> {
             self.cancel(index);
             return Flow::Stay;
         }
+        self.press(index, key)
+    }
+
+    fn press(&mut self, index: usize, key: KeyEvent) -> Flow {
         if let Some(mut hook) = self.on_key.take() {
             let mut cx = Cx {
                 screen: index,
                 now: self.moment,
+                key: self.pressed,
                 out: &mut self.out,
             };
             let taken = hook(key, &mut cx);
@@ -597,7 +650,7 @@ impl<E: Send + 'static> Tui<E> {
     }
 
     fn leave(&mut self, index: usize) {
-        let Some(Role::Overlay(nav)) = self.screens.get_mut(index).map(|slot| &mut slot.role)
+        let Some(Role::Overlay(nav, _)) = self.screens.get_mut(index).map(|slot| &mut slot.role)
         else {
             return;
         };
@@ -611,6 +664,8 @@ impl<E: Send + 'static> Tui<E> {
     fn enter(&mut self) {
         if let Some(index) = self.current() {
             self.begin(index);
+            self.call(index, |screen, cx| screen.entered(cx));
+            self.apply();
         }
     }
 
@@ -630,7 +685,7 @@ impl<E: Send + 'static> Tui<E> {
         let slot = &mut self.screens[index];
         let crumb = slot.screen.crumb();
         let nav = match &mut slot.role {
-            Role::Overlay(nav) => nav,
+            Role::Overlay(nav, _) => nav,
             _ => &mut self.nav,
         };
         if nav.title() == crumb.as_deref() {
@@ -673,6 +728,7 @@ impl<E: Send + 'static> Tui<E> {
         let mut cx = Cx {
             screen: index,
             now: self.moment,
+            key: self.pressed,
             out: &mut self.out,
         };
         Some(work(slot.screen.as_mut(), &mut cx))
@@ -855,7 +911,12 @@ impl<E: Send + 'static> Tui<E> {
         let screens = self.screens.iter().filter_map(|slot| self.due(slot)).min();
         let open = self.open.is_some() && self.open == self.board;
         let board = self.board().and_then(|board| board.wake(self.moment, open));
-        [self.quit.deadline(), screens, board]
+        let band = self
+            .band
+            .as_ref()
+            .and_then(|band| band.deadline(self.moment));
+        let bands = [board, band].into_iter().flatten().min();
+        [self.quit.deadline(), screens, bands]
     }
 
     pub fn run(mut self) -> io::Result<()> {
@@ -922,4 +983,8 @@ impl<E: Send + 'static> Tui<E> {
             }
         }
     }
+}
+
+fn lone(section: Section) -> Nav {
+    Nav::new(vec![Group::new("").section(section)]).keys(NavKeys::NONE)
 }

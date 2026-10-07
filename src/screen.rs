@@ -49,6 +49,8 @@ pub trait Screen<E>: Any {
 
     fn start(&mut self, _cx: &mut Cx<'_, E>) {}
 
+    fn entered(&mut self, _cx: &mut Cx<'_, E>) {}
+
     fn key(&mut self, _key: KeyEvent, _cx: &mut Cx<'_, E>) {}
 
     fn paste(&mut self, _text: &str, _cx: &mut Cx<'_, E>) {}
@@ -83,6 +85,10 @@ pub trait Screen<E>: Any {
 
     fn lead(&self, _room: u16) -> Vec<(String, Style)> {
         Vec::new()
+    }
+
+    fn left(&self, _room: u16, _help: Option<&str>) -> Option<Vec<(String, Style)>> {
+        None
     }
 
     fn notice(&self) -> Option<Notice<'_>> {
@@ -122,6 +128,16 @@ pub trait Screen<E>: Any {
     }
 
     fn tick(&mut self, _cx: &mut Cx<'_, E>) {}
+}
+
+pub trait Band {
+    fn height(&self, room: u16, now: Instant) -> u16;
+
+    fn draw(&mut self, frame: &mut Frame, area: Rect, palette: &Palette, now: Instant);
+
+    fn deadline(&self, _now: Instant) -> Option<Instant> {
+        None
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -181,6 +197,7 @@ impl<E> Outbox<E> {
 pub struct Cx<'a, E> {
     pub(crate) screen: usize,
     pub(crate) now: Instant,
+    pub(crate) key: Option<KeyEvent>,
     pub(crate) out: &'a mut Outbox<E>,
 }
 
@@ -191,6 +208,10 @@ impl<E: Send + 'static> Cx<'_, E> {
 
     pub fn now(&self) -> Instant {
         self.now
+    }
+
+    pub fn key(&self) -> Option<KeyEvent> {
+        self.key
     }
 
     pub fn detach(&mut self, work: impl FnOnce() -> E + Send + 'static) {

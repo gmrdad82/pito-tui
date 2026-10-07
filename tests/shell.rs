@@ -15,12 +15,16 @@ use pito_tui::ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::Line,
+    widgets::Paragraph,
 };
-use pito_tui::{Activities, Activity, Cx, Flow, Job, Palette, Phase, Screen, Tui, Words, dump};
+use pito_tui::{
+    Activities, Activity, Band, Cx, Flow, Job, Palette, Phase, Screen, Tui, Words, dump,
+};
 
 #[derive(Default)]
 struct Probe<const ID: u8> {
     keys: Vec<KeyCode>,
+    entered: usize,
     answers: Vec<bool>,
     started: usize,
     typing: bool,
@@ -37,6 +41,10 @@ impl<const ID: u8> Screen<u32> for Probe<ID> {
 
     fn start(&mut self, _cx: &mut Cx<'_, u32>) {
         self.started += 1;
+    }
+
+    fn entered(&mut self, _cx: &mut Cx<'_, u32>) {
+        self.entered += 1;
     }
 
     fn key(&mut self, key: KeyEvent, cx: &mut Cx<'_, u32>) {
@@ -488,4 +496,83 @@ fn frames_recorded_before_the_shell_compare_against_it_by_screen_and_script_name
             .unwrap()
             .is_empty()
     );
+}
+
+#[test]
+fn an_app_overlay_opens_over_any_screen_and_hears_its_confirm_and_the_keys_let_through() {
+    let mut tui = Tui::<u32>::new("probe", "1.2.3", Color::Blue)
+        .overlay(
+            Section::new("Operations"),
+            &[Key::Char('O')],
+            Probe::<3>::default(),
+        )
+        .screen(Section::new("One"), Probe::<1>::default())
+        .screen(Section::new("Two"), Probe::<2>::default())
+        .through_keys(&[Key::Ctrl('r')]);
+    tui.start();
+    assert_eq!(tui.names(), ["One", "Two", "Operations"]);
+    assert_eq!(one(&mut tui).entered, 0);
+    tui.key(press(KeyCode::Char('1')));
+    assert_eq!(
+        one(&mut tui).entered,
+        1,
+        "the digit of the shown screen enters it"
+    );
+
+    tui.key(press(KeyCode::Char('O')));
+    assert_eq!(tui.current(), Some(2));
+    let text = dump::text(&tui.frame(60, 16));
+    assert!(text.contains("Operations"), "{text}");
+    tui.key(press(KeyCode::Char('d')));
+    tui.key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+    tui.key(press(KeyCode::Char('y')));
+    let ops = tui.find::<Probe<3>>().unwrap();
+    assert_eq!(ops.answers, [true]);
+    assert_eq!(ops.keys, [KeyCode::Char('d'), KeyCode::Char('r')]);
+    tui.key(press(KeyCode::Esc));
+    assert_eq!(tui.current(), Some(0));
+}
+
+struct Panel;
+
+impl Band for Panel {
+    fn height(&self, room: u16, _now: Instant) -> u16 {
+        3.min(room / 2)
+    }
+
+    fn draw(&mut self, frame: &mut Frame, area: Rect, _palette: &Palette, _now: Instant) {
+        let lines = vec![
+            Line::from("op one"),
+            Line::from("op two"),
+            Line::from("+1 more"),
+        ];
+        frame.render_widget(Paragraph::new(lines), area);
+    }
+}
+
+#[test]
+fn an_app_band_sits_on_the_footer_under_a_blank_row_and_stays_under_an_overlay() {
+    let mut tui = Tui::<u32>::new("probe", "1.2.3", Color::Blue)
+        .screen(Section::new("One"), Probe::<1>::default())
+        .overlay(
+            Section::new("Operations"),
+            &[Key::Char('O')],
+            Probe::<3>::default(),
+        )
+        .band(Panel);
+    tui.start();
+    for open in [false, true] {
+        if open {
+            tui.key(press(KeyCode::Char('O')));
+        }
+        let text = dump::text(&tui.frame(60, 16));
+        let lines: Vec<&str> = text.lines().collect();
+        let first = lines
+            .iter()
+            .position(|line| line.contains("op one"))
+            .unwrap();
+        assert!(lines[first - 1].trim().is_empty(), "{text}");
+        assert!(lines[first + 2].contains("+1 more"), "{text}");
+        assert!(lines[first + 3].trim_start().starts_with('─'), "{text}");
+    }
 }

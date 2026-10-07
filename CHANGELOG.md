@@ -4,6 +4,39 @@ Every release of pito-tui, newest first. Versions follow [Semantic
 Versioning](https://semver.org/) as Cargo reads it before 1.0: a change in the
 middle number may break an app, a change in the last one never does.
 
+## 0.3.5 (2026-10-07)
+
+- `Tui::band(impl Band)`: the app draws the band from its own data, in its
+  own columns and with its own cap and "more" line. The shell asks its
+  `height` for the room between the header and the footer, places it flush
+  on the footer with the content's blank row above, draws it on every
+  screen and under every overlay, picker and confirm, and wakes for its
+  `deadline`. It replaces the activity band.
+- `Tui::overlay(section, keys, screen)` opens an app's own screen over any
+  screen as the activity screen opens: by its keys, the tabs unlit, only
+  the back keys, its own breadcrumb row ("Operations / update pfx"), and
+  its confirms and picks answered to it. Overlays come after every tab.
+- `Tui::lit_again(false)`: while the quit guard is armed, its word takes an
+  input bar's hint row in the bar's own hint style, and a confirm keeps its
+  own hint.
+- `Screen::left(room, help)` draws the header's whole left side, the help
+  word (when the shell would show it) joined to the lead as the screen
+  likes.
+- `Screen::entered` each time the nav brings a screen up, the digit of the
+  screen already shown included.
+- `Cx::key()`: the key that led to a callback, so `back` tells `esc` from
+  `q`.
+- `Tui::through_keys(keys)`: keys that reach `on_key` and the screen while a
+  confirm is open, the confirm staying open.
+- `Log::follow(false)` keeps the log's place when lines arrive while it is
+  at the bottom.
+- `Pick::full(true)` fills the screen's area (a heading, a blank row, the
+  list) instead of a box, and `Pick::columns` sets its columns.
+- `clock::span_hours` never goes to days; `clock::Units` takes a year unit
+  for ages of 365 days and more, words for a span under a second ("under
+  1s") and for an age under a minute ("just now"). `clock::next_span` now
+  steps by the minute past an hour, so it suits both spans.
+
 ## 0.3.4 (2026-10-07)
 
 - The screen that ran a command hears it: `Screen::heard(id,
