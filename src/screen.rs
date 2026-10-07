@@ -289,6 +289,7 @@ impl<E: Send + 'static> Cx<'_, E> {
             activity,
             command,
             progress,
+            keep: true,
         });
     }
 
@@ -297,6 +298,9 @@ impl<E: Send + 'static> Cx<'_, E> {
     }
 
     pub fn forget(&mut self, id: u64) {
+        for run in self.out.runs.iter_mut().filter(|run| run.activity.id == id) {
+            run.keep = false;
+        }
         self.out.changes.push(Change::Forget(id));
     }
 

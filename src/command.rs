@@ -167,6 +167,7 @@ pub(crate) struct Run {
     pub(crate) activity: Activity,
     pub(crate) command: Command,
     pub(crate) progress: Stream,
+    pub(crate) keep: bool,
 }
 
 pub(crate) struct Handle {
@@ -181,16 +182,7 @@ impl Handle {
     }
 
     pub(crate) fn stop(&self, now: Instant) -> Option<Activity> {
-        let activity = {
-            let mut state = lock(&self.shared);
-            if state.activity.state.finished() {
-                return None;
-            }
-            halt(&mut state.activity, now);
-            state.stopped = true;
-            state.dirty = true;
-            state.snapshot()
-        };
+        let activity = self.stopping(now)?;
         signal(&self.child, false);
         let child = Arc::clone(&self.child);
         thread::spawn(move || {
@@ -199,6 +191,51 @@ impl Handle {
         });
         Some(activity)
     }
+
+    fn stopping(&self, now: Instant) -> Option<Activity> {
+        let mut state = lock(&self.shared);
+        if state.activity.state.finished() {
+            return None;
+        }
+        halt(&mut state.activity, now);
+        state.stopped = true;
+        state.dirty = true;
+        Some(state.snapshot())
+    }
+
+    fn alive(&self) -> bool {
+        matches!(lock(&self.child).try_wait(), Ok(None))
+    }
+
+    pub(crate) fn forget(&self) {
+        let mut state = lock(&self.shared);
+        state.keep = false;
+        state.lines = Vec::new();
+    }
+}
+
+pub(crate) fn end(handles: &[Handle], now: Instant) -> Vec<Activity> {
+    let stopped = handles
+        .iter()
+        .filter_map(|handle| handle.stopping(now))
+        .collect();
+    for handle in handles {
+        signal(&handle.child, false);
+    }
+    let limit = Instant::now() + GRACE;
+    let mut pause = REAP;
+    while handles.iter().any(Handle::alive) {
+        let left = limit.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            break;
+        }
+        thread::sleep(pause.min(left));
+        pause = (pause * 2).min(POST);
+    }
+    for handle in handles {
+        signal(&handle.child, true);
+    }
+    stopped
 }
 
 fn signal(child: &Mutex<Child>, hard: bool) {
@@ -234,14 +271,17 @@ struct Shared {
     activity: Activity,
     lines: Vec<Line<'static>>,
     heard: Vec<Heard>,
+    keep: bool,
     stopped: bool,
     dirty: bool,
     done: bool,
 }
 
 impl Shared {
-    fn push(&mut self, line: String) {
-        self.lines.push(Line::from(line));
+    fn push(&mut self, line: impl FnOnce() -> String) {
+        if self.keep {
+            self.lines.push(Line::from(line()));
+        }
         self.dirty = true;
     }
 
@@ -289,9 +329,9 @@ fn drain(stream: impl Read, shared: &Mutex<Shared>, from: Stream, progress: bool
         match &parsed {
             Some(parsed) => {
                 follow(&mut state.activity, parsed, Instant::now());
-                state.push(note(parsed));
+                state.push(|| note(parsed));
             }
-            None => state.push(line.clone()),
+            None => state.push(|| line.clone()),
         }
         state.heard.push(Heard::Line {
             stream: from,
@@ -311,6 +351,7 @@ pub(crate) fn spawn<E: Send + 'static>(
         activity,
         mut command,
         progress,
+        keep,
     } = run;
     command
         .stdin(Stdio::null())
@@ -323,6 +364,7 @@ pub(crate) fn spawn<E: Send + 'static>(
         activity,
         lines: Vec::new(),
         heard: Vec::new(),
+        keep,
         stopped: false,
         dirty: true,
         done: false,
@@ -441,6 +483,7 @@ mod tests {
             activity: Activity::new(1, "sim", Instant::now()),
             command,
             progress,
+            keep: true,
         };
         let (sender, inbox) = mpsc::channel();
         let running = Arc::new(AtomicUsize::new(0));
@@ -509,6 +552,55 @@ mod tests {
         assert!(said(&ended));
         assert!(handle.over());
         assert_eq!(running.load(Ordering::SeqCst), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_end_of_the_loop_stops_every_command_and_kills_one_that_ignores_the_signal() {
+        let said = |activity: &Activity| {
+            activity
+                .detail
+                .iter()
+                .any(|line| line.to_string() == "started")
+        };
+        for (script, stubborn) in [
+            ("echo started; sleep 30", false),
+            ("trap '' TERM; echo started; sleep 30", true),
+        ] {
+            let (handle, inbox, running) = started(script, Stream::Stdout);
+            assert!(said(&last(&inbox, said).0));
+            let asked = Instant::now();
+            let stopped = end(std::slice::from_ref(&handle), asked);
+            assert_eq!(stopped.len(), 1);
+            assert_eq!(asked.elapsed() >= GRACE, stubborn);
+            let (ended, heard) = last(&inbox, |_| false);
+            assert!(asked.elapsed() < GRACE + Duration::from_secs(1));
+            assert_eq!(ended.state, State::Stopped);
+            assert_eq!(heard.last(), Some(&Heard::Exit(Exit::Stopped)));
+            assert!(handle.over());
+            assert_eq!(running.load(Ordering::SeqCst), 0);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_forgotten_command_keeps_no_lines_and_its_screen_still_hears_them() {
+        let (handle, inbox, _) = started("echo one; sleep 0.3; echo two", Stream::Stdout);
+        let one =
+            |activity: &Activity| activity.detail.iter().any(|line| line.to_string() == "one");
+        let (_, mut heard) = last(&inbox, one);
+        handle.forget();
+        let (ended, rest) = last(&inbox, |_| false);
+        heard.extend(rest);
+        assert!(ended.detail.is_empty());
+        let texts: Vec<&str> = heard
+            .iter()
+            .filter_map(|heard| match heard {
+                Heard::Line { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(texts, ["one", "two"]);
     }
 
     #[cfg(unix)]

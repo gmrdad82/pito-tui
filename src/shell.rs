@@ -15,7 +15,7 @@ use ratatui::layout::Rect;
 use ratatui::style::Color;
 
 use crate::activity::{Activities, Activity, Board, Change, State};
-use crate::command::{self, Exit, Heard, Report};
+use crate::command::{self, Exit, Heard, Report, Run};
 use crate::copy;
 use crate::pace::{Pace, wait_until};
 use crate::palette::Palette;
@@ -754,17 +754,18 @@ impl<E: Send + 'static> Tui<E> {
         }
         let moment = self.moment;
         for change in std::mem::take(&mut self.out.changes) {
+            if let Change::Forget(id) = change {
+                for handle in self.commands.iter().filter(|handle| handle.id == id) {
+                    handle.forget();
+                }
+            }
             if let Some(board) = self.board_mut() {
                 board.change(change, moment);
             }
         }
         for id in std::mem::take(&mut self.out.stops) {
-            for activity in self.stop(id) {
-                if let Some(board) = self.board_mut() {
-                    board.change(Change::Ran(activity), moment);
-                    board.change(Change::End(id, State::Stopped), moment);
-                }
-            }
+            let stopped = self.stop(id);
+            self.show_stopped(stopped);
         }
         if let Some(screen) = self.out.go.take() {
             self.go(screen);
@@ -783,21 +784,48 @@ impl<E: Send + 'static> Tui<E> {
             .filter(|handle| handle.id == id)
             .filter_map(|handle| handle.stop(moment))
             .collect();
-        let (queued, runs) = std::mem::take(&mut self.out.runs)
-            .into_iter()
-            .partition(|run| run.activity.id == id);
-        self.out.runs = runs;
-        for run in queued {
-            let mut activity = run.activity;
-            command::halt(&mut activity, moment);
-            let report = Report {
-                activity: activity.clone(),
-                heard: vec![Heard::Exit(Exit::Stopped)],
-            };
-            let _ = self.out.sender.send(Wake::Command(run.screen, report));
-            stopped.push(activity);
-        }
+        stopped.extend(self.unqueue(|run| run.activity.id == id));
         stopped
+    }
+
+    fn unqueue(&mut self, which: impl Fn(&Run) -> bool) -> Vec<Activity> {
+        let moment = self.moment;
+        let (queued, runs): (Vec<Run>, Vec<Run>) = std::mem::take(&mut self.out.runs)
+            .into_iter()
+            .partition(which);
+        self.out.runs = runs;
+        queued
+            .into_iter()
+            .map(|run| {
+                let mut activity = run.activity;
+                command::halt(&mut activity, moment);
+                let report = Report {
+                    activity: activity.clone(),
+                    heard: vec![Heard::Exit(Exit::Stopped)],
+                };
+                let _ = self.out.sender.send(Wake::Command(run.screen, report));
+                activity
+            })
+            .collect()
+    }
+
+    fn show_stopped(&mut self, stopped: Vec<Activity>) {
+        let moment = self.moment;
+        let Some(board) = self.board_mut() else {
+            return;
+        };
+        for activity in stopped {
+            let id = activity.id;
+            board.change(Change::Ran(activity), moment);
+            board.change(Change::End(id, State::Stopped), moment);
+        }
+    }
+
+    fn end(&mut self) {
+        let moment = self.tick();
+        let mut stopped = command::end(&self.commands, moment);
+        stopped.extend(self.unqueue(|_| true));
+        self.show_stopped(stopped);
     }
 
     pub(crate) fn reads(&mut self) -> Vec<(usize, u64, Job<E>)> {
@@ -830,7 +858,9 @@ impl<E: Send + 'static> Tui<E> {
             });
         }
         self.commands.retain(|handle| !handle.over());
-        for run in self.out.runs.drain(..) {
+        let board = self.board.is_some();
+        for mut run in self.out.runs.drain(..) {
+            run.keep &= board;
             let sender = self.out.sender.clone();
             let handle = command::spawn(run, sender, Arc::clone(&self.running));
             self.commands.extend(handle);
@@ -926,6 +956,12 @@ impl<E: Send + 'static> Tui<E> {
     }
 
     pub fn run_in(&mut self, term: &mut Term) -> io::Result<()> {
+        let ran = self.serve(term);
+        self.end();
+        ran
+    }
+
+    fn serve(&mut self, term: &mut Term) -> io::Result<()> {
         self.tick();
         self.start();
         self.pump();

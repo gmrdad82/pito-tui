@@ -23,7 +23,7 @@ the app, in any language.
 ## Install
 
 ```toml
-pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v0.3.5" }
+pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v0.3.6" }
 ```
 
 That one line brings ratatui 0.30, crossterm 0.29, pito-header v0.2.0,
@@ -162,8 +162,13 @@ cargo run --example demo -- --dump 100x24 --keys "tab down enter"
   too), then a kill after `command::GRACE` (2 s) if it is still running. The
   activity shows as stopped at once and keeps its status and detail; lines
   printed after that no longer change it. `command::read` parses one line.
-  While a command runs it counts as busy for the quit guard. Headless runs
-  never spawn a command, and a stop there marks a queued one stopped.
+  While a command runs it counts as busy for the quit guard. When
+  `Tui::run` or `run_in` returns, for a quit or anything else, every
+  command still running gets the same polite signal; `run_in` waits up to
+  `command::GRACE` for them to end, kills the ones still running, and only
+  then returns, so no command outlives the loop that started it, and a
+  command queued but not yet started never starts. Headless runs never
+  spawn a command, and a stop there marks a queued one stopped.
 - **The app hears its commands.** The screen that ran a command hears it in
   `Screen::heard(id, command::Heard, cx)`: every line in the order it came,
   as `Heard::Line { stream, text, progress }` (the raw text, the stream it
@@ -180,7 +185,9 @@ cargo run --example demo -- --dump 100x24 --keys "tab down enter"
   command exits or is stopped, the shell ends it by `Exit::state` and keeps
   the app's status. `Cx::run_from` keeps the start of an unfinished activity
   already on the board under that id (one shown waiting first), and
-  `Cx::forget` takes a command's activity off the board for good.
+  `Cx::forget` takes a command's activity off the board for good: the shell
+  stops keeping that command's lines, and the screen still hears every one
+  in `heard`.
 - **A pick-one prompt.** `Cx::pick(Pick::new(title, options))` puts a small
   list over the screen: arrows (or `j`, `k`, `g`, `G`) move, `enter`
   chooses, `esc` or `q` cancels, every key goes to it while it is open, its

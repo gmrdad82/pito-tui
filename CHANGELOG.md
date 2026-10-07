@@ -4,6 +4,19 @@ Every release of pito-tui, newest first. Versions follow [Semantic
 Versioning](https://semver.org/) as Cargo reads it before 1.0: a change in the
 middle number may break an app, a change in the last one never does.
 
+## 0.3.6 (2026-10-07)
+
+- No command outlives the loop that started it. When `Tui::run` or `run_in`
+  returns, every command started with `Cx::run` or `Cx::run_from` that is
+  still running gets `SIGTERM` to its process group, as `Cx::stop` sends;
+  `run_in` waits up to `command::GRACE` (2 s) for them, sends `SIGKILL` to
+  the ones still running, and only then returns. A command queued but not
+  yet started never starts. Before, a quit left them running, and a
+  command that ignores a closed pipe ran to its end.
+- After `Cx::forget`, the shell no longer keeps the command's lines nor
+  copies them on every post; the screen still hears each line in
+  `Screen::heard`. An app without an activity board keeps none at all.
+
 ## 0.3.5 (2026-10-07)
 
 - `Tui::band(impl Band)`: the app draws the band from its own data, in its
