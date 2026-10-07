@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+export CARGO_NET_GIT_FETCH_WITH_CLI=true
+cargo fmt --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo nextest run --all-features --no-tests=pass
+cargo test --all-features --doc
+[ "${1:-}" = --fast ] || cargo build --release --example demo
