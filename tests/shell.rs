@@ -1,6 +1,12 @@
 use pito_tui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use pito_tui::footer::{Input, InputBar};
 use pito_tui::header::Section;
-use pito_tui::ratatui::{Frame, layout::Rect, style::Color};
+use pito_tui::ratatui::{
+    Frame,
+    buffer::Buffer,
+    layout::Rect,
+    style::{Color, Modifier},
+};
 use pito_tui::{Cx, Flow, Job, Palette, Phase, Screen, Tui, Words, dump};
 
 #[derive(Default)]
@@ -14,6 +20,7 @@ struct Probe<const ID: u8> {
     waiting: bool,
     loaded: Vec<u32>,
     cancelled: bool,
+    field: Input,
 }
 
 impl<const ID: u8> Screen<u32> for Probe<ID> {
@@ -36,6 +43,11 @@ impl<const ID: u8> Screen<u32> for Probe<ID> {
 
     fn typing(&self) -> bool {
         self.typing
+    }
+
+    fn input(&self) -> Option<InputBar<'_>> {
+        self.typing
+            .then(|| InputBar::new("Find", &self.field).hint("enter keep"))
     }
 
     fn busy(&self) -> usize {
@@ -114,6 +126,44 @@ fn ctrl_c_twice_quits_and_asks_first_while_work_runs() {
     assert!(dump::text(&busy.frame(60, 16)).contains("2 running, leave?"));
     assert_eq!(busy.key(press(KeyCode::Char('y'))), Flow::Quit);
     assert!(one(&mut busy).keys.is_empty());
+}
+
+fn lit(buffer: &Buffer, text: &str) -> bool {
+    let area = buffer.area;
+    (area.top()..area.bottom()).any(|y| {
+        let row: String = (area.left()..area.right())
+            .map(|x| buffer[(x, y)].symbol())
+            .collect();
+        row.find(text).is_some_and(|at| {
+            let x = area.left() + u16::try_from(row[..at].chars().count()).unwrap();
+            (x..x + u16::try_from(text.chars().count()).unwrap())
+                .filter(|x| buffer[(*x, y)].symbol() != " ")
+                .all(|x| {
+                    let cell = &buffer[(x, y)];
+                    cell.fg == Color::Blue && cell.modifier == Modifier::BOLD
+                })
+        })
+    })
+}
+
+#[test]
+fn a_first_ctrl_c_shows_again_on_an_open_bar_in_the_accent_until_the_guard_lapses() {
+    let mut tui = tui();
+    one(&mut tui).typing = true;
+    tui.key(ctrl_c());
+    let armed = tui.frame(60, 16);
+    assert!(lit(&armed, "again to leave"), "{}", dump::text(&armed));
+    assert!(!dump::text(&armed).contains("enter keep"));
+    tui.key(press(KeyCode::Char('x')));
+    let lapsed = dump::text(&tui.frame(60, 16));
+    assert!(lapsed.contains("enter keep") && !lapsed.contains("again to leave"));
+
+    one(&mut tui).typing = false;
+    tui.key(press(KeyCode::Char('d')));
+    tui.key(ctrl_c());
+    let asking = tui.frame(60, 16);
+    assert!(dump::text(&asking).contains("Delete it?"));
+    assert!(lit(&asking, "again to leave"), "{}", dump::text(&asking));
 }
 
 #[test]

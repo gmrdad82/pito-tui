@@ -22,7 +22,7 @@ pub use pace::{FRAME, Pace, wait_until};
 pub use palette::Palette;
 pub use screen::{Cx, Job, Phase, Screen};
 pub use shell::{Flow, FooterLook, HeaderLook, Tui};
-pub use term::{Modes, Term};
+pub use term::{Modes, Term, restore};
 pub use wake::{Wake, Waker, listen};
 pub use words::Words;
 

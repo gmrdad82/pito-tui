@@ -4,6 +4,18 @@ Every release of pito-tui, newest first. Versions follow [Semantic
 Versioning](https://semver.org/) as Cargo reads it before 1.0: a change in the
 middle number may break an app, a change in the last one never does.
 
+## 0.1.1 (2026-10-07)
+
+- `pito_tui::restore()` gives the terminal back from any thread, once, for
+  an app whose panic hook ends the process: a panic on a worker thread no
+  longer leaves the terminal raw. The first call turns off what `Term`
+  turned on, after any frame being drawn, and later calls do nothing; the
+  shell draws nothing after it.
+- While the quit guard is armed and an input bar or a confirm is open, the
+  quit guard's word (`Words::again`) takes the bar's hint row in the accent,
+  since the footer draws no notice line under a bar; the bar's own hint
+  comes back when the guard lapses.
+
 ## 0.1.0 (2026-10-07)
 
 - The first release: `Tui`, the app shell, built from a name, a version and an

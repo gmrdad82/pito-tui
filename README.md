@@ -20,7 +20,7 @@ the app, in any language.
 ## Install
 
 ```toml
-pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v0.1.0" }
+pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v0.1.1" }
 ```
 
 That one line brings ratatui 0.30, crossterm 0.29, pito-header v0.2.0,
@@ -68,7 +68,11 @@ cargo run --example demo -- --dump 100x24 --keys "tab down enter"
   when the app asks), remembers each one it turned on, and turns exactly
   those off again on quit, on an error, and on a panic on the UI thread,
   before the panic message prints. A panic on a worker thread leaves the
-  running app alone. The app's own panic hook still runs after it.
+  running app alone. The app's own panic hook still runs after it, and a
+  hook that ends the process calls `pito_tui::restore()` first: any thread
+  may call it, the first call gives the terminal back and waits for a frame
+  being drawn to finish, later calls do nothing, and the shell draws nothing
+  after it.
 - **A palette from one colour, or a whole one.** `Palette::new(accent)`
   derives every style the header, footer, list and hourglass draw with;
   `Palette` also takes each token by hand (base, ink, muted, accent,
@@ -77,8 +81,10 @@ cargo run --example demo -- --dump 100x24 --keys "tab down enter"
 - **The footer, assembled:** the screen's hints and the app's, the notice
   line (the quit guard's, or what a screen said with `Cx::say`), the
   confirm bar, the input bar, and the app's name and version at the right
-  end of the row of keys (pito-footer's version slot). `?` hides the hints;
-  the header then shows the app's help word.
+  end of the row of keys (pito-footer's version slot). While an input bar
+  or a confirm is open, the quit guard's word takes the bar's hint row, in
+  the accent, and the bar's own hint comes back when the guard lapses. `?`
+  hides the hints; the header then shows the app's help word.
 - **The header, assembled:** the app's name on the title rule, the groups
   and screens as tabs, the screen's facts and status, and its breadcrumb
   kept in step: when a screen opens something (`crumb`), the sections row
@@ -190,6 +196,7 @@ Words::new()                                               // every word empty u
   .help .again .yes .no .choose .too_small .waiting (text)  .busy(Fn(usize) -> String)
 
 Term::enter(Modes) -> io::Result<Term>                     // restored on drop and on a UI-thread panic
+restore() -> bool                                          // any thread, once: true if it gave the terminal back
   terminal(), modes(), draw(FnOnce(&mut Frame)), mouse(bool)
 Modes::new()  .alternate(true) .paste(true) .mouse(false) .focus(false)
 Pace, FRAME (8.333 ms), wait_until(now, dirty, &Pace, deadlines)
@@ -248,7 +255,17 @@ shell deletes that glue; the app's screens and data stay as they are.
 - Its command line: the app parses its own flags and calls the shell's
   headless helpers.
 - Its crash reporting: a panic hook the app installs before `run` still
-  runs, after the shell has given the terminal back.
+  runs, after the shell has given the terminal back on a UI-thread panic. A
+  hook that ends the process calls `pito_tui::restore()` before it exits,
+  so a panic on a worker thread gives the terminal back too:
+
+  ```rust,no_run
+  std::panic::set_hook(Box::new(|info| {
+      pito_tui::restore();
+      eprintln!("{info}");
+      std::process::exit(101);
+  }));
+  ```
 
 ### What the shell takes over
 
@@ -299,7 +316,8 @@ shell deletes that glue; the app's screens and data stay as they are.
 7. **The loop goes.** Replace the app's `run` with `Tui::run()`; delete
    the pacer, the terminal setup and restore, the restoring panic hooks,
    the input thread and the key routing. The app's crash hook stays where
-   it is, installed before `run`.
+   it is, installed before `run`; if it ends the process, it calls
+   `pito_tui::restore()` before it exits.
 8. **Headless flags.** Wire `--dump WxH` to `dump::size` and `Tui::shot`,
    `--keys` to `dump::keys`, `--ansi` to `dump::ansi`, `--loading` to
    `shot(.., settle: false)` and `--bench N` to `Tui::bench`; `main` in

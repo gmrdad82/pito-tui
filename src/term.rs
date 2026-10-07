@@ -23,6 +23,8 @@ pub(crate) const PASTE: u8 = 4;
 pub(crate) const MOUSE: u8 = 8;
 pub(crate) const FOCUS: u8 = 16;
 
+static ON: AtomicU8 = AtomicU8::new(0);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Modes {
@@ -99,10 +101,11 @@ pub(crate) fn undo(on: &AtomicU8, out: &mut impl Write, raw: impl FnOnce()) -> u
     was
 }
 
-fn leave(on: &AtomicU8) {
-    undo(on, &mut io::stdout(), || {
+pub fn restore() -> bool {
+    let mut out = io::stdout().lock();
+    undo(&ON, &mut out, || {
         let _ = terminal::disable_raw_mode();
-    });
+    }) != 0
 }
 
 fn switch(on: &AtomicU8, flag: u8, out: &mut impl Write, enable: bool) -> io::Result<()> {
@@ -128,41 +131,42 @@ fn switch(on: &AtomicU8, flag: u8, out: &mut impl Write, enable: bool) -> io::Re
     Ok(())
 }
 
-fn turn_on(on: &AtomicU8, modes: Modes) -> io::Result<()> {
-    let mut out = io::stdout();
+fn turn_on(modes: Modes) -> io::Result<()> {
+    let mut out = io::stdout().lock();
     terminal::enable_raw_mode()?;
-    on.fetch_or(RAW, Ordering::SeqCst);
-    switch(on, ALTERNATE, &mut out, modes.alternate)?;
-    switch(on, PASTE, &mut out, modes.paste)?;
-    switch(on, MOUSE, &mut out, modes.mouse)?;
-    switch(on, FOCUS, &mut out, modes.focus)
+    ON.fetch_or(RAW, Ordering::SeqCst);
+    switch(&ON, ALTERNATE, &mut out, modes.alternate)?;
+    switch(&ON, PASTE, &mut out, modes.paste)?;
+    switch(&ON, MOUSE, &mut out, modes.mouse)?;
+    switch(&ON, FOCUS, &mut out, modes.focus)
+}
+
+fn live() -> bool {
+    ON.load(Ordering::SeqCst) & RAW != 0
 }
 
 struct Restore {
-    on: Arc<AtomicU8>,
     previous: Arc<Hook>,
 }
 
 impl Restore {
     fn install() -> Self {
-        let on = Arc::new(AtomicU8::new(0));
         let previous: Arc<Hook> = panic::take_hook().into();
         let chained = Arc::clone(&previous);
-        let shared = Arc::clone(&on);
         let ui = thread::current().id();
         panic::set_hook(Box::new(move |info| {
-            if restores(ui, thread::current().id(), shared.load(Ordering::SeqCst)) {
-                leave(&shared);
+            if restores(ui, thread::current().id(), ON.load(Ordering::SeqCst)) {
+                restore();
             }
             chained(info);
         }));
-        Restore { on, previous }
+        Restore { previous }
     }
 }
 
 impl Drop for Restore {
     fn drop(&mut self) {
-        leave(&self.on);
+        restore();
         if !thread::panicking() {
             let _ = panic::take_hook();
             let previous = Arc::clone(&self.previous);
@@ -174,19 +178,19 @@ impl Drop for Restore {
 pub struct Term {
     terminal: DefaultTerminal,
     modes: Modes,
-    restore: Restore,
+    _restore: Restore,
 }
 
 impl Term {
     pub fn enter(modes: Modes) -> io::Result<Term> {
         let restore = Restore::install();
-        turn_on(&restore.on, modes)?;
+        turn_on(modes)?;
         execute!(io::stdout(), Clear(ClearType::All))?;
         let terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
         Ok(Term {
             terminal,
             modes,
-            restore,
+            _restore: restore,
         })
     }
 
@@ -199,7 +203,10 @@ impl Term {
     }
 
     pub fn draw(&mut self, render: impl FnOnce(&mut Frame)) -> io::Result<()> {
-        let mut out = io::stdout();
+        let mut out = io::stdout().lock();
+        if !live() {
+            return Ok(());
+        }
         execute!(out, BeginSynchronizedUpdate)?;
         let drawn = self.terminal.draw(render).map(|_| ());
         execute!(out, EndSynchronizedUpdate)?;
@@ -208,7 +215,11 @@ impl Term {
 
     pub fn mouse(&mut self, on: bool) -> io::Result<()> {
         self.modes.mouse = on;
-        switch(&self.restore.on, MOUSE, &mut io::stdout(), on)
+        let mut out = io::stdout().lock();
+        if !live() {
+            return Ok(());
+        }
+        switch(&ON, MOUSE, &mut out, on)
     }
 }
 
@@ -245,5 +256,19 @@ mod tests {
         assert_eq!(undo(&on, &mut again, || raw += 1), 0);
         assert!(again.is_empty());
         assert_eq!(raw, 1);
+    }
+
+    #[test]
+    fn any_thread_gives_the_terminal_back_and_only_the_first_one_does() {
+        ON.store(RAW | PASTE, Ordering::SeqCst);
+        let threads: Vec<_> = (0..4).map(|_| thread::spawn(restore)).collect();
+        let gave = threads
+            .into_iter()
+            .filter_map(|thread| thread.join().ok())
+            .filter(|gave| *gave)
+            .count();
+        assert_eq!(gave, 1);
+        assert_eq!(ON.load(Ordering::SeqCst), 0);
+        assert!(!restore());
     }
 }

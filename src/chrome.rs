@@ -1,16 +1,17 @@
 use std::time::Duration;
 
-use pito_footer::{ConfirmBar, Footer, Notice, Words as Choice};
+use pito_footer::{ConfirmBar, Footer, Hint, Notice, Words as Choice};
 use pito_header::{Breadcrumb, Fact, Header};
 use ratatui::{
     Frame,
+    buffer::Buffer,
     layout::{Alignment, Rect},
-    style::Style,
+    style::{Modifier, Style},
     text::{Line, Text},
-    widgets::{Block, Paragraph, Wrap},
+    widgets::{Block, Paragraph, Widget, Wrap},
 };
 
-use crate::screen::Phase;
+use crate::screen::{Phase, Screen};
 use crate::shell::Tui;
 use crate::words::Words;
 
@@ -42,7 +43,68 @@ fn choice(words: &Words) -> Choice<'_> {
     }
 }
 
+fn light(buffer: &mut Buffer, plain: &Buffer, accent: Style) {
+    let lit = accent.add_modifier(Modifier::BOLD);
+    let area = plain.area;
+    for y in area.top()..area.bottom() {
+        let changed = |x: &u16| {
+            let symbol = buffer[(*x, y)].symbol();
+            symbol != " " && symbol != plain[(*x, y)].symbol()
+        };
+        let first = (area.left()..area.right()).find(changed);
+        let last = (area.left()..area.right()).rev().find(changed);
+        let (Some(first), Some(last)) = (first, last) else {
+            continue;
+        };
+        for x in first..=last {
+            let cell = &mut buffer[(x, y)];
+            cell.modifier = Modifier::empty();
+            cell.set_style(lit);
+        }
+    }
+}
+
 impl<E: Send + 'static> Tui<E> {
+    fn footer<'a>(
+        &'a self,
+        hints: &'a [Hint<'a>],
+        screen: &'a dyn Screen<E>,
+        again: Option<&'a str>,
+    ) -> Footer<'a> {
+        let notice = again.map(Notice::accent).or_else(|| {
+            self.out
+                .said
+                .as_ref()
+                .map(|(text, tone)| Notice::new(text, *tone))
+        });
+        let mut choice = choice(&self.words);
+        if let Some(text) = again {
+            choice = choice.hint(text);
+        }
+        let confirm = self.quit.bar(choice).or_else(|| {
+            self.out
+                .asking
+                .as_ref()
+                .map(|asking| ConfirmBar::new(&asking.question, &asking.confirm, choice))
+        });
+        let input = screen
+            .input()
+            .map(|bar| again.map_or(bar, |text| bar.hint(text)));
+        let mut footer = Footer::new(hints)
+            .styles(self.palette.footer())
+            .version(&self.name, &self.version)
+            .notice(notice)
+            .confirm(confirm)
+            .input(input);
+        if let Some(help) = &self.help {
+            footer = footer.help(help);
+        }
+        match self.footer_look {
+            Some(look) => look(footer),
+            None => footer,
+        }
+    }
+
     pub(crate) fn header<'a>(
         &'a self,
         facts: &'a [(String, Style)],
@@ -106,41 +168,20 @@ impl<E: Send + 'static> Tui<E> {
         }
         let mut hints = screen.hints();
         hints.extend(self.hints.iter().copied());
-        let notice = self
-            .quit
-            .notice()
-            .filter(|text| !text.is_empty())
-            .map(Notice::accent)
-            .or_else(|| {
-                self.out
-                    .said
-                    .as_ref()
-                    .map(|(text, tone)| Notice::new(text, *tone))
-            });
-        let choice = choice(&self.words);
-        let confirm = self.quit.bar(choice).or_else(|| {
-            self.out
-                .asking
-                .as_ref()
-                .map(|asking| ConfirmBar::new(&asking.question, &asking.confirm, choice))
-        });
-        let mut footer = Footer::new(&hints)
-            .styles(self.palette.footer())
-            .version(&self.name, &self.version)
-            .notice(notice)
-            .confirm(confirm)
-            .input(screen.input());
-        if let Some(help) = &self.help {
-            footer = footer.help(help);
-        }
-        if let Some(look) = self.footer_look {
-            footer = look(footer);
-        }
+        let again = self.quit.notice().filter(|text| !text.is_empty());
+        let footer = self.footer(&hints, screen.as_ref(), again);
         let height = footer
             .height(width)
             .min(area.bottom().saturating_sub(below));
         let bottom = area.bottom().saturating_sub(height);
-        frame.render_widget(footer, Rect::new(area.x + SIDE, bottom, width, height));
+        let place = Rect::new(area.x + SIDE, bottom, width, height);
+        frame.render_widget(footer, place);
+        if again.is_some() && (screen.input().is_some() || self.out.asking.is_some()) {
+            let mut plain = Buffer::empty(place);
+            self.footer(&hints, screen.as_ref(), Some(""))
+                .render(place, &mut plain);
+            light(frame.buffer_mut(), &plain, self.palette.accent);
+        }
         let content = Rect::new(
             area.x + PAD,
             below,
