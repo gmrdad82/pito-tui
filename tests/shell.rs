@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 use std::time::{Duration, Instant};
 
 use pito_tui::activity::{LINGER, State};
@@ -315,6 +316,33 @@ fn activities_sit_on_the_footer_and_open_over_any_screen_with_only_the_back_keys
     tui.key(press(KeyCode::Esc));
     assert_eq!(tui.current().map(|index| tui.names()[index]), Some("One"));
     assert!(tui.find::<Probe<2>>().unwrap().keys.is_empty());
+}
+
+struct Sim;
+
+impl Screen<u32> for Sim {
+    fn draw(&mut self, _frame: &mut Frame, _area: Rect, _palette: &Palette) {}
+
+    fn key(&mut self, key: KeyEvent, cx: &mut Cx<'_, u32>) {
+        match key.code {
+            KeyCode::Char('r') => cx.run(5, "sim", Command::new("true")),
+            KeyCode::Char('s') => cx.stop(5),
+            _ => {}
+        }
+    }
+}
+
+#[test]
+fn a_stop_shows_the_command_stopped_on_the_band_at_once() {
+    let mut tui = Tui::<u32>::new("probe", "1.2.3", Color::Blue)
+        .screen(Section::new("One"), Sim)
+        .activities(Activities::new(Section::new("Jobs")));
+    tui.start();
+    tui.key(press(KeyCode::Char('r')));
+    assert!(!dump::text(&tui.frame(60, 16)).contains("■ sim"));
+    tui.key(press(KeyCode::Char('s')));
+    let text = dump::text(&tui.frame(60, 16));
+    assert!(text.contains("■ sim"), "{text}");
 }
 
 #[test]

@@ -4,6 +4,22 @@ Every release of pito-tui, newest first. Versions follow [Semantic
 Versioning](https://semver.org/) as Cargo reads it before 1.0: a change in the
 middle number may break an app, a change in the last one never does.
 
+## 0.3.3 (2026-10-07)
+
+- `Cx::run_from(id, label, Command, command::Stream)` follows the
+  `--progress json` lines on stdout, stderr or both, for tools that print
+  them on stderr; every other line still goes into the activity's detail.
+  `Cx::run` stays on stdout.
+- `Cx::stop(id)` ends a running command: `SIGTERM` to its process group on
+  Unix, then `SIGKILL` after `command::GRACE` (2 s) if it is still running
+  (a kill at once elsewhere). The activity shows as stopped at once, keeps
+  its status and detail, and later lines no longer change it.
+- `activity::State::Stopped`, a fourth end state beside done and failed,
+  drawn with a faint `■`. A finished activity now ignores progress lines
+  that come after its end.
+- On Unix a command started with `Cx::run` runs in a process group of its
+  own, so a stop reaches what it started.
+
 ## 0.3.2 (2026-10-07)
 
 - The activity screen never takes a screen's index: it comes after every

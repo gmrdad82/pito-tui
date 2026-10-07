@@ -1,6 +1,6 @@
 [package]
 name = "pito-tui"
-version = "0.3.2"
+version = "0.3.3"
 authors = ["Gamer Dad"]
 edition = "2024"
 description = "The app shell for PITO terminal apps: one crate that brings the header, footer, hourglass and list, a palette from one accent colour or a whole set, a panic-safe terminal guard, a 120 fps paced loop, key routing with a double ctrl+c quit guard, an activity band and screen, and headless dumps"
@@ -21,3 +21,6 @@ ratatui = { version = "0.30", default-features = false, features = ["crossterm_0
 serde_json = "1"
 unicode-segmentation = "1"
 unicode-width = "0.2"
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1", features = ["process"] }

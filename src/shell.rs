@@ -14,7 +14,7 @@ use pito_list::Step;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 
-use crate::activity::{Activities, Board, Change};
+use crate::activity::{Activities, Activity, Board, Change};
 use crate::command;
 use crate::copy;
 use crate::pace::{Pace, wait_until};
@@ -86,6 +86,7 @@ pub struct Tui<E> {
     pub(crate) open: Option<usize>,
     pub(crate) board: Option<usize>,
     running: Arc<AtomicUsize>,
+    commands: Vec<command::Handle>,
     pub(crate) help: Option<Help>,
     pub(crate) quit: QuitGuard,
     mode: Mode,
@@ -130,6 +131,7 @@ impl<E: Send + 'static> Tui<E> {
             open: None,
             board: None,
             running: Arc::new(AtomicUsize::new(0)),
+            commands: Vec::new(),
             help: Some(Help::new(true)),
             mode: Mode::Ask,
             window: WINDOW,
@@ -682,6 +684,13 @@ impl<E: Send + 'static> Tui<E> {
                 board.change(change, moment);
             }
         }
+        for id in std::mem::take(&mut self.out.stops) {
+            for activity in self.stop(id) {
+                if let Some(board) = self.board_mut() {
+                    board.change(Change::Put(activity), moment);
+                }
+            }
+        }
         if let Some(screen) = self.out.go.take() {
             self.go(screen);
         }
@@ -689,6 +698,26 @@ impl<E: Send + 'static> Tui<E> {
             return Flow::Quit;
         }
         Flow::Stay
+    }
+
+    fn stop(&mut self, id: u64) -> Vec<Activity> {
+        let moment = self.moment;
+        let mut stopped: Vec<Activity> = self
+            .commands
+            .iter()
+            .filter(|handle| handle.id == id)
+            .filter_map(|handle| handle.stop(moment))
+            .collect();
+        let (queued, runs) = std::mem::take(&mut self.out.runs)
+            .into_iter()
+            .partition(|run| run.activity.id == id);
+        self.out.runs = runs;
+        for run in queued {
+            let mut activity = run.activity;
+            command::halt(&mut activity, moment);
+            stopped.push(activity);
+        }
+        stopped
     }
 
     pub(crate) fn reads(&mut self) -> Vec<(usize, u64, Job<E>)> {
@@ -720,8 +749,11 @@ impl<E: Send + 'static> Tui<E> {
                 let _ = sender.send(Wake::Event(screen, job()));
             });
         }
+        self.commands.retain(|handle| !handle.over());
         for run in self.out.runs.drain(..) {
-            command::spawn(run, self.out.sender.clone(), Arc::clone(&self.running));
+            let sender = self.out.sender.clone();
+            let handle = command::spawn(run, sender, Arc::clone(&self.running));
+            self.commands.extend(handle);
         }
     }
 

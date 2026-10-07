@@ -37,11 +37,12 @@ pub enum State {
     Waiting,
     Done,
     Failed,
+    Stopped,
 }
 
 impl State {
     pub fn finished(self) -> bool {
-        matches!(self, State::Done | State::Failed)
+        matches!(self, State::Done | State::Failed | State::Stopped)
     }
 }
 
@@ -271,6 +272,7 @@ fn mark(activity: &Activity, now: Instant, palette: &Palette) -> (&'static str, 
         State::Waiting => ("⧗", palette.muted),
         State::Done => ("✓", palette.good),
         State::Failed => ("✗", palette.bad),
+        State::Stopped => ("■", palette.muted),
     }
 }
 

@@ -9,7 +9,7 @@ use pito_footer::{Confirm, Hint, InputBar, Notice, Tone};
 use ratatui::{Frame, layout::Rect, style::Style, text::Line};
 
 use crate::activity::{Activity, Change};
-use crate::command::Run;
+use crate::command::{Run, Stream};
 use crate::copy::COPY_MAX;
 use crate::palette::Palette;
 use crate::pick::Pick;
@@ -144,6 +144,7 @@ pub(crate) struct Outbox<E> {
     pub(crate) go: Option<usize>,
     pub(crate) changes: Vec<Change>,
     pub(crate) runs: Vec<Run>,
+    pub(crate) stops: Vec<u64>,
     pub(crate) quit: bool,
     pub(crate) reload: Vec<usize>,
     pub(crate) changed: Vec<String>,
@@ -164,6 +165,7 @@ impl<E> Outbox<E> {
             go: None,
             changes: Vec::new(),
             runs: Vec::new(),
+            stops: Vec::new(),
             quit: false,
             reload: Vec::new(),
             changed: Vec::new(),
@@ -247,9 +249,27 @@ impl<E: Send + 'static> Cx<'_, E> {
     }
 
     pub fn run(&mut self, id: u64, label: impl Into<String>, command: Command) {
+        self.run_from(id, label, command, Stream::Stdout);
+    }
+
+    pub fn run_from(
+        &mut self,
+        id: u64,
+        label: impl Into<String>,
+        command: Command,
+        progress: Stream,
+    ) {
         let activity = Activity::new(id, label, self.now);
         self.out.changes.push(Change::Put(activity.clone()));
-        self.out.runs.push(Run { activity, command });
+        self.out.runs.push(Run {
+            activity,
+            command,
+            progress,
+        });
+    }
+
+    pub fn stop(&mut self, id: u64) {
+        self.out.stops.push(id);
     }
 
     pub fn forget(&mut self, id: u64) {

@@ -23,7 +23,7 @@ the app, in any language.
 ## Install
 
 ```toml
-pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v0.3.2" }
+pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v0.3.3" }
 ```
 
 That one line brings ratatui 0.30, crossterm 0.29, pito-header v0.2.0,
@@ -112,7 +112,7 @@ cargo run --example demo -- --dump 100x24 --keys "tab down enter"
   keeps it (`keep_facts`), on the same row.
 - **Activities.** The app hands the shell what it has running (`Cx::activity`,
   `Cx::activities`, `Cx::forget`): each with a label, a state (running,
-  waiting, done, failed), a progress fraction or none (a spinner then), when
+  waiting, done, failed, stopped), a progress fraction or none (a spinner then), when
   it started and ended, a short status line and the detail lines it opens
   into (a log, its steps). The shell draws them as a band flush on the
   footer, the newest first, taking up to half the room, with a finished one
@@ -128,11 +128,18 @@ cargo run --example demo -- --dump 100x24 --keys "tab down enter"
   tools print (version 1: one object a line with `state` start, progress,
   done, fail or end, and `stage`, `fraction`, `msg` and, on the end line,
   `ok`; unknown fields are ignored), so an app that drives its own CLI shows
-  that command's progress live with no glue. Every line it prints, and its
-  stderr, go into the activity's detail; the activity ends on the `end`
-  line, or with the command's exit status. `command::read` parses one line.
+  that command's progress live with no glue. The lines come from stdout;
+  `Cx::run_from(id, label, Command, command::Stream::Stderr)` follows them
+  on stderr instead, and `Stream::Both` on both. Every line on either stream
+  goes into the activity's detail (a progress line as a short note); the
+  activity ends on the `end` line, or with the command's exit status.
+  `Cx::stop(id)` ends a running command: a polite signal (`SIGTERM` to the
+  process group the command runs in on Unix, so whatever it started ends
+  too), then a kill after `command::GRACE` (2 s) if it is still running. The
+  activity shows as stopped at once and keeps its status and detail; lines
+  printed after that no longer change it. `command::read` parses one line.
   While a command runs it counts as busy for the quit guard. Headless runs
-  never spawn a command.
+  never spawn a command, and a stop there marks a queued one stopped.
 - **A pick-one prompt.** `Cx::pick(Pick::new(title, options))` puts a small
   list over the screen: arrows (or `j`, `k`, `g`, `G`) move, `enter`
   chooses, `esc` or `q` cancels, every key goes to it while it is open, its
@@ -280,16 +287,18 @@ Cx<'_, E>: screen(), now(), detach(FnOnce() -> E), waker() -> Waker<E>,
   copy(text) -> bool, go(screen), quit(), reload(), changed(source),
   palette(Palette), words(Words), hints(Vec<Hint<'static>>),
   activity(Activity), activities([Activity]), forget(id), band(bool),
-  run(id, label, process::Command), pick(Pick)
+  run(id, label, process::Command), run_from(id, label, Command, command::Stream), stop(id),
+  pick(Pick)
 
 Activity::new(id: u64, label, started: Instant)            // every field pub, and a builder each
   .state(activity::State) .progress(f64 or None) .estimate(bool) .ended(Instant) .status(text)
   .detail([Line]) .shared(log::Lines)
-pub enum activity::State { Running, Waiting, Done, Failed }  // activity::LINGER: 3 s once finished
+pub enum activity::State { Running, Waiting, Done, Failed, Stopped }  // activity::LINGER: 3 s once finished
 Activities::new(header::Section)                           // the activity screen's name and words
   .keys(&[footer::Key]) .band(bool) .hints([Hint]) .detail_hints([Hint]) .log(Log) .empty(text)
   .more(Fn(usize) -> String) .elapsed(Fn(Duration) -> String) .facts(Fn(&[Activity]) -> Vec<(String, Style)>)
 command::read(line) -> Option<Progress { state, stage, fraction, message, ok }>   // one --progress json line, v 1
+pub enum command::Stream { Stdout, Stderr, Both }          // where Cx::run_from follows the lines; command::GRACE: 2 s
 
 Pick::new(title, [option]) | Pick::rows(title, [list::Row])  .selected(index) .hints([Hint]) .keys(list::Keys) .cancel_keys(..)
 Log::new(label) .placeholder(..) .hint(..) .keys(list::Keys) .search_keys(..) .hit_keys(next, previous) .copy_keys(page, all)
@@ -345,7 +354,7 @@ bracketed paste only.
 
 `Phase`, `Turn`, `Wake`, `Words`, `Palette`, `Modes`, `Bench`, `Activity`,
 `Activities`, `activity::State`, `Pick`, `log::Turn`, `clock::Units`,
-`command::Progress`, `capture::Walk`, `capture::Script`, `capture::Look` and
+`command::Progress`, `command::Stream`, `capture::Walk`, `capture::Script`, `capture::Look` and
 `capture::Difference` are
 `#[non_exhaustive]`: match the enums with a wildcard arm and build the structs
 with `new()` and their builders, so a later release can add to them in a minor
@@ -407,7 +416,7 @@ shell deletes that glue; the app's screens and data stay as they are.
 | Header assembly: title, help word, a lead beside it, a status fitted to the room, facts, a breadcrumb kept in step | `Screen::lead`, `status_parts`, `facts`, `crumb`, `selected` and `back`, `keep_facts` |
 | Footer assembly: hints, notice, legend, confirm, input, version, height | `Screen::hints`, `input`, `notice`, `legend`, `Cx::say`, `Words::leave`; the version slot is wired |
 | A panel of running work above the footer and a screen listing it, with a detail view | `Activities`, fed by `Cx::activity`, `activities` and `forget` |
-| Code that runs the app's own CLI and parses its `--progress json` lines | `Cx::run(id, label, Command)`, and `command::read` for a single line |
+| Code that runs the app's own CLI, parses its `--progress json` lines and stops it | `Cx::run(id, label, Command)` (`Cx::run_from` when the lines come on stderr), `Cx::stop(id)`, and `command::read` for a single line |
 | A picker drawn over a screen, its keys and its answer | `Cx::pick(Pick)` and `Screen::picked` |
 | A long-log or trace pane: scroll, page, ends, find, copy, a cache of built rows | `Log`; a long list takes pito-list's `Shared` |
 | Age and duration text, Braille bars, percent, spinners, label redraw timing | `clock`, `progress`, `Activity::estimate` |
@@ -485,7 +494,8 @@ shell deletes that glue; the app's screens and data stay as they are.
 11. **What the app had built in.** Its own pickers become `Cx::pick`, its
     log and trace panes a `Log` (a long list a pito-list `Shared`), its
     age and duration text `clock`, its bars and spinners `progress`, and the
-    code that ran its own CLI and read the progress lines `Cx::run`.
+    code that ran its own CLI and read the progress lines `Cx::run` (or
+    `Cx::run_from` for lines on stderr), with `Cx::stop` for its stop.
 
 ### Proving the switch
 
