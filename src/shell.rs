@@ -8,15 +8,22 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crossterm::event::{Event, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
-use pito_footer::{Answer, Footer, Guard, Help, Hint, Key, Mode, QuitGuard, WINDOW, Wording};
+use pito_footer::{
+    Answer, Footer, Guard, Help, Hint, Key, Mode, QuitGuard, Tone as Said, WINDOW, Wording,
+};
 use pito_header::{Action, Group, Header, Nav, NavKeys, Section, Step as Move};
 use pito_list::Step;
 use ratatui::layout::Rect;
-use ratatui::style::Color;
+use ratatui::style::{Color, Style};
 
 use crate::activity::{Activities, Activity, Board, Change, State};
 use crate::command::{self, Exit, Heard, Report, Run};
 use crate::copy;
+use crate::head::{Focus, Head, Numbers, Row};
+use crate::label::{Label, Span};
+use crate::layer::{Event as Layered, Outcome, Toast};
+use crate::layout::Layout;
+use crate::model::{Item, Model};
 use crate::pace::{Pace, wait_until};
 use crate::palette::Palette;
 use crate::screen::{Band, Cx, Job, Outbox, Phase, Screen};
@@ -29,7 +36,7 @@ const QUIT: &[Key] = &[Key::Ctrl('c')];
 const STOP: &[Key] = &[Key::Esc];
 
 pub type HeaderLook = for<'a> fn(Header<'a>) -> Header<'a>;
-pub type FooterLook = for<'a> fn(Footer<'a>) -> Footer<'a>;
+pub type FooterLook = for<'a> fn(Footer<'a>, u16) -> Footer<'a>;
 
 type KeyHook<E> = Box<dyn FnMut(KeyEvent, &mut Cx<'_, E>) -> bool>;
 type DrawHook = Box<dyn FnMut(Duration)>;
@@ -43,6 +50,8 @@ pub enum Flow {
 pub(crate) enum Role {
     Tab,
     Overlay(Nav, &'static [Key]),
+    Gate,
+    App,
 }
 
 pub(crate) struct Slot<E> {
@@ -53,6 +62,8 @@ pub(crate) struct Slot<E> {
     pub(crate) generation: u64,
     pub(crate) reading: Option<u64>,
     pub(crate) since: Option<Instant>,
+    pub(crate) glass: Option<Instant>,
+    pub(crate) label: String,
     pub(crate) ticked: Option<Instant>,
 }
 
@@ -66,26 +77,42 @@ impl<E> Slot<E> {
             generation: 0,
             reading: None,
             since: None,
+            glass: None,
+            label: String::new(),
             ticked: None,
         }
     }
 }
 
+enum Digit {
+    Nav,
+    Pass,
+    Done(Flow),
+}
+
 pub struct Tui<E> {
     pub(crate) name: Cow<'static, str>,
     pub(crate) version: Cow<'static, str>,
+    pub(crate) title: Vec<Span>,
     pub(crate) palette: Palette,
+    pub(crate) drawn: Palette,
+    mono: bool,
+    roles: Vec<(Cow<'static, str>, Style)>,
+    role: Option<Cow<'static, str>>,
     pub(crate) words: Words,
     pub(crate) hints: Vec<Hint<'static>>,
     pub(crate) min: (u16, u16),
-    groups: Vec<Group>,
-    pub(crate) nav: Nav,
-    nav_keys: NavKeys,
+    pub(crate) model: Model,
+    pub(crate) head: Option<Head>,
+    pub(crate) layout: Layout,
+    pub(crate) focus: Focus,
+    focus_keys: (&'static [Key], &'static [Key]),
     pub(crate) screens: Vec<Slot<E>>,
-    tabs: Vec<usize>,
     pub(crate) open: Option<usize>,
     pub(crate) board: Option<usize>,
     pub(crate) band: Option<Box<dyn Band>>,
+    pub(crate) top_band: Option<Box<dyn Band>>,
+    pub(crate) gated: bool,
     pressed: Option<KeyEvent>,
     through: &'static [Key],
     running: Arc<AtomicUsize>,
@@ -96,6 +123,9 @@ pub struct Tui<E> {
     window: Duration,
     triggers: &'static [Key],
     stop: &'static [Key],
+    sticky: bool,
+    pub(crate) quit_tone: Said,
+    pub(crate) quit_hints: bool,
     eager: bool,
     pub(crate) keep_facts: bool,
     pub(crate) lit_again: bool,
@@ -109,6 +139,12 @@ pub struct Tui<E> {
     after: Option<DrawHook>,
     pub(crate) content: Rect,
     pub(crate) top: Rect,
+    pub(crate) rows: Vec<(Row, Rect)>,
+    pub(crate) toasts: Vec<(Instant, Toast)>,
+    pub(crate) taken: Option<Instant>,
+    pub(crate) delay: Duration,
+    pub(crate) least: Duration,
+    pub(crate) version_fit: bool,
 }
 
 impl<E: Send + 'static> Tui<E> {
@@ -119,22 +155,32 @@ impl<E: Send + 'static> Tui<E> {
     ) -> Self {
         let (sender, inbox) = mpsc::channel();
         let words = Words::new();
+        let name = name.into();
+        let palette = Palette::new(accent);
         let mut tui = Tui {
-            name: name.into(),
+            title: vec![(name.clone(), Style::new())],
+            name,
             version: version.into(),
-            palette: Palette::new(accent),
+            palette,
+            drawn: palette,
+            mono: false,
+            roles: Vec::new(),
+            role: None,
             quit: QuitGuard::new(Wording::new(words.again.clone())),
             words,
             hints: Vec::new(),
             min: (40, 12),
-            groups: Vec::new(),
-            nav: Nav::new(Vec::new()),
-            nav_keys: NavKeys::HEY,
+            model: Model::new(),
+            head: None,
+            layout: Layout::new(),
+            focus: Focus::Content,
+            focus_keys: (&[], &[]),
             screens: Vec::new(),
-            tabs: Vec::new(),
             open: None,
             board: None,
             band: None,
+            top_band: None,
+            gated: false,
             pressed: None,
             through: &[],
             running: Arc::new(AtomicUsize::new(0)),
@@ -144,6 +190,9 @@ impl<E: Send + 'static> Tui<E> {
             window: WINDOW,
             triggers: QUIT,
             stop: STOP,
+            sticky: false,
+            quit_tone: Said::Accent,
+            quit_hints: true,
             eager: false,
             keep_facts: false,
             lit_again: true,
@@ -157,13 +206,19 @@ impl<E: Send + 'static> Tui<E> {
             after: None,
             content: Rect::default(),
             top: Rect::default(),
+            rows: Vec::new(),
+            toasts: Vec::new(),
+            taken: None,
+            delay: Duration::ZERO,
+            least: Duration::ZERO,
+            version_fit: false,
         };
         tui.rearm();
         tui
     }
 
     pub fn palette(mut self, palette: Palette) -> Self {
-        self.palette = palette;
+        self.set_palette(palette);
         self
     }
 
@@ -182,23 +237,69 @@ impl<E: Send + 'static> Tui<E> {
         self
     }
 
-    pub fn group(mut self, group: Group) -> Self {
-        self.groups.push(group);
-        self.renav();
+    pub fn title(mut self, text: impl Into<Cow<'static, str>>) -> Self {
+        self.title = vec![(text.into(), Style::new())];
         self
     }
 
-    pub fn screen(mut self, section: Section, screen: impl Screen<E>) -> Self {
-        let group = self.groups.pop().unwrap_or_else(|| Group::new(""));
-        self.groups.push(group.section(section));
-        let index = self.tabs.len();
-        self.tabs.push(index);
+    pub fn title_spans<T: Into<Cow<'static, str>>>(
+        mut self,
+        spans: impl IntoIterator<Item = (T, Style)>,
+    ) -> Self {
+        self.title = spans
+            .into_iter()
+            .map(|(text, style)| (text.into(), style))
+            .collect();
+        self
+    }
+
+    pub fn layout(mut self, layout: Layout) -> Self {
+        self.layout = layout;
+        self
+    }
+
+    pub fn head(mut self, head: Head) -> Self {
+        self.head = Some(head);
+        self
+    }
+
+    pub fn role(mut self, name: impl Into<Cow<'static, str>>, style: Style) -> Self {
+        let name = name.into();
+        self.roles.retain(|(kept, _)| *kept != name);
+        self.roles.push((name, style));
+        self.repaint();
+        self
+    }
+
+    pub fn monochrome(mut self, mono: bool) -> Self {
+        self.mono = mono;
+        self.repaint();
+        self
+    }
+
+    pub fn group(mut self, label: impl Into<Label>) -> Self {
+        self.model.add_group(label.into());
+        self
+    }
+
+    pub fn group_keys(mut self, keys: &'static [Key]) -> Self {
+        self.model.group_keys(keys);
+        self
+    }
+
+    pub fn screen(mut self, label: impl Into<Label>, screen: impl Screen<E>) -> Self {
+        let index = self.model.tabs.len();
         self.screens
             .insert(index, Slot::new(Box::new(screen), Role::Tab));
         if let Some(board) = self.board.as_mut() {
             *board += 1;
         }
-        self.renav();
+        self.model.add_tab(label.into(), index);
+        self
+    }
+
+    pub fn show(mut self, shown: impl Fn(Item) -> bool) -> Self {
+        self.model.show(&shown);
         self
     }
 
@@ -211,6 +312,31 @@ impl<E: Send + 'static> Tui<E> {
         let role = Role::Overlay(lone(section), keys);
         self.screens.push(Slot::new(Box::new(screen), role));
         self
+    }
+
+    pub fn app(mut self, screen: impl Screen<E>) -> Self {
+        self.screens.retain(|slot| !matches!(slot.role, Role::App));
+        self.reboard();
+        self.screens.push(Slot::new(Box::new(screen), Role::App));
+        self
+    }
+
+    pub fn gate(mut self, screen: impl Screen<E>, shut: bool) -> Self {
+        self.screens.retain(|slot| !matches!(slot.role, Role::Gate));
+        self.reboard();
+        self.screens.push(Slot::new(Box::new(screen), Role::Gate));
+        self.gated = shut;
+        self
+    }
+
+    fn reboard(&mut self) {
+        let board = self.screens.iter().position(|slot| {
+            let any: &dyn Any = slot.screen.as_ref();
+            any.is::<Board>()
+        });
+        if self.board.is_some() {
+            self.board = board;
+        }
     }
 
     pub fn activities(mut self, words: Activities) -> Self {
@@ -236,6 +362,11 @@ impl<E: Send + 'static> Tui<E> {
         self
     }
 
+    pub fn top_band(mut self, band: impl Band + 'static) -> Self {
+        self.top_band = Some(Box::new(band));
+        self
+    }
+
     pub(crate) fn board(&self) -> Option<&Board> {
         let slot = self.screens.get(self.board?)?;
         let any: &dyn Any = slot.screen.as_ref();
@@ -249,8 +380,12 @@ impl<E: Send + 'static> Tui<E> {
     }
 
     pub fn nav_keys(mut self, keys: NavKeys) -> Self {
-        self.nav_keys = keys;
-        self.renav();
+        self.model.set_keys(keys);
+        self
+    }
+
+    pub fn focus_keys(mut self, next: &'static [Key], previous: &'static [Key]) -> Self {
+        self.focus_keys = (next, previous);
         self
     }
 
@@ -274,6 +409,21 @@ impl<E: Send + 'static> Tui<E> {
     pub fn quit_keys(mut self, keys: &'static [Key]) -> Self {
         self.triggers = keys;
         self.rearm();
+        self
+    }
+
+    pub fn quit_sticky(mut self, sticky: bool) -> Self {
+        self.sticky = sticky;
+        self
+    }
+
+    pub fn quit_tone(mut self, tone: Said) -> Self {
+        self.quit_tone = tone;
+        self
+    }
+
+    pub fn quit_hints(mut self, shown: bool) -> Self {
+        self.quit_hints = shown;
         self
     }
 
@@ -302,6 +452,17 @@ impl<E: Send + 'static> Tui<E> {
         self
     }
 
+    pub fn hourglass_timing(mut self, delay: Duration, least: Duration) -> Self {
+        self.delay = delay;
+        self.least = least;
+        self
+    }
+
+    pub fn version_fit(mut self, fit: bool) -> Self {
+        self.version_fit = fit;
+        self
+    }
+
     pub fn modes(mut self, modes: Modes) -> Self {
         self.modes = modes;
         self
@@ -327,10 +488,6 @@ impl<E: Send + 'static> Tui<E> {
         self
     }
 
-    fn renav(&mut self) {
-        self.nav = Nav::new(self.groups.clone()).keys(self.nav_keys);
-    }
-
     fn rearm(&mut self) {
         self.quit = QuitGuard::new(Wording::new(self.words.again.clone()))
             .mode(self.mode)
@@ -338,8 +495,23 @@ impl<E: Send + 'static> Tui<E> {
             .triggers(self.triggers);
     }
 
+    fn repaint(&mut self) {
+        let mut palette = self.palette;
+        let role = self
+            .role
+            .as_ref()
+            .and_then(|name| self.roles.iter().find(|(kept, _)| kept == name));
+        if let Some((_, style)) = role {
+            palette.title = *style;
+            palette.glass = *style;
+            palette.shimmer = *style;
+        }
+        self.drawn = if self.mono { palette.mono() } else { palette };
+    }
+
     pub fn set_palette(&mut self, palette: Palette) {
         self.palette = palette;
+        self.repaint();
     }
 
     pub fn set_words(&mut self, words: Words) {
@@ -347,30 +519,56 @@ impl<E: Send + 'static> Tui<E> {
         self.words = words;
     }
 
+    pub fn set_layout(&mut self, layout: Layout) {
+        self.layout = layout;
+    }
+
     pub fn current_palette(&self) -> &Palette {
         &self.palette
     }
 
+    pub(crate) fn slot_of(&self, wanted: fn(&Role) -> bool) -> Option<usize> {
+        self.screens.iter().position(|slot| wanted(&slot.role))
+    }
+
+    pub(crate) fn gate_slot(&self) -> Option<usize> {
+        self.slot_of(|role| matches!(role, Role::Gate))
+    }
+
+    pub(crate) fn app_slot(&self) -> Option<usize> {
+        self.slot_of(|role| matches!(role, Role::App))
+    }
+
     pub fn current(&self) -> Option<usize> {
-        self.open.or_else(|| {
-            let number = self.nav.place().number.checked_sub(1)?;
-            self.tabs.get(number).copied()
-        })
+        if self.gated
+            && let Some(gate) = self.gate_slot()
+        {
+            return Some(gate);
+        }
+        self.open.or_else(|| self.model.current_screen())
     }
 
     pub fn names(&self) -> Vec<&str> {
-        let mut tabs = self
-            .nav
-            .groups()
-            .iter()
-            .flat_map(|group| group.sections().iter().map(Section::name));
         self.screens
             .iter()
-            .map(|slot| match &slot.role {
-                Role::Tab => tabs.next().unwrap_or_default(),
+            .enumerate()
+            .map(|(index, slot)| match &slot.role {
+                Role::Tab => self
+                    .model
+                    .tabs
+                    .iter()
+                    .find(|tab| tab.screen == index)
+                    .map_or("", |tab| tab.label.text()),
                 Role::Overlay(nav, _) => nav.section().map_or("", Section::name),
+                Role::Gate | Role::App => "",
             })
             .collect()
+    }
+
+    pub(crate) fn walkable(&self, index: usize) -> bool {
+        self.screens
+            .get(index)
+            .is_some_and(|slot| matches!(slot.role, Role::Tab | Role::Overlay(..)))
     }
 
     pub fn find<T: Screen<E>>(&self) -> Option<&T> {
@@ -392,25 +590,27 @@ impl<E: Send + 'static> Tui<E> {
     }
 
     pub fn waker(&self, screen: usize) -> Waker<E> {
-        Waker::new(self.out.sender.clone(), screen)
+        Waker::new(self.out.sender.clone(), screen).epoch(Arc::clone(&self.out.epoch))
     }
 
     pub fn go(&mut self, screen: usize) -> bool {
         match self.screens.get(screen).map(|slot| &slot.role) {
             Some(Role::Tab) => {
-                let Some(number) = self.tabs.iter().position(|tab| *tab == screen) else {
-                    return false;
-                };
-                if self.nav.go(number + 1).is_none() {
+                if !self.model.go_screen(screen) {
                     return false;
                 }
                 self.open = None;
             }
             Some(Role::Overlay(..)) => self.open = Some(screen),
-            None => return false,
+            Some(Role::Gate | Role::App) | None => return false,
         }
+        self.focus = Focus::Content;
         self.enter();
         true
+    }
+
+    pub(crate) fn reveal(&mut self) {
+        self.gated = false;
     }
 
     pub fn changed(&mut self, source: &str) {
@@ -422,6 +622,9 @@ impl<E: Send + 'static> Tui<E> {
     }
 
     pub fn start(&mut self) {
+        if let Some(app) = self.app_slot() {
+            self.begin(app);
+        }
         if let Some(index) = self.current() {
             self.begin(index);
         }
@@ -449,21 +652,49 @@ impl<E: Send + 'static> Tui<E> {
             .position(|slot| matches!(&slot.role, Role::Overlay(_, keys) if keys.contains(&key)))
     }
 
+    pub(crate) fn typing_now(&self) -> bool {
+        if let Some(top) = self.out.modals.last() {
+            return top.modal.value(top.modal.focused()).is_some();
+        }
+        self.current()
+            .and_then(|index| self.screens.get(index))
+            .is_some_and(|slot| slot.screen.typing() || matches!(slot.role, Role::Gate))
+    }
+
     fn route(&mut self, key: KeyEvent) -> Flow {
         let busy = self.busy();
-        match self.quit.key(key.into(), self.moment, busy > 0) {
-            Guard::Quit => return Flow::Quit,
-            Guard::Held => {
-                self.word_quit();
-                return Flow::Stay;
+        let pressed: Key = key.into();
+        let sticky = self.sticky
+            && self.quit.armed()
+            && self.quit.asking().is_none()
+            && !self.triggers.contains(&pressed);
+        if !sticky {
+            match self.quit.key(pressed, self.moment, busy > 0) {
+                Guard::Quit => return Flow::Quit,
+                Guard::Held => {
+                    self.word_quit();
+                    return Flow::Stay;
+                }
+                _ => {}
             }
-            _ => {}
         }
         self.out.said = None;
         self.follow();
-        let through = self.through.contains(&key.into());
+        if let Some((owner, takeover)) = self.out.takeover.as_ref() {
+            if takeover.cancel.contains(&pressed) {
+                let (owner, id) = (*owner, takeover.id);
+                self.out.takeover = None;
+                self.call(owner, |screen, cx| screen.layer(id, Layered::Closed, cx));
+                return self.apply();
+            }
+            return Flow::Stay;
+        }
+        if !self.out.modals.is_empty() {
+            return self.modal_key(key);
+        }
+        let through = self.through.contains(&pressed);
         if let Some(asking) = self.out.asking.as_mut().filter(|_| !through) {
-            if let Some(answer) = asking.confirm.key(key.into()) {
+            if let Some(answer) = asking.confirm.key(pressed) {
                 let screen = asking.screen;
                 self.out.asking = None;
                 let yes = matches!(answer, Answer::Yes);
@@ -472,7 +703,7 @@ impl<E: Send + 'static> Tui<E> {
             return self.apply();
         }
         if let Some(picking) = self.out.picking.as_mut() {
-            let choice = if picking.pick.cancel.contains(&key.into()) {
+            let choice = if picking.pick.cancel.contains(&pressed) {
                 Some(None)
             } else if let Step::Open(index) = picking.pick.rows.key(key.into()) {
                 Some(Some(index))
@@ -486,20 +717,32 @@ impl<E: Send + 'static> Tui<E> {
             }
             return self.apply();
         }
+        if let Some(app) = self.app_slot()
+            && self.call(app, |screen, cx| screen.claim(key, cx)) == Some(true)
+        {
+            return self.apply();
+        }
         let Some(index) = self.current() else {
             return Flow::Stay;
         };
+        if self.gated {
+            self.call(index, |screen, cx| screen.key(key, cx));
+            return self.apply();
+        }
         if self.screens[index].screen.typing() {
             self.call(index, |screen, cx| screen.key(key, cx));
             return self.apply();
         }
-        if self.help.as_mut().is_some_and(|help| help.key(key.into())) {
+        if self.help.as_mut().is_some_and(|help| help.key(pressed)) {
             return Flow::Stay;
         }
         if through && self.out.asking.is_some() {
             return self.press(index, key);
         }
-        if let Some(overlay) = self.overlay_for(key.into()) {
+        if let Some(flow) = self.focused(pressed) {
+            return flow;
+        }
+        if let Some(overlay) = self.overlay_for(pressed) {
             if self.open == Some(overlay) {
                 self.open = None;
             } else {
@@ -508,29 +751,191 @@ impl<E: Send + 'static> Tui<E> {
             return self.apply();
         }
         if let Some(open) = self.open {
-            if self.nav_keys.back.contains(&key.into())
-                && !(self.loading(open) && self.stop.contains(&key.into()))
+            if self.model.keys.back.contains(&key.into())
+                && !(self.loading(open) && self.stop.contains(&pressed))
             {
                 self.leave(open);
                 return self.apply();
             }
-        } else if let Some(action) = self.nav.action(key.into()) {
-            self.navigate(action);
-            return self.apply();
+        } else {
+            if let Some(heading) = self.model.heading_for(pressed) {
+                if self.model.go_heading(heading) {
+                    self.enter();
+                }
+                return self.apply();
+            }
+            match self.digit(pressed) {
+                Digit::Done(flow) => return flow,
+                Digit::Pass => return self.press(index, key),
+                Digit::Nav => {}
+            }
+            if let Some(action) = self.model.nav.action(key.into()) {
+                self.navigate(action);
+                return self.apply();
+            }
         }
-        if self.loading(index) && self.stop.contains(&key.into()) {
+        if self.loading(index) && self.stop.contains(&pressed) {
             self.cancel(index);
             return Flow::Stay;
         }
         self.press(index, key)
     }
 
+    fn digit(&mut self, key: Key) -> Digit {
+        let Some(head) = self.head.as_ref() else {
+            return Digit::Nav;
+        };
+        let Key::Char(digit @ '0'..='9') = key else {
+            return Digit::Nav;
+        };
+        if !self.model.keys.digits {
+            return Digit::Nav;
+        }
+        let number = if digit == '0' {
+            10
+        } else {
+            digit as usize - '0' as usize
+        };
+        let lone = head.lone;
+        let swallow = self.model.keys.swallow_digits;
+        let missing = if swallow {
+            Digit::Done(Flow::Stay)
+        } else {
+            Digit::Pass
+        };
+        match head.numbers {
+            Numbers::Off => Digit::Pass,
+            Numbers::Across => {
+                let Some(tab) = self.model.visible.get(number - 1) else {
+                    return Digit::Nav;
+                };
+                let heading = self.model.tabs[*tab].group;
+                let group = self.model.groups.iter().position(|kept| *kept == heading);
+                if lone && group.is_some_and(|group| self.model.lone(group)) {
+                    return missing;
+                }
+                Digit::Nav
+            }
+            Numbers::InGroup => {
+                let group = self.model.nav.place().group;
+                let count = self.model.group_tabs().len();
+                if (lone && count == 1) || number > count {
+                    return missing;
+                }
+                if self.model.nav.go_to(group, number - 1).is_some() {
+                    self.enter();
+                }
+                Digit::Done(self.apply())
+            }
+        }
+    }
+
+    pub(crate) fn ring(&self) -> Vec<Focus> {
+        let mut ring = Vec::new();
+        let Some(head) = self.head.as_ref() else {
+            return ring;
+        };
+        if self.open.is_some() || self.gated {
+            return ring;
+        }
+        let slot = self
+            .current()
+            .and_then(|index| self.screens.get(index))
+            .is_some_and(|slot| !slot.screen.after_tabs().is_empty());
+        for row in &head.rows {
+            match row {
+                Row::Groups if self.model.groups.len() > 1 => ring.push(Focus::Groups),
+                Row::Sections if self.model.nav.count() > 0 => {
+                    ring.push(Focus::Sections);
+                    if slot {
+                        ring.push(Focus::Slot);
+                    }
+                }
+                _ => {}
+            }
+        }
+        ring
+    }
+
+    fn focused(&mut self, key: Key) -> Option<Flow> {
+        let ring = self.ring();
+        if ring.is_empty() {
+            self.focus = Focus::Content;
+            return None;
+        }
+        let at = ring.iter().position(|focus| *focus == self.focus);
+        if at.is_none() {
+            self.focus = Focus::Content;
+        }
+        let stops = ring.len() + 1;
+        let index = at.unwrap_or(ring.len());
+        let step = |by: isize| {
+            let next = (index as isize + by).rem_euclid(stops as isize) as usize;
+            ring.get(next).copied().unwrap_or(Focus::Content)
+        };
+        let (next, previous) = self.focus_keys;
+        if next.contains(&key) {
+            self.focus = step(1);
+            return Some(Flow::Stay);
+        }
+        if previous.contains(&key) {
+            self.focus = step(-1);
+            return Some(Flow::Stay);
+        }
+        let action = match (self.focus, key) {
+            (Focus::Content, _) => return None,
+            (_, Key::Esc | Key::Enter) => {
+                self.focus = Focus::Content;
+                return Some(Flow::Stay);
+            }
+            (_, Key::Up) => {
+                if index > 0 {
+                    self.focus = ring[index - 1];
+                }
+                return Some(Flow::Stay);
+            }
+            (_, Key::Down) => {
+                self.focus = step(1);
+                return Some(Flow::Stay);
+            }
+            (Focus::Groups, Key::Left) => Action::PrevGroup,
+            (Focus::Groups, Key::Right) => Action::NextGroup,
+            (Focus::Sections, Key::Left) => Action::PrevSection,
+            (Focus::Sections, Key::Right) => Action::NextSection,
+            _ => return None,
+        };
+        self.navigate(action);
+        Some(self.apply())
+    }
+
+    fn modal_key(&mut self, key: KeyEvent) -> Flow {
+        let Some(top) = self.out.modals.last_mut() else {
+            return Flow::Stay;
+        };
+        let (owner, id) = (top.screen, top.modal.id);
+        match top.modal.key(key) {
+            Outcome::Stay => Flow::Stay,
+            Outcome::Heard(event) => {
+                self.call(owner, |screen, cx| screen.layer(id, event, cx));
+                self.apply()
+            }
+            Outcome::Close => {
+                self.out.modals.pop();
+                self.call(owner, |screen, cx| screen.layer(id, Layered::Closed, cx));
+                self.apply()
+            }
+        }
+    }
+
     fn press(&mut self, index: usize, key: KeyEvent) -> Flow {
         if let Some(mut hook) = self.on_key.take() {
+            let typing = self.typing_now();
             let mut cx = Cx {
                 screen: index,
                 now: self.moment,
                 key: self.pressed,
+                focus: self.focus,
+                typing,
                 out: &mut self.out,
             };
             let taken = hook(key, &mut cx);
@@ -544,7 +949,19 @@ impl<E: Send + 'static> Tui<E> {
     }
 
     pub fn paste(&mut self, text: &str) {
-        if self.out.asking.is_some() || self.out.picking.is_some() || self.quit.asking().is_some() {
+        if self.out.takeover.is_some()
+            || self.out.asking.is_some()
+            || self.out.picking.is_some()
+            || self.quit.asking().is_some()
+        {
+            return;
+        }
+        if let Some(top) = self.out.modals.last_mut() {
+            let (owner, id) = (top.screen, top.modal.id);
+            if let Outcome::Heard(event) = top.modal.paste(text) {
+                self.call(owner, |screen, cx| screen.layer(id, event, cx));
+                self.apply();
+            }
             return;
         }
         if let Some(index) = self.current() {
@@ -554,17 +971,33 @@ impl<E: Send + 'static> Tui<E> {
     }
 
     pub fn mouse(&mut self, mouse: MouseEvent) {
+        if self.out.takeover.is_some() || !self.out.modals.is_empty() {
+            return;
+        }
         let Some(index) = self.current() else {
             return;
         };
         let (column, row) = (mouse.column, mouse.row);
-        if mouse.kind == MouseEventKind::Down(MouseButton::Left)
-            && self.top.contains((column, row).into())
-        {
+        let down = mouse.kind == MouseEventKind::Down(MouseButton::Left);
+        if down && !self.gated && self.head.is_some() {
+            let hit = self
+                .rows
+                .iter()
+                .find(|(_, line)| line.contains((column, row).into()))
+                .copied();
+            if let Some((kind, line)) = hit {
+                self.click(kind, line, column);
+                return;
+            }
+        }
+        if down && !self.gated && self.head.is_none() && self.top.contains((column, row).into()) {
             let facts = self.screens[index].screen.facts();
-            let place = self.header(&facts, &[], &[]).hit(self.top, column, row);
+            let title = self.title_text();
+            let place = self
+                .header(&title, &facts, &[], &[])
+                .hit(self.top, column, row);
             if let Some(place) = place
-                && self.nav.go_to(place.group, place.section).is_some()
+                && self.model.nav.go_to(place.group, place.section).is_some()
             {
                 self.open = None;
                 self.enter();
@@ -574,6 +1007,28 @@ impl<E: Send + 'static> Tui<E> {
         let area = self.content;
         self.call(index, |screen, cx| screen.mouse(mouse, area, cx));
         self.apply();
+    }
+
+    fn click(&mut self, kind: Row, line: Rect, column: u16) {
+        let moved = match kind {
+            Row::Groups => self
+                .group_labels()
+                .hit(line, column)
+                .and_then(|group| self.model.groups.get(group).copied())
+                .is_some_and(|heading| self.model.go_heading(heading)),
+            Row::Sections if self.open.is_none() && self.model.nav.depth() == 0 => {
+                let group = self.model.nav.place().group;
+                let tail = self.tail();
+                self.section_labels(&tail)
+                    .hit(line, column)
+                    .is_some_and(|section| self.model.nav.go_to(group, section).is_some())
+            }
+            _ => false,
+        };
+        if moved {
+            self.open = None;
+            self.enter();
+        }
     }
 
     pub fn event(&mut self, screen: usize, event: E) {
@@ -602,6 +1057,11 @@ impl<E: Send + 'static> Tui<E> {
             Wake::Input(Event::Paste(text)) => self.paste(&text),
             Wake::Input(Event::Mouse(mouse)) => self.mouse(mouse),
             Wake::Event(screen, event) => self.event(screen, event),
+            Wake::Stamped(stamp, screen, event) => {
+                if stamp == self.out.stamp() {
+                    self.event(screen, event);
+                }
+            }
             Wake::Loaded(screen, generation, event) => {
                 self.loaded(screen, generation, event);
             }
@@ -635,14 +1095,14 @@ impl<E: Send + 'static> Tui<E> {
     fn navigate(&mut self, action: Action) {
         match action {
             Action::Back => {
-                if let Some(Move::Back { .. }) = self.nav.apply(Action::Back)
+                if let Some(Move::Back { .. }) = self.model.nav.apply(Action::Back)
                     && let Some(index) = self.current()
                 {
                     self.call(index, |screen, cx| screen.back(cx));
                 }
             }
             action => {
-                if let Some(Move::Moved(_)) = self.nav.apply(action) {
+                if let Some(Move::Moved(_)) = self.model.nav.apply(action) {
                     self.enter();
                 }
             }
@@ -686,7 +1146,8 @@ impl<E: Send + 'static> Tui<E> {
         let crumb = slot.screen.crumb();
         let nav = match &mut slot.role {
             Role::Overlay(nav, _) => nav,
-            _ => &mut self.nav,
+            Role::Tab => &mut self.model.nav,
+            Role::Gate | Role::App => return,
         };
         if nav.title() == crumb.as_deref() {
             return;
@@ -724,11 +1185,14 @@ impl<E: Send + 'static> Tui<E> {
         index: usize,
         work: impl FnOnce(&mut dyn Screen<E>, &mut Cx<'_, E>) -> R,
     ) -> Option<R> {
+        let typing = self.typing_now();
         let slot = self.screens.get_mut(index)?;
         let mut cx = Cx {
             screen: index,
             now: self.moment,
             key: self.pressed,
+            focus: self.focus,
+            typing,
             out: &mut self.out,
         };
         Some(work(slot.screen.as_mut(), &mut cx))
@@ -737,12 +1201,32 @@ impl<E: Send + 'static> Tui<E> {
     fn apply(&mut self) -> Flow {
         if let Some(palette) = self.out.palette.take() {
             self.palette = palette;
+            self.repaint();
+        }
+        if let Some(role) = self.out.role.take() {
+            self.role = role;
+            self.repaint();
         }
         if let Some(words) = self.out.words.take() {
             self.set_words(words);
         }
         if let Some(hints) = self.out.hints.take() {
             self.hints = hints;
+        }
+        if let Some(title) = self.out.title.take() {
+            self.title = title;
+        }
+        if let Some(layout) = self.out.layout.take() {
+            self.layout = layout;
+        }
+        if std::mem::take(&mut self.out.bump) {
+            self.out.epoch.fetch_add(1, Ordering::SeqCst);
+            self.out.jobs.clear();
+            for slot in &mut self.screens {
+                slot.generation += 1;
+                slot.reading = None;
+                slot.stale = true;
+            }
         }
         for index in std::mem::take(&mut self.out.reload) {
             if let Some(slot) = self.screens.get_mut(index) {
@@ -766,6 +1250,36 @@ impl<E: Send + 'static> Tui<E> {
         for id in std::mem::take(&mut self.out.stops) {
             let stopped = self.stop(id);
             self.show_stopped(stopped);
+        }
+        for toast in std::mem::take(&mut self.out.toasts) {
+            self.toasts.push((moment + toast.lasting, toast));
+        }
+        match (&self.out.takeover, self.taken) {
+            (Some(_), None) => self.taken = Some(moment),
+            (None, Some(_)) => self.taken = None,
+            _ => {}
+        }
+        if let Some(shown) = self.out.show.take()
+            && self.model.show(&*shown)
+            && self.open.is_none()
+        {
+            self.focus = Focus::Content;
+            self.enter();
+        }
+        if let Some(heading) = self.out.group.take()
+            && self.model.go_heading(heading)
+        {
+            self.open = None;
+            self.focus = Focus::Content;
+            self.enter();
+        }
+        if let Some(shut) = self.out.gate.take()
+            && shut != self.gated
+            && self.gate_slot().is_some()
+        {
+            self.gated = shut;
+            self.focus = Focus::Content;
+            self.enter();
         }
         if let Some(screen) = self.out.go.take() {
             self.go(screen);
@@ -851,10 +1365,10 @@ impl<E: Send + 'static> Tui<E> {
                 let _ = sender.send(Wake::Loaded(screen, generation, job()));
             });
         }
-        for (screen, job) in self.out.jobs.drain(..) {
+        for (screen, stamp, job) in self.out.jobs.drain(..) {
             let sender = self.out.sender.clone();
             thread::spawn(move || {
-                let _ = sender.send(Wake::Event(screen, job()));
+                let _ = sender.send(Wake::Stamped(stamp, screen, job()));
             });
         }
         self.commands.retain(|handle| !handle.over());
@@ -874,8 +1388,11 @@ impl<E: Send + 'static> Tui<E> {
                 self.loaded(screen, generation, job());
                 woke = true;
             }
-            for (screen, job) in std::mem::take(&mut self.out.jobs) {
-                self.event(screen, job());
+            for (screen, stamp, job) in std::mem::take(&mut self.out.jobs) {
+                let event = job();
+                if stamp == self.out.stamp() {
+                    self.event(screen, event);
+                }
                 woke = true;
             }
             while let Ok(wake) = self.inbox.try_recv() {
@@ -913,7 +1430,10 @@ impl<E: Send + 'static> Tui<E> {
     }
 
     pub(crate) fn ticks(&mut self) -> Option<Flow> {
-        let mut flow = None;
+        let moment = self.moment;
+        let before = self.toasts.len();
+        self.toasts.retain(|(until, _)| *until > moment);
+        let mut flow = (self.toasts.len() != before).then_some(Flow::Stay);
         for index in 0..self.screens.len() {
             let Some(deadline) = self.due(&self.screens[index]) else {
                 continue;
@@ -930,26 +1450,48 @@ impl<E: Send + 'static> Tui<E> {
     }
 
     pub(crate) fn animating(&self) -> bool {
+        if self.out.takeover.is_some() {
+            return true;
+        }
         self.current()
             .and_then(|index| self.screens.get(index))
-            .is_some_and(|slot| {
-                slot.screen.animating() || matches!(slot.screen.phase(), Phase::Loading(_))
-            })
+            .is_some_and(|slot| slot.screen.animating() || slot.glass.is_some())
     }
 
-    pub(crate) fn deadlines(&self) -> [Option<Instant>; 3] {
+    fn glass_due(&self) -> Option<Instant> {
+        let slot = self.screens.get(self.current()?)?;
+        let loading = matches!(slot.screen.phase(), Phase::Loading(_));
+        match (loading, slot.since, slot.glass) {
+            (true, Some(since), None) => Some(since + self.delay),
+            (false, _, Some(shown)) => Some(shown + self.least),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn deadlines(&self) -> [Option<Instant>; 5] {
         let screens = self.screens.iter().filter_map(|slot| self.due(slot)).min();
         let open = self.open.is_some() && self.open == self.board;
         let board = self.board().and_then(|board| board.wake(self.moment, open));
-        let band = self
-            .band
-            .as_ref()
-            .and_then(|band| band.deadline(self.moment));
-        let bands = [board, band].into_iter().flatten().min();
-        [self.quit.deadline(), screens, bands]
+        let bands = [&self.band, &self.top_band]
+            .into_iter()
+            .flatten()
+            .filter_map(|band| band.deadline(self.moment));
+        let bands = bands.chain(board).min();
+        let toasts = self.toasts.iter().map(|(until, _)| *until).min();
+        [
+            self.quit.deadline(),
+            screens,
+            bands,
+            toasts,
+            self.glass_due(),
+        ]
     }
 
     pub fn run(mut self) -> io::Result<()> {
+        if std::env::var_os("NO_COLOR").is_some_and(|value| !value.is_empty()) {
+            self.mono = true;
+            self.repaint();
+        }
         let mut term = Term::enter(self.modes)?;
         listen(self.out.sender.clone());
         self.run_in(&mut term)

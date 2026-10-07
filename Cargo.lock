@@ -476,8 +476,8 @@ dependencies = [
 
 [[package]]
 name = "pito-list"
-version = "0.7.0"
-source = "git+https://github.com/gmrdad82/pito-list?tag=v0.7.0#d05434266d3ccdc7eb00ac568e3a5db77e104a84"
+version = "0.8.0"
+source = "git+https://github.com/gmrdad82/pito-list?tag=v0.8.0#51a43dcbd9fb2d4a4ad94f34d1b036d59be55bc6"
 dependencies = [
  "crossterm",
  "ratatui",

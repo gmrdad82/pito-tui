@@ -191,7 +191,7 @@ impl Filter {
     }
 
     pub fn view<'a>(&'a mut self, columns: &'a [Column<'a>], palette: &Palette) -> ListView<'a> {
-        ListView::new(&mut self.list, columns).styles(palette.list())
+        palette.view(&mut self.list, columns)
     }
 }
 

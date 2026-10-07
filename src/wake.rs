@@ -1,4 +1,6 @@
 use std::io;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 use std::thread::{self, JoinHandle};
 
@@ -16,11 +18,13 @@ pub enum Wake<E> {
     Loaded(usize, u64, E),
     Activity(Activity),
     Command(usize, Report),
+    Stamped(u64, usize, E),
 }
 
 pub struct Waker<E> {
     sender: Sender<Wake<E>>,
     screen: usize,
+    epoch: Option<Arc<AtomicU64>>,
 }
 
 impl<E> Clone for Waker<E> {
@@ -28,6 +32,7 @@ impl<E> Clone for Waker<E> {
         Waker {
             sender: self.sender.clone(),
             screen: self.screen,
+            epoch: self.epoch.clone(),
         }
     }
 }
@@ -42,7 +47,16 @@ impl<E> std::fmt::Debug for Waker<E> {
 
 impl<E: Send + 'static> Waker<E> {
     pub fn new(sender: Sender<Wake<E>>, screen: usize) -> Self {
-        Waker { sender, screen }
+        Waker {
+            sender,
+            screen,
+            epoch: None,
+        }
+    }
+
+    pub(crate) fn epoch(mut self, epoch: Arc<AtomicU64>) -> Self {
+        self.epoch = Some(epoch);
+        self
     }
 
     pub fn screen(&self) -> usize {
@@ -50,7 +64,11 @@ impl<E: Send + 'static> Waker<E> {
     }
 
     pub fn send(&self, event: E) -> bool {
-        self.sender.send(Wake::Event(self.screen, event)).is_ok()
+        let wake = match &self.epoch {
+            Some(epoch) => Wake::Stamped(epoch.load(Ordering::SeqCst), self.screen, event),
+            None => Wake::Event(self.screen, event),
+        };
+        self.sender.send(wake).is_ok()
     }
 }
 

@@ -174,7 +174,9 @@ fn runs<E: Send + 'static>(walk: &Walk, app: &dyn Fn() -> Tui<E>) -> Vec<(String
     if walk.screens {
         let tui = app();
         for (index, name) in tui.names().into_iter().enumerate() {
-            runs.push((screen(index, name), Run::Screen(index)));
+            if tui.walkable(index) {
+                runs.push((screen(index, name), Run::Screen(index)));
+            }
         }
     }
     for (index, script) in walk.scripts.iter().enumerate() {
@@ -192,6 +194,7 @@ fn render<E: Send + 'static>(
     let mut tui = app();
     match run {
         Run::Screen(index) => {
+            tui.reveal();
             tui.shot(width, height, &[], true);
             if tui.go(*index) {
                 tui.settle();

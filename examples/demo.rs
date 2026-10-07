@@ -513,7 +513,7 @@ fn tui() -> Tui<Msg> {
             Hint::new("?", "help").rank(4),
             Hint::new("ctrl+c", "twice quit").pinned(),
         ])
-        .footer_look(|footer| footer.separator(" · "))
+        .footer_look(|footer, _| footer.separator(" · "))
         .on_key(move |key, cx| {
             if key.code != KeyCode::Char('a') {
                 return false;

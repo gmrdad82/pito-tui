@@ -1,6 +1,8 @@
 use std::any::Any;
 use std::borrow::Cow;
 use std::process::Command;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 use std::time::Instant;
 
@@ -11,6 +13,11 @@ use ratatui::{Frame, layout::Rect, style::Style, text::Line};
 use crate::activity::{Activity, Change};
 use crate::command::{Heard, Run, Stream};
 use crate::copy::COPY_MAX;
+use crate::head::Focus;
+use crate::label::Span;
+use crate::layer::{Event as Layered, Modal, Takeover, Toast};
+use crate::layout::Layout;
+use crate::model::Item;
 use crate::palette::Palette;
 use crate::pick::Pick;
 use crate::wake::{Wake, Waker};
@@ -65,6 +72,12 @@ pub trait Screen<E>: Any {
 
     fn heard(&mut self, _id: u64, _heard: Heard, _cx: &mut Cx<'_, E>) {}
 
+    fn layer(&mut self, _id: u64, _event: Layered, _cx: &mut Cx<'_, E>) {}
+
+    fn claim(&mut self, _key: KeyEvent, _cx: &mut Cx<'_, E>) -> bool {
+        false
+    }
+
     fn back(&mut self, _cx: &mut Cx<'_, E>) {}
 
     fn hints(&self) -> Vec<Hint<'_>> {
@@ -88,6 +101,14 @@ pub trait Screen<E>: Any {
     }
 
     fn left(&self, _room: u16, _help: Option<&str>) -> Option<Vec<(String, Style)>> {
+        None
+    }
+
+    fn after_tabs(&self) -> Vec<(String, Style)> {
+        Vec::new()
+    }
+
+    fn caption(&self) -> Option<Vec<(String, Style)>> {
         None
     }
 
@@ -152,9 +173,18 @@ pub(crate) struct Picking {
     pub(crate) pick: Pick,
 }
 
+pub(crate) struct Opened {
+    pub(crate) screen: usize,
+    pub(crate) modal: Modal,
+}
+
+pub(crate) type Shown = Box<dyn Fn(Item) -> bool>;
+
 pub(crate) struct Outbox<E> {
     pub(crate) sender: Sender<Wake<E>>,
-    pub(crate) jobs: Vec<(usize, Job<E>)>,
+    pub(crate) jobs: Vec<(usize, u64, Job<E>)>,
+    pub(crate) epoch: Arc<AtomicU64>,
+    pub(crate) bump: bool,
     pub(crate) copies: Vec<String>,
     pub(crate) said: Option<(Cow<'static, str>, Tone)>,
     pub(crate) asking: Option<Asking>,
@@ -169,6 +199,15 @@ pub(crate) struct Outbox<E> {
     pub(crate) palette: Option<Palette>,
     pub(crate) words: Option<Words>,
     pub(crate) hints: Option<Vec<Hint<'static>>>,
+    pub(crate) title: Option<Vec<Span>>,
+    pub(crate) layout: Option<Layout>,
+    pub(crate) role: Option<Option<Cow<'static, str>>>,
+    pub(crate) show: Option<Shown>,
+    pub(crate) group: Option<usize>,
+    pub(crate) toasts: Vec<Toast>,
+    pub(crate) modals: Vec<Opened>,
+    pub(crate) takeover: Option<(usize, Takeover)>,
+    pub(crate) gate: Option<bool>,
 }
 
 impl<E> Outbox<E> {
@@ -176,6 +215,8 @@ impl<E> Outbox<E> {
         Outbox {
             sender,
             jobs: Vec::new(),
+            epoch: Arc::new(AtomicU64::new(0)),
+            bump: false,
             copies: Vec::new(),
             said: None,
             asking: None,
@@ -190,7 +231,20 @@ impl<E> Outbox<E> {
             palette: None,
             words: None,
             hints: None,
+            title: None,
+            layout: None,
+            role: None,
+            show: None,
+            group: None,
+            toasts: Vec::new(),
+            modals: Vec::new(),
+            takeover: None,
+            gate: None,
         }
+    }
+
+    pub(crate) fn stamp(&self) -> u64 {
+        self.epoch.load(Ordering::SeqCst)
     }
 }
 
@@ -198,6 +252,8 @@ pub struct Cx<'a, E> {
     pub(crate) screen: usize,
     pub(crate) now: Instant,
     pub(crate) key: Option<KeyEvent>,
+    pub(crate) focus: Focus,
+    pub(crate) typing: bool,
     pub(crate) out: &'a mut Outbox<E>,
 }
 
@@ -214,12 +270,25 @@ impl<E: Send + 'static> Cx<'_, E> {
         self.key
     }
 
+    pub fn focus(&self) -> Focus {
+        self.focus
+    }
+
+    pub fn typing(&self) -> bool {
+        self.typing
+    }
+
     pub fn detach(&mut self, work: impl FnOnce() -> E + Send + 'static) {
-        self.out.jobs.push((self.screen, Box::new(work)));
+        let stamp = self.out.stamp();
+        self.out.jobs.push((self.screen, stamp, Box::new(work)));
     }
 
     pub fn waker(&self) -> Waker<E> {
-        Waker::new(self.out.sender.clone(), self.screen)
+        Waker::new(self.out.sender.clone(), self.screen).epoch(Arc::clone(&self.out.epoch))
+    }
+
+    pub fn epoch(&mut self) {
+        self.out.bump = true;
     }
 
     pub fn say(&mut self, text: impl Into<Cow<'static, str>>, tone: Tone) {
@@ -330,5 +399,81 @@ impl<E: Send + 'static> Cx<'_, E> {
 
     pub fn hints(&mut self, hints: Vec<Hint<'static>>) {
         self.out.hints = Some(hints);
+    }
+
+    pub fn title(&mut self, text: impl Into<Cow<'static, str>>) {
+        self.out.title = Some(vec![(text.into(), Style::new())]);
+    }
+
+    pub fn title_spans<T: Into<Cow<'static, str>>>(
+        &mut self,
+        spans: impl IntoIterator<Item = (T, Style)>,
+    ) {
+        let spans = spans
+            .into_iter()
+            .map(|(text, style)| (text.into(), style))
+            .collect();
+        self.out.title = Some(spans);
+    }
+
+    pub fn layout(&mut self, layout: Layout) {
+        self.out.layout = Some(layout);
+    }
+
+    pub fn role(&mut self, role: Option<impl Into<Cow<'static, str>>>) {
+        self.out.role = Some(role.map(Into::into));
+    }
+
+    pub fn show(&mut self, shown: impl Fn(Item) -> bool + 'static) {
+        self.out.show = Some(Box::new(shown));
+    }
+
+    pub fn go_group(&mut self, group: usize) {
+        self.out.group = Some(group);
+    }
+
+    pub fn toast(&mut self, toast: Toast) {
+        self.out.toasts.push(toast);
+    }
+
+    pub fn open(&mut self, modal: Modal) {
+        self.out.modals.retain(|opened| opened.modal.id != modal.id);
+        self.out.modals.push(Opened {
+            screen: self.screen,
+            modal,
+        });
+    }
+
+    pub fn alert(
+        &mut self,
+        id: u64,
+        title: impl Into<Cow<'static, str>>,
+        lines: impl IntoIterator<Item = Line<'static>>,
+    ) {
+        self.open(Modal::alert(id, title, lines));
+    }
+
+    pub fn modal(&mut self, id: u64) -> Option<&mut Modal> {
+        self.out
+            .modals
+            .iter_mut()
+            .find(|opened| opened.modal.id == id)
+            .map(|opened| &mut opened.modal)
+    }
+
+    pub fn close(&mut self, id: u64) {
+        self.out.modals.retain(|opened| opened.modal.id != id);
+    }
+
+    pub fn takeover(&mut self, takeover: Takeover) {
+        self.out.takeover = Some((self.screen, takeover));
+    }
+
+    pub fn end_takeover(&mut self) {
+        self.out.takeover = None;
+    }
+
+    pub fn gate(&mut self, shut: bool) {
+        self.out.gate = Some(shut);
     }
 }

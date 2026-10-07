@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use pito_footer::{Hint, Key};
-use pito_list::{Cell, Column, Keys, List, ListView, Row};
+use pito_list::{Cell, Column, Keys, List, Row};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -104,9 +104,7 @@ impl Pick {
             ..area
         };
         let columns = self.laid(count);
-        let view = ListView::new(&mut self.rows, &columns)
-            .styles(palette.list())
-            .header(false);
+        let view = palette.view(&mut self.rows, &columns).header(false);
         frame.render_widget(view, list);
     }
 
@@ -147,9 +145,7 @@ impl Pick {
         let inner = block.inner(place);
         frame.render_widget(block, place);
         let columns = self.laid(count);
-        let view = ListView::new(&mut self.rows, &columns)
-            .styles(palette.list())
-            .header(false);
+        let view = palette.view(&mut self.rows, &columns).header(false);
         frame.render_widget(view, inner);
     }
 }

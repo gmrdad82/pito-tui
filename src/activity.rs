@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use crossterm::event::KeyEvent;
 use pito_footer::{Hint, InputBar, Key};
 use pito_header::Section;
-use pito_list::{Cell, Column, List, ListView, Mark, Row, Step};
+use pito_list::{Cell, Column, List, Mark, Row, Step};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -571,9 +571,7 @@ impl<E: Send + 'static> Screen<E> for Board {
             Column::new("", 8, 0).flex(),
             Column::new("", 2, 0).fit(12).right().pinned(),
         ];
-        let view = ListView::new(&mut self.rows, &columns)
-            .styles(palette.list())
-            .header(false);
+        let view = palette.view(&mut self.rows, &columns).header(false);
         frame.render_widget(view, area);
     }
 
