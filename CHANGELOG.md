@@ -4,6 +4,128 @@ Every release of pito-tui, newest first. Versions follow [Semantic
 Versioning](https://semver.org/) as Cargo reads it before 1.0: a change in the
 middle number may break an app, a change in the last one never does.
 
+## 0.4.0 (2026-10-08)
+
+Every PITO TUI can now run the whole shell: the building blocks an app that
+kept its own loop was missing, each a general primitive with no app's words
+or shape in it.
+
+### The header
+
+- `Tui::head(Head)` draws the header as a stack of rows in the app's order:
+  `Row::Title`, `Groups`, `Caption` (a ruled label between two rows, the
+  current group's name unless the screen's `caption()` gives one),
+  `Sections`, `Facts`, `Crumbs` and `Blank`. `Head::numbers(Numbers::Across
+  | InGroup | Off)` numbers the tabs across the app, within their group, or
+  not at all, and `Head::lone(true)` leaves a group of one tab unnumbered;
+  number keys follow what is drawn. Without `head` the header is
+  pito-header's, exactly as before, and `header_look` applies there.
+- `Label`: a group's or a tab's name as styled spans (an underlined
+  accelerator letter, say) with a short form, taken by `Tui::group` and
+  `Tui::screen` (a `Section`, a `Group`, `&str` or `String` still work).
+- `Tui::title`, `Cx::title` and `Cx::title_spans` set the title on the rule
+  at runtime, in the new `Palette::title` style, which the spans patch.
+- `Screen::after_tabs()` puts the screen's own spans after the tabs on the
+  sections row, a "‹ value ›" selector, say.
+- `Tui::focus_keys(next, previous)` moves keyboard focus through the groups
+  row, the sections row, the after-tabs slot and the content: the focused
+  row's current item takes `Palette::focus`, left and right move along it,
+  up and down move between rows, `esc` or `enter` gives focus back to the
+  content, and in the slot keys reach the screen with `Cx::focus()` saying
+  `Focus::Slot`.
+- `Tui::show` and `Cx::show(|Item| bool)` show or hide groups and tabs
+  (`Item::Group(n)`, `Item::Tab(screen)`); the nav is rebuilt then, keeping
+  each group's last tab and the current tab when it is still shown.
+- `Tui::group_keys(keys)` gives the group added last its keys, and
+  `Cx::go_group(n)` returns to a group's last-used tab.
+
+### The app slot and layers
+
+- `Tui::app(screen)`: one app-level screen, never drawn as content. Its
+  `lead`, `left` and `status_parts` feed the title rule on every screen (a
+  screen's own only when it gives none), it hears app-wide keys first in
+  the new `Screen::claim(key, cx) -> bool` (over a gate, a typing screen
+  and any screen; `Cx::typing()` says when the screen in front takes
+  text), and what it opens answers to it.
+- `Tui::gate(screen, shut)` and `Cx::gate(bool)`: a layer before the app,
+  the title rule over the gate's own box, no tabs, no help, only the
+  gate's own hints; every key is the gate's after the quit guard, open
+  prompts and the app's claim. The capture walk shows each screen past
+  the gate.
+- `Cx::takeover(Takeover)` and `Cx::end_takeover()`: an app-wide
+  transition, its text on the title rule and the hourglass under it, tabs
+  and footer hidden, every key ignored but its cancel keys (the owner hears
+  `layer::Event::Closed`) and the quit guard, whose word and question take
+  a bare footer line.
+- `layer::Modal`, opened with `Cx::open`, a container over the live screen:
+  centred, bordered and titled, owning the keys until it closes, its body
+  built from parts in order (`text`, a `list` of `Choice`s, a `Field`), tab
+  and shift+tab moving focus, `Modal::filter(field, list)` narrowing a list
+  as the field is typed, `Choice::skip()` for rows the cursor passes over,
+  `Choice::confirm(warning)` for a row that needs a second enter with the
+  warning on the status line, and `Modal::status(text, Tone)`. `Cx::modal(id)`
+  changes it while it is open, `Cx::close(id)` closes it, and its owner
+  hears `Screen::layer(id, Event)`: `Chosen`, `Moved`, `Edited`,
+  `Submitted` or `Closed`. Modals stack. `Cx::alert(id, title, lines)` and
+  `Modal::alert` are a dismiss-only one: `esc`, `enter` or `q` closes it.
+- `Cx::toast(Toast)`: app-wide notices that survive screen changes, at a
+  `Spot` over the content (top right unless placed), in a `Tone`, stacked,
+  leaving on their own after their time (3 s unless set) with one redraw.
+- `Tui::top_band(impl Band)`: the same `Band` trait, under the header.
+- `Tui::quit_sticky(true)` keeps the armed quit guard through other keys
+  from any layer; `Tui::quit_tone(footer::Tone)` and `Tui::quit_hints(false)`
+  give its word a tone and hide the hints while it is armed.
+
+### Layout, palette and timing
+
+- `Layout` (`Tui::layout`, `Cx::layout`): the top and bottom margins, the
+  side margin, the content's padding, the gap under the header and the gap
+  above the footer, and the `Spot` where the too-small words sit, drawn in
+  the new `Palette::small`. `TOP`, `SIDE`, `PAD` and `GAP` stay as its
+  defaults. `Spot` places a box by `Edge` (`Start`, `Third`, `Middle`,
+  `End`) on each axis; `message_at` places text by one.
+- `Palette` gains `strong`, `warn` (apart from `bad`), `title`, `inactive`
+  (apart from `muted`), `focus` (inverse), `small`, `bar` and `count`, and a
+  shell `Tone` (`Ink`, `Strong`, `Muted`, `Accent`, `Good`, `Warn`, `Bad`)
+  for toasts and modal status lines (`Palette::tone`).
+- `Tui::role(name, style)` and `Cx::role(Some(name))`: named colour roles,
+  one per app mode; the active one colours the title and the hourglass.
+- `Palette::mono()`: reverse, bold and dim stand in for colour. `Tui::run`
+  applies it when `NO_COLOR` is set, and `Tui::monochrome(true)` forces it;
+  headless runs stay as built.
+- `Tui::hourglass_timing(delay, least)`: a load shorter than the delay shows
+  nothing, and a shown hourglass stays at least `least`.
+- `Tui::version_fit(true)` shows the footer's name and version only when
+  they cost no extra row and the quit guard is quiet.
+- `Cx::epoch()`: detach jobs and reads started before it, and waker events
+  sent before it, are dropped, and every started screen reads again. A
+  waker made earlier still delivers what it sends after.
+
+### Lists (pito-list v0.8.0)
+
+- pito-list moves to v0.8.0 and is re-exported. `Palette::bar` and
+  `Palette::count` hold the app's scrollbar (`list::Bar`) and range count
+  (`list::Count`, every word the app's), and `Palette::view(list, columns)`
+  gives any screen's list the app's styles, bar and count. The pick, the
+  activity screen, `Filter::view` and the modal lists use it, and `Log`
+  draws the same bar beside its lines and the count on its bottom line.
+
+### Breaking
+
+- `FooterLook` is `fn(Footer, u16) -> Footer`: the look gets the footer's
+  width.
+- `Tui::group` and `Tui::screen` take `impl Into<Label>`; a `Group` passed
+  in keeps its name and short name, not sections built into it.
+- `Wake` has a `Stamped(epoch, screen, E)` variant: detach results and
+  events from wakers made by `Cx::waker` and `Tui::waker` arrive as it.
+  `Waker::new` still sends plain `Wake::Event`.
+- `Palette` has new fields, so a palette built field by field needs them
+  (it is `#[non_exhaustive]`; build it with `new` and the builders).
+- `pito_tui::Tone` is the shell's tone; the footer's is still
+  `pito_tui::footer::Tone` (`Cx::say` and `quit_tone` take it).
+- While a modal or pick is open, the footer keeps only the app's pinned
+  hints, since the others' keys don't reach the app then.
+
 ## 0.3.7 (2026-10-08)
 
 - `capture::compare_dirs(before, after)` compares two capture folders frame

@@ -1,0 +1,19 @@
+Sleep 600ms
+Type "3"
+Sleep 900ms
+Type "/"
+Sleep 300ms
+Type "1999"
+Sleep 500ms
+Enter
+Sleep 700ms
+Type "n"
+Sleep 700ms
+Type "n"
+Sleep 700ms
+Type "G"
+Sleep 900ms
+Type "g"
+Sleep 900ms
+Type "1"
+Sleep 600ms

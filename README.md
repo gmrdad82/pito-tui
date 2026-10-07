@@ -23,11 +23,11 @@ the app, in any language.
 ## Install
 
 ```toml
-pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v0.3.7" }
+pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v0.4.0" }
 ```
 
 That one line brings ratatui 0.30, crossterm 0.29, pito-header v0.2.0,
-pito-footer v0.4.0, pito-hourglass v0.1.3 and pito-list v0.7.0, reachable as
+pito-footer v0.4.0, pito-hourglass v0.1.3 and pito-list v0.8.0, reachable as
 `pito_tui::ratatui`, `pito_tui::crossterm`, `pito_tui::header`,
 `pito_tui::footer`, `pito_tui::hourglass` and `pito_tui::list`.
 
@@ -35,8 +35,13 @@ Run the demo to see it (`ctrl+c` twice quits):
 
 ```sh
 cargo run --example demo
+cargo run --example demo -- --stack
 cargo run --example demo -- --dump 100x24 --keys "tab down enter"
 ```
+
+`ctrl+k` in the demo opens a "Go to" list that reaches every screen and
+every layer below; `--stack` shows the header as a row stack with groups,
+and `--mono` the monochrome palette.
 
 ## What it does
 
@@ -71,14 +76,20 @@ cargo run --example demo -- --dump 100x24 --keys "tab down enter"
   draws nothing.
 - **Keys in a fixed order:** a key release is ignored; then the quit guard
   (a double `ctrl+c`, asking first while work runs, with the app's words);
+  then a takeover, which hears only its cancel keys; then the modal on top;
   then an open confirm, unless the key is one the app lets through
   (`through_keys`, such as `ctrl+r` for a refresh), which goes to `on_key`
-  and the screen with the confirm left open; then a screen that is typing
-  into an input; then the help toggle (`?`); then the keys that open an
-  overlay (the activity screen or the app's own); then the nav keys (only
-  the back keys while an overlay is open); then the stop key while a screen
-  loads; then the app's own keys (`on_key`); then the screen. `Cx::key`
-  tells a callback which key led to it, so `back` knows `esc` from `q`.
+  and the screen with the confirm left open; then an open pick; then the
+  app slot's `claim`; then a gate, which takes every other key; then a
+  screen that is typing into an input; then the help toggle (`?`); then the
+  header's focus keys and, while a header row has focus, its arrows; then
+  the keys that open an overlay (the activity screen or the app's own);
+  then the nav keys (only the back keys while an overlay is open), the
+  group keys and the number keys; then the stop key while a screen loads;
+  then the app's own keys (`on_key`); then the screen. `Cx::key` tells a
+  callback which key led to it, so `back` knows `esc` from `q`.
+
+  ![The quit guard: one ctrl+c arms it until it lapses, and with work running two ask first](docs/quit.gif)
 - **A terminal that is always given back.** `Term` turns on raw mode, the
   alternate screen and bracketed paste (mouse capture and focus events only
   when the app asks), remembers each one it turned on, and turns exactly
@@ -91,9 +102,17 @@ cargo run --example demo -- --dump 100x24 --keys "tab down enter"
   after it.
 - **A palette from one colour, or a whole one.** `Palette::new(accent)`
   derives every style the header, footer, list and hourglass draw with;
-  `Palette` also takes each token by hand (base, ink, muted, accent,
-  selected, good, bad, rule, line, glass, shimmer). `Cx::palette` swaps it
-  while the app runs, and the hourglass follows.
+  `Palette` also takes each token by hand (base, ink, strong, muted,
+  accent, selected, good, warn, bad, rule, line, glass, shimmer, title,
+  inactive, focus, small). `Cx::palette` swaps it while the app runs, and
+  the hourglass follows. `Palette::tone(Tone)` turns the shell's `Tone`
+  (`Ink`, `Strong`, `Muted`, `Accent`, `Good`, `Warn`, `Bad`) into a style
+  for toasts and modal status lines. Named colour roles, one per app mode,
+  come from `Tui::role(name, style)`, and `Cx::role(Some(name))` makes one
+  active: the title and the hourglass take it. `Palette::mono()` lets
+  reverse, bold and dim stand in for colour; `Tui::run` uses it when
+  `NO_COLOR` is set, and `Tui::monochrome(true)` forces it (headless runs
+  stay as built, so a capture doesn't depend on the environment).
 - **The footer, assembled:** the screen's hints and the app's, the notice
   line, the confirm bar, the input bar, and the app's name and version at
   the right end of the row of keys (pito-footer's version slot). The notice
@@ -107,7 +126,13 @@ cargo run --example demo -- --dump 100x24 --keys "tab down enter"
   hint style, and a confirm keeps its own hint.
   The quit question has its own hint (`Words::leave`), falling back to the
   confirm's (`Words::choose`). `?` hides the hints; the header then shows
-  the app's help word.
+  the app's help word. `quit_sticky(true)` keeps the armed guard through
+  other keys, from any layer, until it lapses or quits; `quit_tone` gives
+  its word a tone (`footer::Tone::Alert`, say) and `quit_hints(false)` hides
+  the hints while it is armed. `version_fit(true)` shows the name and
+  version only when they cost the footer no extra row and the quit guard
+  is quiet. While a modal or pick owns the keys, only the app's pinned
+  hints stay beside its own.
 - **The header, assembled:** the app's name on the title rule, with the help
   word and the screen's `lead` on its left and the screen's status on its
   right, each in styled parts and each told the room it has, so a screen
@@ -119,7 +144,82 @@ cargo run --example demo -- --dump 100x24 --keys "tab down enter"
   keeps it (`keep_facts`), on the same row. A screen that wants the whole
   left side, the help word joined to its lead in its own style, gives it
   in `left(room, help)`: `help` is the help word when the shell would show
-  it (the hints hidden), and `None` keeps the shell's join.
+  it (the hints hidden), and `None` keeps the shell's join. The title is the
+  app's name until `Tui::title`, `Cx::title` or `Cx::title_spans` changes
+  it, while the app runs too ("demo · locked").
+- **The header as a stack of rows.** `Tui::head(Head::new([..]))` draws the
+  header from rows in the app's order, each optional: `Row::Title` (the
+  title rule), `Groups`, `Caption` (a ruled label between two rows: the
+  current group's name, or the screen's `caption()`), `Sections`, `Facts`,
+  `Crumbs` (the breadcrumb rule) and `Blank`. Groups and tabs take a
+  `Label`: styled spans, an underlined accelerator letter, say, with a
+  short form for narrow widths; the current one is drawn lit, the others in
+  `Palette::inactive`. `Head::numbers` numbers the tabs across the app
+  (`Across`), within their group (`InGroup`, starting at 1 in each) or not
+  at all (`Off`), `Head::lone(true)` leaves a group of one tab unnumbered,
+  and the number keys follow what is drawn. A screen's `after_tabs()` spans
+  sit after the tabs on the sections row, a "‹ value ›" selector in place
+  of a facts row. `Tui::focus_keys(next, previous)` moves keyboard focus
+  through the groups row, the sections row, that slot and the content: the
+  focused row's current item takes `Palette::focus`, left and right move
+  along it, up and down move between rows, and `esc` or `enter` gives
+  focus back; in the slot, keys reach the screen and `Cx::focus()` says
+  `Focus::Slot`. `Tui::group_keys(keys)` gives the group added last its
+  keys, and they (or `Cx::go_group(n)`) return to that group's last-used
+  tab. `Tui::show` and `Cx::show(|item| ..)` show or hide groups and tabs
+  by the app's predicate (`Item::Group(n)`, `Item::Tab(screen)`) whenever
+  the app says, keeping each group's last tab and the current tab while it
+  is shown. Without `head`, the header is pito-header's as before, and
+  `header_look` applies to it.
+
+  ![The header as a row stack: groups with an underlined key, a caption, tabs numbered in their group, focus moving through the rows and an after-tabs selector](docs/stack.gif)
+- **The app slot.** `Tui::app(screen)` adds one app-level screen that is
+  never drawn as content. Its `lead`, `left` and `status_parts` feed the
+  title rule on every screen (a screen's own show only when it gives
+  none), so app-wide indicators come from one place. It hears app-wide
+  keys first in `Screen::claim(key, cx) -> bool`, over a gate, a typing
+  screen or any screen (`Cx::typing()` says when the screen in front takes
+  text), and everything it opens (a modal, a pick, a confirm, a takeover,
+  a detach or a command) answers to it rather than to a screen.
+- **Layers.** `Tui::gate(screen, shut)` puts a gate before the app: the
+  title rule over the gate's own box, no tabs, no help and only the gate's
+  own hints, every key the gate's after the quit guard, open prompts and
+  the app's claim; `Cx::gate(false)` reveals the app (entering its current
+  screen) and `Cx::gate(true)` shuts it again. `Cx::takeover(Takeover)`
+  covers the app for an app-wide transition: its text on the title rule,
+  the hourglass under it, tabs and footer hidden, every key ignored but its
+  cancel keys (the owner hears `layer::Event::Closed`) and the quit guard,
+  until `Cx::end_takeover()`. `Cx::open(Modal)` puts a container over the
+  live screen, which keeps drawing: centred, bordered and titled, owning
+  the keys until it closes, its body built from parts in order (`text`, a
+  `list` of `Choice`s and `Field`s, tab and shift+tab moving focus between
+  them), one primitive for filtered pick lists, search boxes, step menus
+  with a reason field, and forms. `Modal::filter(field, list)` narrows a
+  list as the field is typed, `Choice::skip()` is a heading the cursor
+  passes over, `Choice::confirm(warning)` needs a second enter and shows
+  its warning on the status line (`Modal::status(text, tone)`), and
+  `Cx::modal(id)` changes rows and status while it is open. Its owner hears
+  `Screen::layer(id, Event)`: `Chosen`, `Moved`, `Edited`, `Submitted` and
+  `Closed`; `Cx::close(id)` closes it. Modals stack, so an alert can sit
+  over a form. `Cx::alert(id, title, lines)` is a dismiss-only one: `esc`,
+  `enter` or `q` closes it.
+
+  ![An app-owned modal: a field narrowing a list with headings the cursor skips, a row that needs a second enter, and an alert](docs/modal.gif)
+- **Toasts and a band under the header.** `Cx::toast(Toast::new(text))`
+  shows an app-wide notice over the content, `.at(Spot::TOP_RIGHT)` unless
+  placed elsewhere, `.tone(Tone::Good)`, stacked with the others at its
+  spot, surviving screen changes and leaving on its own after `.lasting(..)`
+  (3 s unless set), with one redraw. `Tui::top_band(impl Band)` draws a
+  band under the header with the same `Band` trait as the footer's, a
+  one-row banner with a live countdown, say, waking for its `deadline`.
+
+  ![A band under the header counting down, a takeover with the hourglass, toasts, and a gate before the app](docs/layers.gif)
+- **Layout.** `Tui::layout(Layout::new()...)` (or `Cx::layout`) sets the
+  top and bottom margins, the side margin of the header and footer, the
+  content's padding, the gap under the header and the gap above the
+  footer, and the `Spot` where the too-small words sit (in
+  `Palette::small`). A `Spot` places a box by an `Edge` on each axis
+  (`Start`, `Third`, `Middle`, `End`); `message_at` places text by one.
 - **Activities.** The app hands the shell what it has running (`Cx::activity`,
   `Cx::activities`, `Cx::forget`): each with a label, a state (running,
   waiting, done, failed, stopped), a progress fraction or none (a spinner then), when
@@ -135,6 +235,8 @@ cargo run --example demo -- --dump 100x24 --keys "tab down enter"
   pages and takes the keys, and its time is the loop's moment.
   `Cx::activities` replaces the app's own list and leaves the commands'
   activities (below) where they are.
+
+  ![A job and a real command on the activity band, the command stopped, then the activity screen over Home with a job opened under its own breadcrumb](docs/activities.gif)
 - **The app's own band and overlays.** `Tui::band(impl Band)` draws the
   band from the app's own data in place of the activity band: the shell
   asks its `height` for the room between the header and the footer (and
@@ -195,6 +297,8 @@ cargo run --example demo -- --dump 100x24 --keys "tab down enter"
   asked, in `picked`. `Pick::full(true)` fills the screen's area instead of
   a box: the title as a heading, a blank row, then the list;
   `Pick::columns` lays the rows out in the app's own columns.
+
+  ![The pick-one prompt choosing an accent, twice](docs/pick.gif)
 - **A log viewer.** `Log` is a pane a screen embeds for a 20,000-line log or
   a 10,000-event trace: it holds the lines once (`Arc`), builds only the
   rows on screen, clips rather than wraps, and scrolls, pages and jumps to
@@ -204,6 +308,15 @@ cargo run --example demo -- --dump 100x24 --keys "tab down enter"
   keeps its place. A list that big wants pito-list's `Shared`, which builds
   only the rows on screen from the app's own items. The activity screen's
   detail is a `Log`.
+
+  ![A find in a 20,000-line log, stepping through the hits and to both ends, with the scrollbar and the range count](docs/log.gif)
+- **A scrollbar and a range count.** `Palette::bar(Some(list::Bar::LINE))`
+  and `Palette::count(Some(list::Count::new("–", " of ").group(",")))` hold
+  the app's choice once; `Palette::view(&mut list, &columns)` gives any
+  list a screen draws the app's styles, bar and count (pito-list v0.8.0:
+  shown only when the list overflows, every word the app's). The pick, the
+  activity screen, `Filter::view` and the modal lists use it, and `Log`
+  draws the same bar beside its lines and the count on its bottom line.
 - **Time, bars and spinners.** `clock::span` ("1m 2s", "2d 1h") and
   `clock::span_hours` ("49h 3m", never days, for a "took") and
   `clock::age` ("3m") in the app's own unit words (`clock::Units`, with
@@ -217,6 +330,14 @@ cargo run --example demo -- --dump 100x24 --keys "tab down enter"
 - **A filter over a list.** `Filter` holds a pito-list `List`, a pito-footer
   `Input` and the rows that match; `/` starts typing, `enter` keeps the
   filter, `esc` clears it, and the keys are the app's to change.
+- **Loads that never flash.** `Tui::hourglass_timing(delay, least)`: a load
+  shorter than `delay` shows nothing, and an hourglass once shown stays at
+  least `least`, so quick reads stay quiet and slow ones never blink.
+- **An epoch.** `Cx::epoch()` marks the app changing mode (another account,
+  another workspace): detach jobs and reads started before it, and waker
+  events sent before it, are dropped, and every started screen reads
+  again. A waker made earlier still delivers what it sends after, so a
+  long-lived watcher keeps working.
 - **The rest of the glue:** a too-small guard with the app's message, OSC 52
   copy (`Cx::copy`, up to 48 KiB), a y/n confirm whose answer comes back to
   the screen that asked, an optional callback after every draw with the time
@@ -291,9 +412,13 @@ fn main() -> std::io::Result<()> {
 the hourglass, a filtered list, a drill-in with a breadcrumb and copy, fake
 jobs with progress on the activity band and screen (`j` starts one, `o`
 lists them), a real command on the band (`c` runs the demo itself as a
-child printing progress lines), a pick-one prompt (`p` picks the accent), a
-20,000-line log with find and copy (the Log tab), a time label kept fresh by
-a deadline, an app-wide key that swaps the palette, and the headless flags,
+child printing progress lines, `x` stops it), a pick-one prompt (`p` picks
+the accent), a 20,000-line log with find and copy (the Log tab), a time
+label kept fresh by a deadline, an app-wide key that swaps the palette, an
+app slot whose `ctrl+k` opens a "Go to" modal reaching a lock gate, a
+workspace switch under a takeover (ending in an epoch, a role and a toast),
+a paused band under the header and an alert, the header as a row stack
+(`--stack`), the monochrome palette (`--mono`), and the headless flags,
 `--capture DIR` and `--compare DIR` among them.
 
 ## The API
@@ -301,18 +426,22 @@ a deadline, an app-wide key that swaps the palette, and the headless flags,
 ```text
 Tui::new(name, version, accent: Color) -> Tui<E>          // E: the app's worker answers
   .palette(Palette) .words(Words) .hints([Hint<'static>]) .min_size(w, h)
-  .group(header::Group) .screen(header::Section, impl Screen<E>)   // screens join the last group
+  .group(impl Into<Label>) .group_keys(&[footer::Key]) .screen(impl Into<Label>, impl Screen<E>)
+  .show(Fn(Item) -> bool) .head(Head) .focus_keys(next, previous) .title(text) .title_spans([(text, Style)])
+  .layout(Layout) .role(name, Style) .monochrome(bool) .hourglass_timing(delay, least) .version_fit(bool)
   .nav_keys(NavKeys) .help(Option<Help>) .quit(Mode) .quit_window(Duration)
-  .quit_keys(&[footer::Key]) .stop_keys(&[footer::Key]) .eager(bool) .keep_facts(bool)
+  .quit_keys(&[footer::Key]) .quit_sticky(bool) .quit_tone(footer::Tone) .quit_hints(bool)
+  .stop_keys(&[footer::Key]) .eager(bool) .keep_facts(bool)
   .modes(Modes) .activities(Activities) .overlay(header::Section, &[footer::Key], impl Screen<E>)
-  .band(impl Band) .lit_again(bool) .through_keys(&[footer::Key])
-  .header_look(fn(Header) -> Header) .footer_look(fn(Footer) -> Footer)
+  .app(impl Screen<E>) .gate(impl Screen<E>, shut: bool)
+  .band(impl Band) .top_band(impl Band) .lit_again(bool) .through_keys(&[footer::Key])
+  .header_look(fn(Header) -> Header) .footer_look(fn(Footer, width: u16) -> Footer)
   .on_key(FnMut(KeyEvent, &mut Cx<E>) -> bool) .after_draw(FnMut(Duration))
   run() -> io::Result<()>, run_in(&mut Term)
   key(KeyEvent) -> Flow, paste(&str), mouse(MouseEvent), event(screen, E), handle(Wake<E>) -> Flow
   loaded(screen, generation, E) -> bool, changed(source), go(screen) -> bool, start()
   pump(), settle(), advance(Duration) -> Flow, draw(&mut Frame), busy(), current(), names()
-  find::<T>(), find_mut::<T>(), sender(), waker(screen), set_palette(..), set_words(..)
+  find::<T>(), find_mut::<T>(), sender(), waker(screen), set_palette(..), set_words(..), set_layout(..)
   frame(w, h) -> Buffer, shot(w, h, &[KeyEvent], settle) -> Buffer, bench(w, h, frames) -> Vec<Bench>
 pub enum Flow { Stay, Quit }
 
@@ -327,7 +456,11 @@ pub trait Screen<E>: Any {                                 // every method but d
   fn mouse(&mut self, MouseEvent, Rect, &mut Cx<E>);  fn event(&mut self, E, &mut Cx<E>);
   fn answer(&mut self, yes: bool, &mut Cx<E>);  fn picked(&mut self, Option<usize>, &mut Cx<E>);
   fn heard(&mut self, id: u64, command::Heard, &mut Cx<E>);  // a command it ran: each line, then the exit
+  fn layer(&mut self, id: u64, layer::Event, &mut Cx<E>);  // a modal or takeover it opened
+  fn claim(&mut self, KeyEvent, &mut Cx<E>) -> bool;       // the app slot's app-wide keys, first
   fn back(&mut self, &mut Cx<E>);
+  fn after_tabs(&self) -> Vec<(String, Style)>;            // after the tabs, with Tui::head
+  fn caption(&self) -> Option<Vec<(String, Style)>>;      // Row::Caption's label
   fn hints(&self) -> Vec<Hint>;  fn facts(&self) -> Vec<(String, Style)>;
   fn status(&self) -> Option<(String, Style)>;
   fn status_parts(&self, room: u16) -> Vec<(String, Style)>;  // default: status() as one part
@@ -353,7 +486,28 @@ Cx<'_, E>: screen(), now(), key() -> Option<KeyEvent>, detach(FnOnce() -> E), wa
   palette(Palette), words(Words), hints(Vec<Hint<'static>>),
   activity(Activity), activities([Activity]), forget(id), band(bool),
   run(id, label, process::Command), run_from(id, label, Command, command::Stream), stop(id),
-  pick(Pick)
+  pick(Pick), focus() -> Focus, typing() -> bool, epoch(), title(text), title_spans([(text, Style)]),
+  layout(Layout), role(Option<name>), show(Fn(Item) -> bool), go_group(n), toast(Toast),
+  open(Modal), alert(id, title, [Line]), modal(id) -> Option<&mut Modal>, close(id),
+  takeover(Takeover), end_takeover(), gate(shut: bool)
+
+Head::new([Row]) .numbers(Numbers) .lone(bool)            // Head::default(): Title, Groups, Sections, Facts, Crumbs
+pub enum Row { Title, Groups, Caption, Sections, Facts, Crumbs, Blank }
+pub enum Numbers { Across, InGroup, Off };  pub enum Focus { Content, Groups, Sections, Slot }
+pub enum Item { Group(n), Tab(screen) }
+Label::new(text) | Label::spans([(text, Style)])  .short(text) .short_spans([(text, Style)])   // From &str, String, Section, Group
+layer::Modal::new(id, title) | Modal::alert(id, title, [Line])
+  .text([Line]) .list([Choice]) .list_rows([Choice], rows) .field(Field) .filter(field, list)
+  .status(text, Tone) .width(cells) .hints([Hint]) .cancel_keys(..) .close_keys(..) .focus(part)
+  id(), focused(), set_status(..), set_text(part, ..), set_choices(part, ..), choice(part), value(part), input_mut(part)
+layer::Choice::new(text) | Choice::spans([(String, Style)])  .skip() .confirm(warning)
+layer::Field::new(label) .placeholder(..) .input(Input)
+pub enum layer::Event { Chosen { part, choice }, Moved { part, choice }, Edited { part }, Submitted { part }, Closed }
+layer::Takeover::new(id, title) .title_spans(..) .label(text) .cancel(&[footer::Key])
+layer::Toast::new(text) .tone(Tone) .at(Spot) .lasting(Duration)
+Layout::new() .top .bottom .side .pad .head_gap .gap (cells) .small(Spot)
+Spot::new(Edge, Edge), Spot::TOP_LEFT .. BOTTOM_RIGHT, MIDDLE, THIRD; place(area, w, h) -> Rect
+pub enum Edge { Start, Third, Middle, End };  pub enum Tone { Ink, Strong, Muted, Accent, Good, Warn, Bad }
 
 Activity::new(id: u64, label, started: Instant)            // every field pub, and a builder each
   .state(activity::State) .progress(f64 or None) .estimate(bool) .ended(Instant) .status(text)
@@ -387,9 +541,10 @@ capture::Recorder::against(dir) -> io::Result<Recorder>    // the same frames co
   .screen(index, name, &Buffer) .record(script name, &Buffer) -> io::Result<()>, frames(), finish() -> io::Result<Vec<Difference>>
 
 Palette::new(accent: Color)                                // every token a pub field and a builder
-  .base .ink .muted .accent .selected .good .bad .rule .line .glass .shimmer (Style)
-  header() -> header::Styles, footer() -> footer::Styles, list() -> list::Styles,
-  hourglass(elapsed, label, hint) -> Hourglass
+  .base .ink .strong .muted .accent .selected .good .warn .bad .rule .line .glass .shimmer
+  .title .inactive .focus .small (Style)  .bar(Option<list::Bar>) .count(Option<list::Count>)
+  mono(), tone(Tone) -> Style, header() -> header::Styles, footer() -> footer::Styles,
+  list() -> list::Styles, view(&mut List, &[Column]) -> ListView, hourglass(elapsed, label, hint) -> Hourglass
 Words::new()                                               // every word empty until the app sets it
   .help .again .yes .no .choose .leave .too_small .waiting (text)  .busy(Fn(usize) -> String)
 
@@ -399,7 +554,8 @@ restore() -> bool                                          // any thread, once: 
 Modes::new()  .alternate(true) .paste(true) .mouse(false) .focus(false)
 Pace, FRAME (8.333 ms), wait_until(now, dirty, &Pace, deadlines)
 pub enum Wake<E> { Input(Event), Lost(io::Error), Event(screen, E), Loaded(screen, generation, E), Activity(Activity),
-  Command(screen, command::Report) }                       // a command's lines and exit, from the shell's runner
+  Command(screen, command::Report),                        // a command's lines and exit, from the shell's runner
+  Stamped(epoch, screen, E) }                              // a detach answer or a shell-made waker's event
 Waker<E>: new(sender, screen), send(E) -> bool, screen();  listen(sender)   // the input thread
 
 Filter::new(label) .placeholder(..) .hint(..) .keys(list::Keys) .start_keys(..) .clear_keys(..) .input(Input)
@@ -410,8 +566,9 @@ matches(text, query) -> bool                               // every word of the 
 
 dump::size("120x34"), dump::keys("tab / foo enter ctrl+c") -> Result<Vec<KeyEvent>, word>,
 dump::text(&Buffer), dump::ansi(&Buffer);  Bench { screen, frames, average, worst }
-text::clean, cells, split, clip, fit, wrap, hard_wrap;  message(frame, area, text);  copy(text), base64(bytes)
-TOP, SIDE, PAD, GAP                                        // the shell's spacing, in cells
+text::clean, cells, split, clip, fit, wrap, hard_wrap;  message(frame, area, text);  message_at(.., Spot)
+copy(text), base64(bytes)
+TOP, SIDE, PAD, GAP                                        // Layout::new()'s spacing, in cells
 ```
 
 Until the app says otherwise, a `Tui` wants at least 40 × 12 cells, uses
@@ -423,10 +580,14 @@ facts row while a screen is drilled in (`keep_facts(true)` keeps it), has no
 activity band or screen until the app gives it `Activities` (the band then
 shows unless `band(false)`) or its own `Band`, lights the quit word in the
 accent over an input bar or a confirm (`lit_again`), lets no key past an open
-confirm (`through_keys`), and turns on raw mode, the alternate screen and
-bracketed paste only.
+confirm (`through_keys`), draws pito-header's header (no `head`), shows an
+hourglass at once and drops it at once (`hourglass_timing`), shows the name
+and version wherever pito-footer fits them (`version_fit`), has no app slot,
+gate, takeover, modal, toast or top band until the app makes one, and turns
+on raw mode, the alternate screen and bracketed paste only.
 
-`Phase`, `Turn`, `Wake`, `Words`, `Palette`, `Modes`, `Bench`, `Activity`,
+`Phase`, `Turn`, `Wake`, `Words`, `Palette`, `Tone`, `Layout`, `Spot`, `Edge`,
+`Head`, `Row`, `Numbers`, `Focus`, `Item`, `layer::Event`, `Modes`, `Bench`, `Activity`,
 `Activities`, `activity::State`, `Pick`, `log::Turn`, `clock::Units`,
 `command::Progress`, `command::Stream`, `command::Heard` (and its `Line`), `command::Exit`,
 `capture::Walk`, `capture::Script`, `capture::Look` and

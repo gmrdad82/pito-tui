@@ -391,11 +391,10 @@ impl<E: Send + 'static> Tui<E> {
                         .screen
                         .caption()
                         .map(|parts| spans(&parts));
-                    let group = self
-                        .model
-                        .groups
-                        .get(nav.place().group)
-                        .map(|heading| self.model.headings[*heading].label.full().to_vec());
+                    let group = self.model.groups.get(nav.place().group).map(|heading| {
+                        let name = self.model.headings[*heading].label.text().to_string();
+                        vec![(name.into(), Style::new())]
+                    });
                     let middle = caption.or(group).unwrap_or_default();
                     Rule {
                         rule: palette.rule,

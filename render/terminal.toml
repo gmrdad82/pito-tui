@@ -38,3 +38,59 @@ tape = "render/terminal/demo.tape"
 launch = "demo"
 settle = "400ms"
 closure = { crossfade = 0.5 }
+
+[shots.activities]
+kind = "clip"
+line = "A job and a real command on the activity band, the command stopped, then the activity screen over Home with a job opened under its own breadcrumb"
+tape = "render/terminal/activities.tape"
+launch = "demo"
+settle = "400ms"
+closure = { crossfade = 0.5 }
+
+[shots.log]
+kind = "clip"
+line = "A find in a 20,000-line log, stepping through the hits and to both ends, with the scrollbar and the range count"
+tape = "render/terminal/log.tape"
+launch = "demo"
+settle = "400ms"
+closure = { crossfade = 0.5 }
+
+[shots.pick]
+kind = "clip"
+line = "The pick-one prompt choosing an accent, twice"
+tape = "render/terminal/pick.tape"
+launch = "demo"
+settle = "400ms"
+closure = { crossfade = 0.5 }
+
+[shots.modal]
+kind = "clip"
+line = "An app-owned modal: a field narrowing a list with headings the cursor skips, a row that needs a second enter, and an alert"
+tape = "render/terminal/modal.tape"
+launch = "demo"
+settle = "400ms"
+closure = { crossfade = 0.5 }
+
+[shots.layers]
+kind = "clip"
+line = "A band under the header counting down, a takeover with the hourglass, toasts, and a gate before the app"
+tape = "render/terminal/layers.tape"
+launch = "demo"
+settle = "400ms"
+closure = { crossfade = 0.5 }
+
+[shots.quit]
+kind = "clip"
+line = "The quit guard: one ctrl+c arms it until it lapses, and with work running two ask first"
+tape = "render/terminal/quit.tape"
+launch = "demo"
+settle = "400ms"
+closure = { crossfade = 0.5 }
+
+[shots.stack]
+kind = "clip"
+line = "The header as a row stack: groups with an underlined key, a caption, tabs numbered in their group, focus moving through the rows and an after-tabs selector"
+tape = "render/terminal/stack.tape"
+launch = "demo --stack"
+settle = "400ms"
+closure = { crossfade = 0.5 }
