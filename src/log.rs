@@ -3,8 +3,14 @@ use std::sync::Arc;
 
 use crossterm::event::KeyEvent;
 use pito_footer::{Input, InputBar};
-use pito_list::{Key, Keys};
-use ratatui::{Frame, layout::Rect, text::Line, widgets::Paragraph};
+use pito_list::{Cell, Column, Key, Keys, List, ListView, Row, Source};
+use ratatui::{
+    Frame,
+    buffer::Buffer,
+    layout::{Alignment, Rect},
+    text::Line,
+    widgets::Paragraph,
+};
 
 use crate::filter::matches;
 use crate::palette::Palette;
@@ -277,8 +283,28 @@ impl Log {
     }
 
     pub fn draw(&mut self, frame: &mut Frame, area: Rect, palette: &Palette) {
+        let total = self.lines.len();
+        let over = area.height > 0 && total > usize::from(area.height);
+        let cut = over && palette.count.is_some() && area.height > 1;
+        let bar = over && palette.bar.is_some() && area.width > 1;
+        let area = Rect {
+            width: area.width - u16::from(bar),
+            height: area.height - u16::from(cut),
+            ..area
+        };
         self.page = usize::from(area.height).max(1);
         self.top = self.top.min(self.last());
+        if bar {
+            let column = Rect::new(area.right(), area.y, 1, area.height);
+            scrollbar(frame.buffer_mut(), column, self.top, total, palette);
+        }
+        if let Some(count) = palette.count.filter(|_| cut) {
+            let last = (self.top + self.page).min(total);
+            let label = count.label(self.top + 1, last, total).to_string();
+            let line = Rect::new(area.x, area.bottom(), area.width + u16::from(bar), 1);
+            let label = Line::styled(label, palette.muted).alignment(Alignment::Right);
+            frame.render_widget(Paragraph::new(label), line);
+        }
         let current = self.hit.map(|at| self.hits[at]);
         let end = (self.top + self.page).min(self.lines.len());
         let shown: Vec<Line> = (self.top..end)
@@ -292,5 +318,49 @@ impl Log {
             })
             .collect();
         frame.render_widget(Paragraph::new(shown), area);
+    }
+}
+
+struct Blank(usize);
+
+impl Source for Blank {
+    fn len(&self) -> usize {
+        self.0
+    }
+
+    fn row(&self, _index: usize) -> Cow<'_, Row> {
+        Cow::Owned(Row::new(Vec::<Cell>::new()))
+    }
+
+    fn selectable(&self, _index: usize) -> bool {
+        true
+    }
+}
+
+pub(crate) fn scrollbar(
+    buf: &mut Buffer,
+    column: Rect,
+    top: usize,
+    total: usize,
+    palette: &Palette,
+) {
+    if column.is_empty() {
+        return;
+    }
+    let mut list = List::from_source(Blank(total));
+    list.select(top);
+    list.scroll_to(top);
+    let columns = [Column::new("", 0, 0)];
+    let view = ListView::new(&mut list, &columns)
+        .styles(palette.list())
+        .scrollbar(palette.bar)
+        .cursor("");
+    let mut scratch = Buffer::empty(Rect::new(0, 0, 2, column.height));
+    ratatui::widgets::Widget::render(view, scratch.area, &mut scratch);
+    for y in 0..column.height {
+        let at = (column.x, column.y + y);
+        if buf.area.contains(at.into()) {
+            buf[at] = scratch[(1, y)].clone();
+        }
     }
 }
