@@ -1,8 +1,9 @@
+<p align="center"><img src="docs/demo.gif" alt="The demo: a job and a real command on the activity band and screen, an accent picked from a list, a find in a 20,000-line log, a read under the hourglass and a drill-in"></p>
+
 # pito-tui
 
 [![CI](https://github.com/gmrdad82/pito-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/gmrdad82/pito-tui/actions/workflows/ci.yml)
-
-![The demo: a job and a real command on the activity band and screen, an accent picked from a list, a find in a 20,000-line log, a read under the hourglass and a drill-in](docs/demo.gif)
+[![Version](https://img.shields.io/github/v/tag/gmrdad82/pito-tui)](https://github.com/gmrdad82/pito-tui/tags)
 
 The app shell for [PITO](https://pitomd.com) terminal apps, as one ratatui 0.30
 crate. An app gives it a name, a version and an accent colour, and plugs in its
