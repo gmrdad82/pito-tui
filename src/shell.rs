@@ -27,7 +27,8 @@ use crate::model::{Item, Model};
 use crate::pace::{Pace, wait_until};
 use crate::palette::Palette;
 use crate::screen::{Band, Cx, Job, Outbox, Phase, Screen};
-use crate::term::{Modes, Term};
+use crate::signal;
+use crate::term::{Modes, Term, restore};
 use crate::wake::{Wake, Waker, listen};
 use crate::words::Words;
 
@@ -1070,6 +1071,7 @@ impl<E: Send + 'static> Tui<E> {
                 self.apply();
             }
             Wake::Command(screen, report) => return self.heard(screen, report),
+            Wake::Signal(_) => return Flow::Quit,
             _ => {}
         }
         Flow::Stay
@@ -1498,8 +1500,16 @@ impl<E: Send + 'static> Tui<E> {
     }
 
     pub fn run_in(&mut self, term: &mut Term) -> io::Result<()> {
+        let sender = self.out.sender.clone();
+        let live = signal::live(move |signal| {
+            let _ = sender.send(Wake::Signal(signal));
+        });
         let ran = self.serve(term);
         self.end();
+        if let Some(signal) = live.end() {
+            restore();
+            signal::die(signal);
+        }
         ran
     }
 

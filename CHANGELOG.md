@@ -4,6 +4,22 @@ Every release of pito-tui, newest first. Versions follow [Semantic
 Versioning](https://semver.org/) as Cargo reads it before 1.0: a change in the
 middle number may break an app, a change in the last one never does.
 
+## 0.4.1 (2026-10-08)
+
+- No command outlives a hangup or a termination either. While `Tui::run` or
+  `run_in` runs, on Unix, `SIGHUP` (the terminal going away: a closed tmux
+  pane or window, say), `SIGTERM` and `SIGINT` end the loop as a quit does,
+  without asking: every command the shell started, forgotten ones too, gets
+  `SIGTERM` to its process group and `SIGKILL` after `command::GRACE` if it
+  still runs, a command queued but not yet started never starts, the
+  terminal is given back, and then the process ends by that same signal, as
+  it would have without the shell. Before, the app died at once and its
+  commands, each in a process group of its own that the hangup never
+  reaches, ran on. Before the loop and after it, those signals keep their
+  default action.
+- `Wake::Signal(number)` is the wake that ends the loop for such a signal;
+  `Tui::handle` answers it with `Flow::Quit`.
+
 ## 0.4.0 (2026-10-08)
 
 Every PITO TUI can now run the whole shell: the building blocks an app that

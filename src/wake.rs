@@ -19,6 +19,7 @@ pub enum Wake<E> {
     Activity(Activity),
     Command(usize, Report),
     Stamped(u64, usize, E),
+    Signal(i32),
 }
 
 pub struct Waker<E> {

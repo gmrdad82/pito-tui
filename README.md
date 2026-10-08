@@ -24,7 +24,7 @@ the app, in any language.
 ## Install
 
 ```toml
-pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v0.4.0" }
+pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v0.4.1" }
 ```
 
 That one line brings ratatui 0.30, crossterm 0.29, pito-header v0.2.0,
@@ -94,8 +94,9 @@ and `--mono` the monochrome palette.
 - **A terminal that is always given back.** `Term` turns on raw mode, the
   alternate screen and bracketed paste (mouse capture and focus events only
   when the app asks), remembers each one it turned on, and turns exactly
-  those off again on quit, on an error, and on a panic on the UI thread,
-  before the panic message prints. A panic on a worker thread leaves the
+  those off again on quit, on an error, on a hangup or a termination
+  signal while the loop runs, and on a panic on the UI thread, before the
+  panic message prints. A panic on a worker thread leaves the
   running app alone. The app's own panic hook still runs after it, and a
   hook that ends the process calls `pito_tui::restore()` first: any thread
   may call it, the first call gives the terminal back and waits for a frame
@@ -270,8 +271,15 @@ and `--mono` the monochrome palette.
   command still running gets the same polite signal; `run_in` waits up to
   `command::GRACE` for them to end, kills the ones still running, and only
   then returns, so no command outlives the loop that started it, and a
-  command queued but not yet started never starts. Headless runs never
-  spawn a command, and a stop there marks a queued one stopped.
+  command queued but not yet started never starts. The terminal going away
+  or the app being told to end does the same: while the loop runs, on Unix,
+  `SIGHUP`, `SIGTERM` and `SIGINT` end it as a quit does, without asking,
+  every command it started is stopped that way, forgotten ones too, the
+  terminal is given back, and then the process ends by that same signal,
+  as it would have without the shell (`Wake::Signal` is the wake that ends
+  the loop). Before the loop and after it, those signals keep their
+  default action. Headless runs never spawn a command, and a stop there
+  marks a queued one stopped.
 - **The app hears its commands.** The screen that ran a command hears it in
   `Screen::heard(id, command::Heard, cx)`: every line in the order it came,
   as `Heard::Line { stream, text, progress }` (the raw text, the stream it
@@ -556,7 +564,8 @@ Modes::new()  .alternate(true) .paste(true) .mouse(false) .focus(false)
 Pace, FRAME (8.333 ms), wait_until(now, dirty, &Pace, deadlines)
 pub enum Wake<E> { Input(Event), Lost(io::Error), Event(screen, E), Loaded(screen, generation, E), Activity(Activity),
   Command(screen, command::Report),                        // a command's lines and exit, from the shell's runner
-  Stamped(epoch, screen, E) }                              // a detach answer or a shell-made waker's event
+  Stamped(epoch, screen, E),                               // a detach answer or a shell-made waker's event
+  Signal(number) }                                         // SIGHUP, SIGTERM or SIGINT while the loop runs: it quits
 Waker<E>: new(sender, screen), send(E) -> bool, screen();  listen(sender)   // the input thread
 
 Filter::new(label) .placeholder(..) .hint(..) .keys(list::Keys) .start_keys(..) .clear_keys(..) .input(Input)

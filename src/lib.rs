@@ -21,6 +21,7 @@ mod pick;
 pub mod progress;
 mod screen;
 mod shell;
+mod signal;
 mod term;
 pub mod text;
 mod wake;
