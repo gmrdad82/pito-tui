@@ -247,7 +247,11 @@ mod tests {
             RAW | ALTERNATE | PASTE | MOUSE
         );
         let written = String::from_utf8(out).unwrap();
-        for off in ["\x1b[?2004l", "\x1b[?1049l", "\x1b[?1000l", "\x1b[?25h"] {
+        let mut offs = vec!["\x1b[?2004l", "\x1b[?1049l", "\x1b[?25h"];
+        if cfg!(not(windows)) {
+            offs.push("\x1b[?1000l");
+        }
+        for off in offs {
             assert!(written.contains(off), "{off:?} in {written:?}");
         }
         assert!(!written.contains("\x1b[?1004l"), "focus was never on");
