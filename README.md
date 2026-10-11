@@ -16,6 +16,8 @@ crate.
 It has no words of its own: every label, hint and message on screen comes from
 the app, in any language.
 
+Works on Linux, Windows and macOS (CI-tested on all three).
+
 [pito-header]: https://github.com/gmrdad82/pito-header
 [pito-footer]: https://github.com/gmrdad82/pito-footer
 [pito-hourglass]: https://github.com/gmrdad82/pito-hourglass
