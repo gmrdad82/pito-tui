@@ -5,7 +5,7 @@
 [![CI](https://github.com/gmrdad82/pito-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/gmrdad82/pito-tui/actions/workflows/ci.yml)
 [![Version](https://img.shields.io/github/v/tag/gmrdad82/pito-tui)](https://github.com/gmrdad82/pito-tui/tags)
 
-The app shell for [PITO](https://pitomd.com) terminal apps, as one ratatui 0.30
+The app shell for [PITO MD](https://pitomd.com) terminal apps, as one ratatui 0.30
 crate. An app gives it a name, a version and an accent colour, and plugs in its
 screens; the shell does everything around them: the terminal, the loop, the
 keys, the header, the footer, the hourglass while a screen loads, and headless
@@ -254,7 +254,7 @@ and `--mono` the monochrome palette.
   answered to it. Overlays come after every tab, in the order added; a
   screen that wants a digit to switch tabs from it calls `Cx::go`.
 - **Commands on the band.** `Cx::run(id, label, Command)` runs a child
-  command and follows the `--progress json` lines the PITO command-line
+  command and follows the `--progress json` lines the PITO MD command-line
   tools print (version 1: one object a line with `state` start, progress,
   done, fail or end, and `stage`, `fraction`, `msg` and, on the end line,
   `ok`; unknown fields are ignored), so an app that drives its own CLI shows
@@ -890,8 +890,8 @@ issue.
 
 ## Licence
 
-The code is MIT licensed: see [LICENSE](LICENSE), by Catalin Ilinca. The PITO
-name and its logos, and the names and logos of every PITO app and game, are ©
+The code is MIT licensed: see [LICENSE](LICENSE), by Catalin Ilinca. The PITO MD
+name and its logos, and the names and logos of every PITO MD app and game, are ©
 Catalin Ilinca, all rights reserved, and are not covered by the MIT licence;
 see [TRADEMARKS.md](TRADEMARKS.md). The GIFs in `docs/` are captures of the
 demo, under the MIT licence like the code ([docs/NOTICE](docs/NOTICE)).
