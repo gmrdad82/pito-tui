@@ -1,0 +1,32 @@
+title = "FRAME TIME"
+unit = "MS PER FRAME, MEAN OF 1000"
+better = "lower"
+subtitle = "RYZEN 9 9950X"
+date = "2026-10-14"
+suffix = " MS"
+notes = ["DEMO --DUMP <SIZE> --BENCH 1000, RELEASE BUILD: THE WHOLE SHELL, HEADER, SCREEN AND FOOTER, DRAWN INTO AN IN-MEMORY TERMINAL.", "* THE LOOP DRAWS AT MOST ONE FRAME EVERY 8.333 MS (120 FPS), AND NONE WHILE NOTHING CHANGES."]
+
+[[parties]]
+name = "PITO-TUI 0.4.1"
+
+[[groups]]
+name = "120 X 34 CELLS"
+rows = [
+  { label = "HOME", values = [0.094], texts = ["0.094 MS"] },
+  { label = "WHAT TO DO NEXT", values = [0.136], texts = ["0.136 MS"] },
+  { label = "LOG", values = [0.137], texts = ["0.137 MS"] },
+  { label = "JOBS", values = [0.070], texts = ["0.070 MS"] },
+]
+
+[[groups]]
+name = "200 X 60 CELLS"
+rows = [
+  { label = "HOME", values = [0.222], texts = ["0.222 MS"] },
+  { label = "WHAT TO DO NEXT", values = [0.249], texts = ["0.249 MS"] },
+  { label = "LOG", values = [0.314], texts = ["0.314 MS"] },
+  { label = "JOBS", values = [0.249], texts = ["0.249 MS"] },
+]
+
+[[groups]]
+name = "BUDGET"
+rows = [{ label = "ONE FRAME AT 120 FPS", values = [8.333], texts = ["8.333 MS"], mark = "*" }]

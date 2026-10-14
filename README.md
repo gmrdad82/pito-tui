@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/demo.gif" alt="The demo: a job and a real command on the activity band and screen, an accent picked from a list, a find in a 20,000-line log, a read under the hourglass and a drill-in"></p>
+<p align="center"><img src="docs/images/demo.gif" width="800" alt="The demo: a job and a real command on the activity band and screen, an accent picked from a list, a find in a 20,000-line log, a read under the hourglass and a drill-in"></p>
 
 # pito-tui
 
@@ -7,14 +7,22 @@
 
 The app shell for [PITO MD](https://pitomd.com) terminal apps, as one ratatui 0.30
 crate. An app gives it a name, a version and an accent colour, and plugs in its
-screens; the shell does everything around them: the terminal, the loop, the
-keys, the header, the footer, the hourglass while a screen loads, and headless
-dumps for tests and reviews. It brings [pito-header], [pito-footer],
-[pito-hourglass] and [pito-list] with it and re-exports them, so an app pins one
-crate.
+screens; the shell does everything around them: the terminal, a 120 fps loop,
+the keys, the header, the footer, the hourglass while a screen loads, modals,
+toasts, a live activity band, a log viewer, and headless dumps for tests and
+reviews. It brings [pito-header], [pito-footer], [pito-hourglass] and
+[pito-list] with it and re-exports them, so an app pins one crate.
 
 It has no words of its own: every label, hint and message on screen comes from
 the app, in any language.
+
+- **0.07 to 0.31 ms to draw a whole frame**, header, screen and footer, against
+  the 8.3 ms a frame gets at 120 fps.
+- **Idle, it draws nothing**: the loop sleeps until a key, a worker or a
+  deadline wakes it, and redraws only what changed.
+- **One line in `Cargo.toml`** brings the shell and its four widget crates;
+  11 direct dependencies, 4 of them PITO MD's own.
+- **A 1.7 MB demo** (stripped release build), from 8,768 lines of Rust.
 
 Works on Linux, Windows and macOS (CI-tested on all three).
 
@@ -23,7 +31,17 @@ Works on Linux, Windows and macOS (CI-tested on all three).
 [pito-hourglass]: https://github.com/gmrdad82/pito-hourglass
 [pito-list]: https://github.com/gmrdad82/pito-list
 
-## Install
+## Install and first use
+
+With Rust installed, the same lines work on Linux, macOS and Windows:
+
+```sh
+cargo new hello
+cd hello
+cargo add pito-tui --git https://github.com/gmrdad82/pito-tui --tag v0.4.1
+```
+
+or by hand in `Cargo.toml`:
 
 ```toml
 pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v0.4.1" }
@@ -34,19 +52,212 @@ pito-footer v0.4.0, pito-hourglass v0.1.3 and pito-list v0.8.0, reachable as
 `pito_tui::ratatui`, `pito_tui::crossterm`, `pito_tui::header`,
 `pito_tui::footer`, `pito_tui::hourglass` and `pito_tui::list`.
 
-Run the demo to see it (`ctrl+c` twice quits):
+Put this in `src/main.rs`, then `cargo run`: a titled screen with a key count,
+the hints and version in the footer, and `ctrl+c` twice to quit.
+
+```rust,no_run
+use pito_tui::crossterm::event::KeyEvent;
+use pito_tui::footer::Hint;
+use pito_tui::header::Section;
+use pito_tui::ratatui::{Frame, layout::Rect, style::Color, text::Line};
+use pito_tui::{Cx, Palette, Screen, Tui, Words, message};
+
+struct Hello {
+    presses: usize,
+}
+
+impl Screen<()> for Hello {
+    fn draw(&mut self, frame: &mut Frame, area: Rect, palette: &Palette) {
+        let text = format!("{} keys pressed", self.presses);
+        message(frame, area, Line::styled(text, palette.ink));
+    }
+
+    fn key(&mut self, _key: KeyEvent, _cx: &mut Cx<'_, ()>) {
+        self.presses += 1;
+    }
+
+    fn hints(&self) -> Vec<Hint<'_>> {
+        vec![Hint::new("any key", "count")]
+    }
+}
+
+fn main() -> std::io::Result<()> {
+    let words = Words::new()
+        .help("? help")
+        .again("ctrl+c again to quit")
+        .yes("Yes")
+        .no("No")
+        .too_small("Make the window bigger");
+    Tui::new("hello", env!("CARGO_PKG_VERSION"), Color::Rgb(0x5b, 0x8c, 0xff))
+        .words(words)
+        .hints([Hint::new("ctrl+c", "twice quit").pinned()])
+        .screen(Section::new("Hello"), Hello { presses: 0 })
+        .run()
+}
+```
+
+To see everything in this README live, run the demo from a checkout
+(`ctrl+c` twice quits):
 
 ```sh
-cargo run --example demo
-cargo run --example demo -- --stack
-cargo run --example demo -- --dump 100x24 --keys "tab down enter"
+git clone https://github.com/gmrdad82/pito-tui
+cd pito-tui
+cargo run --release --example demo
+cargo run --release --example demo -- --stack
+cargo run --release --example demo -- --dump 100x24 --keys "tab down enter"
 ```
 
 `ctrl+k` in the demo opens a "Go to" list that reaches every screen and
 every layer below; `--stack` shows the header as a row stack with groups,
 and `--mono` the monochrome palette.
 
-## What it does
+## Speed
+
+![Frame time of the demo's four screens at 120x34 and 200x60 cells, 0.070 to 0.314 ms each, against the 8.333 ms budget of one frame at 120 fps](docs/images/frames-bars.png)
+
+The loop draws at most one frame every 8.333 ms (120 fps), batches every wake
+that came in since, and draws nothing while nothing changes. Each frame is a
+synchronized update, so the terminal never shows half of one. Drawing reads
+the loop's moment, never the clock or the input, so a frame costs only the
+drawing:
+
+| Screen | 120x34 average | 120x34 worst | 200x60 average | 200x60 worst |
+| --- | --- | --- | --- | --- |
+| Home | 0.094 ms | 3.085 ms | 0.222 ms | 1.991 ms |
+| What to do next | 0.136 ms | 3.179 ms | 0.249 ms | 1.907 ms |
+| Log (20,000 lines) | 0.137 ms | 0.955 ms | 0.314 ms | 6.730 ms |
+| Jobs | 0.070 ms | 0.850 ms | 0.249 ms | 2.216 ms |
+
+How it was measured, once, on 2026-10-14: `demo --dump 120x34 --bench 1000`
+and `--dump 200x60 --bench 1000` on the release build of pito-tui 0.4.1
+(rustc 1.97.1), an AMD Ryzen 9 9950X on Linux; `Tui::bench` draws each screen
+1,000 times into an in-memory terminal, the whole shell each time, moving the
+clock a frame at a time. The machine was busy with other work (load average
+about 58 on 32 threads), which shows in the worst frames; every one still
+fits the frame budget. Not measured on macOS or Windows.
+
+Size and build, the same day and machine: the demo's release build is 2.3 MB,
+1.7 MB stripped; `src/` is 8,768 lines of Rust, tests included; the crate has
+11 direct dependencies and 71 in all on Linux; a clean release build of the
+demo, every dependency included, takes 39 s.
+
+## Features
+
+### A header, a footer and screens
+
+Each screen is a type that implements `Screen`: it draws its area, takes its
+keys, and says what it shows in the header and the footer. The shell lays the
+screens out as numbered tabs in groups, keeps a breadcrumb when a screen drills
+in, and fits the footer's hints to the width. The header can also be a stack of
+rows in the app's order: groups with an underlined key, a caption, tabs numbered
+within their group, keyboard focus moving through the rows, and a selector after
+the tabs.
+
+![The header as a row stack: groups with an underlined key, a caption, tabs numbered in their group, focus moving through the rows and an after-tabs selector](docs/images/stack.gif)
+
+### A quit guard and keys in a fixed order
+
+One `ctrl+c` arms the quit guard until it lapses, a second quits, and while
+work runs it asks first, in the app's words. Every key goes through one fixed
+order (the guard, a takeover, a modal, a confirm, a pick, the app, the header,
+the nav, the screen), so layers never fight over a key.
+
+![The quit guard: one ctrl+c arms it until it lapses, and with work running two ask first](docs/images/quit.gif)
+
+### Modals
+
+`Cx::open(Modal)` puts a centred, titled container over the live screen, built
+from text, lists and fields: filtered pick lists, search boxes, step menus with
+a reason field, and forms. A field narrows a list as it is typed, headings are
+skipped by the cursor, a risky row needs a second `enter`, and modals stack, so
+an alert can sit over a form.
+
+![An app-owned modal: a field narrowing a list with headings the cursor skips, a row that needs a second enter, and an alert](docs/images/modal.gif)
+
+### Bands, takeovers, toasts and gates
+
+A band under the header with a live countdown, a takeover that covers the app
+with the hourglass during a switch, toasts that outlive a screen change, and a
+gate in front of the app (a lock screen, a sign-in) that takes every key until
+the app opens it.
+
+![A band under the header counting down, a takeover with the hourglass, toasts, and a gate before the app](docs/images/layers.gif)
+
+### Activities and real commands
+
+The app hands the shell what it has running, and the shell draws it as a band
+on the footer and an activity screen that opens over any screen. `Cx::run`
+starts a real child command and follows its `--progress json` lines live; `x`
+stops it with a polite signal, then a kill, and no command outlives the app.
+
+![A job and a real command on the activity band, the command stopped, then the activity screen over Home with a job opened under its own breadcrumb](docs/images/activities.gif)
+
+### A pick-one prompt
+
+`Cx::pick(Pick::new(title, options))` puts a small list over the screen, and
+the answer comes back to the screen that asked. Here it picks the accent, and
+the whole palette follows from that one colour.
+
+![The pick-one prompt choosing an accent, twice](docs/images/pick.gif)
+
+### A log viewer for 20,000 lines
+
+`Log` holds the lines once, builds only the rows on screen, and scrolls, pages
+and jumps to either end; `/` finds every line holding each word, `n` and `N`
+step through the hits, and the scrollbar and range count show where you are.
+Drawing the Log screen at 200x60 took 0.314 ms on average.
+
+![A find in a 20,000-line log, stepping through the hits and to both ends, with the scrollbar and the range count](docs/images/log.gif)
+
+### Headless runs, dumps and frame captures
+
+`Tui::shot` draws the app at any size after a list of keys, `dump::text` and
+`dump::ansi` print it, `Tui::bench` times every screen, and `capture::capture`
+and `capture::compare` record every cell of every screen before a big change
+and report each cell that moved after it. Time comes from the run, never the
+wall clock, so the same app gives the same frames.
+
+```text
+$ cargo run --release --example demo -- --dump 72x14 --keys "tab"
+ ──────────────────────────────── demo ──────────────── workspace one ─
+                    1 Home  2 What to do next  3 Log
+                                5 steps
+ ─ What to do next ────────────────────────────────────────────────────
+    Step                        How
+  ▌ Replace this screen         Home and Next are two Screen types; s…
+    Set your accent             Tui::new takes one colour, or Palette…
+    Add your first command      a key in Screen::key, its work in Cx:…
+    Load real data              Screen::load returns the read; Screen…
+    Wire the headless flags     --dump, --keys, --at, --bench, --capt…
+
+ ──────────────────────────────────────────────────────────────────────
+ ↑↓ move · enter open · / filter · ctrl+k go to · ctrl+c twice quit
+```
+
+### A terminal that is always given back
+
+`Term` turns on raw mode, the alternate screen and bracketed paste, remembers
+each one, and turns exactly those off again on quit, on an error, on a hangup
+or termination signal, and on a panic, before the panic message prints.
+
+## Part of PITO MD
+
+pito-tui is the shell of the [PITO MD](https://pitomd.com) terminal apps, and
+the crate that ties its terminal widgets together:
+
+- [pito-header]: the groups, tabs, breadcrumb and facts rule at the top.
+- [pito-footer]: the key hints, notice line, confirm, input and quit guard at
+  the bottom.
+- [pito-hourglass]: the Braille hourglass shown while a screen loads.
+- [pito-list]: the selectable rows, scrollbar and range count of every list.
+
+Its README visuals come from the PITO MD tools too:
+[prec](https://github.com/gmrdad82/prec) records the demo frame by frame,
+[pconv](https://github.com/gmrdad82/pconv) turns the recordings into GIFs, and
+[pito-compare](https://github.com/gmrdad82/pito-compare) draws the frame-time
+chart.
+
+## Everything it does
 
 - **Screens, plugged in.** Each screen is a type that implements `Screen`:
   it draws its area, takes its keys, and says what it shows in the header
@@ -91,8 +302,6 @@ and `--mono` the monochrome palette.
   group keys and the number keys; then the stop key while a screen loads;
   then the app's own keys (`on_key`); then the screen. `Cx::key` tells a
   callback which key led to it, so `back` knows `esc` from `q`.
-
-  ![The quit guard: one ctrl+c arms it until it lapses, and with work running two ask first](docs/quit.gif)
 - **A terminal that is always given back.** `Term` turns on raw mode, the
   alternate screen and bracketed paste (mouse capture and focus events only
   when the app asks), remembers each one it turned on, and turns exactly
@@ -175,8 +384,6 @@ and `--mono` the monochrome palette.
   the app says, keeping each group's last tab and the current tab while it
   is shown. Without `head`, the header is pito-header's as before, and
   `header_look` applies to it.
-
-  ![The header as a row stack: groups with an underlined key, a caption, tabs numbered in their group, focus moving through the rows and an after-tabs selector](docs/stack.gif)
 - **The app slot.** `Tui::app(screen)` adds one app-level screen that is
   never drawn as content. Its `lead`, `left` and `status_parts` feed the
   title rule on every screen (a screen's own show only when it gives
@@ -207,8 +414,6 @@ and `--mono` the monochrome palette.
   `Closed`; `Cx::close(id)` closes it. Modals stack, so an alert can sit
   over a form. `Cx::alert(id, title, lines)` is a dismiss-only one: `esc`,
   `enter` or `q` closes it.
-
-  ![An app-owned modal: a field narrowing a list with headings the cursor skips, a row that needs a second enter, and an alert](docs/modal.gif)
 - **Toasts and a band under the header.** `Cx::toast(Toast::new(text))`
   shows an app-wide notice over the content, `.at(Spot::TOP_RIGHT)` unless
   placed elsewhere, `.tone(Tone::Good)`, stacked with the others at its
@@ -216,8 +421,6 @@ and `--mono` the monochrome palette.
   (3 s unless set), with one redraw. `Tui::top_band(impl Band)` draws a
   band under the header with the same `Band` trait as the footer's, a
   one-row banner with a live countdown, say, waking for its `deadline`.
-
-  ![A band under the header counting down, a takeover with the hourglass, toasts, and a gate before the app](docs/layers.gif)
 - **Layout.** `Tui::layout(Layout::new()...)` (or `Cx::layout`) sets the
   top and bottom margins, the side margin of the header and footer, the
   content's padding, the gap under the header and the gap above the
@@ -239,8 +442,6 @@ and `--mono` the monochrome palette.
   pages and takes the keys, and its time is the loop's moment.
   `Cx::activities` replaces the app's own list and leaves the commands'
   activities (below) where they are.
-
-  ![A job and a real command on the activity band, the command stopped, then the activity screen over Home with a job opened under its own breadcrumb](docs/activities.gif)
 - **The app's own band and overlays.** `Tui::band(impl Band)` draws the
   band from the app's own data in place of the activity band: the shell
   asks its `height` for the room between the header and the footer (and
@@ -308,8 +509,6 @@ and `--mono` the monochrome palette.
   asked, in `picked`. `Pick::full(true)` fills the screen's area instead of
   a box: the title as a heading, a blank row, then the list;
   `Pick::columns` lays the rows out in the app's own columns.
-
-  ![The pick-one prompt choosing an accent, twice](docs/pick.gif)
 - **A log viewer.** `Log` is a pane a screen embeds for a 20,000-line log or
   a 10,000-event trace: it holds the lines once (`Arc`), builds only the
   rows on screen, clips rather than wraps, and scrolls, pages and jumps to
@@ -319,8 +518,6 @@ and `--mono` the monochrome palette.
   keeps its place. A list that big wants pito-list's `Shared`, which builds
   only the rows on screen from the app's own items. The activity screen's
   detail is a `Log`.
-
-  ![A find in a 20,000-line log, stepping through the hits and to both ends, with the scrollbar and the range count](docs/log.gif)
 - **A scrollbar and a range count.** `Palette::bar(Some(list::Bar::LINE))`
   and `Palette::count(Some(list::Count::new("–", " of ").group(",")))` hold
   the app's choice once; `Palette::view(&mut list, &columns)` gives any
@@ -376,48 +573,7 @@ and `--mono` the monochrome palette.
   against a capture with `Recorder::against`, and any two captures compare
   with `capture::compare_dirs`.
 
-## Use
-
-```rust,no_run
-use pito_tui::crossterm::event::KeyEvent;
-use pito_tui::footer::Hint;
-use pito_tui::header::Section;
-use pito_tui::ratatui::{Frame, layout::Rect, style::Color, text::Line};
-use pito_tui::{Cx, Palette, Screen, Tui, Words, message};
-
-struct Hello {
-    presses: usize,
-}
-
-impl Screen<()> for Hello {
-    fn draw(&mut self, frame: &mut Frame, area: Rect, palette: &Palette) {
-        let text = format!("{} keys pressed", self.presses);
-        message(frame, area, Line::styled(text, palette.ink));
-    }
-
-    fn key(&mut self, _key: KeyEvent, _cx: &mut Cx<'_, ()>) {
-        self.presses += 1;
-    }
-
-    fn hints(&self) -> Vec<Hint<'_>> {
-        vec![Hint::new("any key", "count")]
-    }
-}
-
-fn main() -> std::io::Result<()> {
-    let words = Words::new()
-        .help("? help")
-        .again("ctrl+c again to quit")
-        .yes("Yes")
-        .no("No")
-        .too_small("Make the window bigger");
-    Tui::new("hello", env!("CARGO_PKG_VERSION"), Color::Rgb(0x5b, 0x8c, 0xff))
-        .words(words)
-        .hints([Hint::new("ctrl+c", "twice quit").pinned()])
-        .screen(Section::new("Hello"), Hello { presses: 0 })
-        .run()
-}
-```
+## The demo
 
 `examples/demo.rs` is the fuller starting point: two screens, a read with
 the hourglass, a filtered list, a drill-in with a breadcrumb and copy, fake
@@ -877,8 +1033,10 @@ README's example as a doctest) and the release build of the demo.
 and pull request to main. The tests are a safety net for what would hurt if it
 broke: the frame pacing, the terminal restore, the key order, the load
 generations and the dump formats. Each release is listed in
-[CHANGELOG.md](CHANGELOG.md). The clip at the top is the demo recorded in a
-pseudo-terminal from [render/terminal.toml](render/terminal.toml) and its tape.
+[CHANGELOG.md](CHANGELOG.md). The clips are the demo recorded in a pseudo-terminal by prec from
+[render/terminal.toml](render/terminal.toml) and its tapes, made into GIFs by
+pconv, and the chart is drawn by pcmp from
+[docs/images/frames.toml](docs/images/frames.toml).
 
 ## Contributing
 
@@ -893,7 +1051,8 @@ issue.
 The code is MIT licensed: see [LICENSE](LICENSE), by Catalin Ilinca. The PITO MD
 name and its logos, and the names and logos of every PITO MD app and game, are ©
 Catalin Ilinca, all rights reserved, and are not covered by the MIT licence;
-see [TRADEMARKS.md](TRADEMARKS.md). The GIFs in `docs/` are captures of the
-demo, under the MIT licence like the code ([docs/NOTICE](docs/NOTICE)).
+see [TRADEMARKS.md](TRADEMARKS.md). The GIFs and the chart in `docs/images/` are
+captures and measurements of the demo, under the MIT licence like the code
+([docs/images/NOTICE](docs/images/NOTICE)).
 The look of the crates it brings is in the style of HEY's terminal UI; see
 [NOTICE.md](NOTICE.md).
