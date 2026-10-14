@@ -1,8 +1,17 @@
 # Changelog
 
 Every release of pito-tui, newest first. Versions follow [Semantic
-Versioning](https://semver.org/) as Cargo reads it before 1.0: a change in the
-middle number may break an app, a change in the last one never does.
+Versioning](https://semver.org/): from 1.0.0 on, only a change in the first
+number may break an app; the middle number adds, the last one fixes.
+
+## v1.0.0 — 2026-10-14
+
+### Changed
+
+- pito-tui is 1.0.0: the API an app writes against is the one 0.4.1 had, and from here only a 2.0 may break it.
+- Works on Linux, Windows and macOS, and every change is now built and tested on all three.
+- The README shows pito-tui at a glance: a frame drawn in 0.07 to 0.31 ms against the 8.3 ms of 120 fps, a 30-second start, and a GIF for every feature.
+- The brand reads PITO MD in the README, the crate description and TRADEMARKS.md.
 
 ## 0.4.1 (2026-10-08)
 

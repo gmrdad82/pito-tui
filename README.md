@@ -38,13 +38,13 @@ With Rust installed, the same lines work on Linux, macOS and Windows:
 ```sh
 cargo new hello
 cd hello
-cargo add pito-tui --git https://github.com/gmrdad82/pito-tui --tag v0.4.1
+cargo add pito-tui --git https://github.com/gmrdad82/pito-tui --tag v1.0.0
 ```
 
 or by hand in `Cargo.toml`:
 
 ```toml
-pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v0.4.1" }
+pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v1.0.0" }
 ```
 
 That one line brings ratatui 0.30, crossterm 0.29, pito-header v0.2.0,
@@ -130,7 +130,7 @@ drawing:
 
 How it was measured, once, on 2026-10-14: `demo --dump 120x34 --bench 1000`
 and `--dump 200x60 --bench 1000` on the release build of pito-tui 0.4.1
-(rustc 1.97.1), an AMD Ryzen 9 9950X on Linux; `Tui::bench` draws each screen
+(rustc 1.97.1; 1.0.0 draws with the same code), an AMD Ryzen 9 9950X on Linux; `Tui::bench` draws each screen
 1,000 times into an in-memory terminal, the whole shell each time, moving the
 clock a frame at a time. The machine was busy with other work (load average
 about 58 on 32 threads), which shows in the worst frames; every one still
