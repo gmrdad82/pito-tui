@@ -25,6 +25,22 @@ find "$stage/docs" -name '*.md' -exec sed -i "s/{{tag}}/$tag/g" {} +
   sed '1{/^# /d}' CHANGELOG.md
 } > "$stage/docs/changelog.md"
 
+quote='
+  s{\A---\n(.*?)\n---\n}{
+    my $front = $1;
+    $front =~ s{^(title|description|  label): (.*)$}{
+      my ($key, $value) = ($1, $2);
+      $value = $1 if $value =~ /\A"(.*)"\z/;
+      $value =~ s/\\(["\\])/$1/g;
+      $value =~ s/\\/\\\\/g;
+      $value =~ s/"/\\"/g;
+      "$key: \"$value\""
+    }gme;
+    "---\n$front\n---\n"
+  }se;
+'
+find "$stage/docs" -name '*.md' -exec perl -0pi -e "$quote" {} +
+
 rm -rf "$target/doc"
 RUSTDOCFLAGS="-A rustdoc::broken_intra_doc_links" CARGO_TARGET_DIR=$target cargo doc --no-deps --all-features --quiet
 cp -R "$target/doc" "$stage/docs/api"
