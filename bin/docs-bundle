@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+repo=gmrdad82/pito-tui
+version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+tag=${1:-v$version}
+if [ "$tag" != "v$version" ]; then
+  echo "docs-bundle: $tag doesn't match the version in Cargo.toml (v$version)" >&2
+  exit 1
+fi
+out=${DOCS_OUT:-tmp}
+stage=$out/docs-stage
+target=${CARGO_TARGET_DIR:-target}
+
+rm -rf "$stage"
+mkdir -p "$stage"
+cp -R docs/pages "$stage/docs"
+mkdir -p "$stage/docs/images"
+cp docs/images/*.gif docs/images/*.png "$stage/docs/images/"
+find "$stage/docs" -name '*.md' -exec sed -i "s/{{tag}}/$tag/g" {} +
+
+{
+  printf -- '---\ntitle: Changelog\ndescription: Every release of pito-tui, newest first.\nsidebar:\n  order: 300\n---\n\n'
+  sed '1{/^# /d}' CHANGELOG.md
+} > "$stage/docs/changelog.md"
+
+rm -rf "$target/doc"
+RUSTDOCFLAGS="-A rustdoc::broken_intra_doc_links" CARGO_TARGET_DIR=$target cargo doc --no-deps --all-features --quiet
+cp -R "$target/doc" "$stage/docs/api"
+printf '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=pito_tui/index.html"><title>pito-tui API</title><a href="pito_tui/index.html">pito_tui</a>\n' > "$stage/docs/api/index.html"
+perl -pi -e "s{src=\"docs/images/}{src=\"https://raw.githubusercontent.com/$repo/$tag/docs/images/}g; s{href=\"(?![a-z]+:|\\.|#|/)([^\"#]+)(?<!\\.html)\"}{href=\"https://github.com/$repo/blob/$tag/\$1\"}g" "$stage/docs/api/pito_tui/index.html"
+
+broken=0
+while IFS= read -r page; do
+  rel=${page#"$stage/docs/"}
+  case $rel in
+    index.md) url=. ;;
+    *) url=${rel%.md} ;;
+  esac
+  dir=$(dirname "$rel")
+  while IFS= read -r link; do
+    case $link in
+      http://* | https://* | \#*) continue ;;
+    esac
+    path=${link%%#*}
+    case $path in
+      *.gif | *.png | *.webp) resolved=$(realpath -m --relative-to="$stage/docs" "$stage/docs/$dir/$path") ;;
+      *) resolved=$(realpath -m --relative-to="$stage/docs" "$stage/docs/$url/$path") ;;
+    esac
+    resolved=${resolved%/}
+    if [ -f "$stage/docs/$resolved" ] || [ -f "$stage/docs/$resolved.md" ] || [ -f "$stage/docs/$resolved/index.md" ] || [ -f "$stage/docs/$resolved/index.html" ] || { [ "$resolved" = . ] && [ -f "$stage/docs/index.md" ]; }; then
+      continue
+    fi
+    echo "docs-bundle: $rel links to $link, which isn't in the bundle" >&2
+    broken=1
+  done < <(grep -o '](\([^)]*\))' "$page" | sed 's/^](\(.*\))$/\1/' | sed 's/ .*//')
+  if ! head -1 "$page" | grep -q '^---$' || ! grep -q '^title: ' "$page" || ! grep -q '^description: ' "$page" || ! grep -q '^  order: ' "$page"; then
+    echo "docs-bundle: $rel lacks its frontmatter (title, description, sidebar.order)" >&2
+    broken=1
+  fi
+done < <(find "$stage/docs" -path "$stage/docs/api" -prune -o -name '*.md' -print | sort)
+if grep -rIlE '/home/|/Users/|C:\\\\Users' "$stage/docs" --exclude-dir=api; then
+  echo "docs-bundle: a page above carries a local path" >&2
+  broken=1
+fi
+[ "$broken" = 0 ] || exit 1
+
+tarball=$out/docs-$tag.tar.gz
+tar -czf "$tarball" -C "$stage" docs
+echo "$tarball"

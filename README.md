@@ -38,13 +38,13 @@ With Rust installed, the same lines work on Linux, macOS and Windows:
 ```sh
 cargo new hello
 cd hello
-cargo add pito-tui --git https://github.com/gmrdad82/pito-tui --tag v1.0.0
+cargo add pito-tui --git https://github.com/gmrdad82/pito-tui --tag v1.0.1
 ```
 
 or by hand in `Cargo.toml`:
 
 ```toml
-pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v1.0.0" }
+pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v1.0.1" }
 ```
 
 That one line brings ratatui 0.30, crossterm 0.29, pito-header v0.2.0,
@@ -1037,6 +1037,12 @@ generations and the dump formats. Each release is listed in
 [render/terminal.toml](render/terminal.toml) and its tapes, made into GIFs by
 pconv, and the chart is drawn by pcmp from
 [docs/images/frames.toml](docs/images/frames.toml).
+
+`bin/docs-bundle` builds this crate's section of the PITO MD docs site: the
+guides and reference pages in [docs/pages](docs/pages), the changelog, the
+images and the `cargo doc` API, checked for broken links and packed into
+`tmp/docs-vX.Y.Z.tar.gz`. The release workflow runs it on every tag and
+attaches the bundle to the tag's GitHub Release.
 
 ## Contributing
 
