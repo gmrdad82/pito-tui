@@ -4,6 +4,12 @@ Every release of pito-tui, newest first. Versions follow [Semantic
 Versioning](https://semver.org/): from 1.0.0 on, only a change in the first
 number may break an app; the middle number adds, the last one fixes.
 
+## v1.0.1 — 2026-10-14
+
+### Added
+
+- Docs for the PITO MD docs site: an overview, install and first app, eleven guides with real output from the demo, the formats pito-tui reads and writes, and the full API, attached to every GitHub Release as `docs-vX.Y.Z.tar.gz`.
+
 ## v1.0.0 — 2026-10-14
 
 ### Changed
