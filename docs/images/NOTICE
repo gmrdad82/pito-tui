@@ -4,3 +4,6 @@ frames-bars.png is a chart of that example's own frame-time bench, drawn with pc
 (pito-compare) from frames.toml beside it. All are © 2026 Cătălin Ilinca, under the
 MIT licence like the code (see ../../LICENSE). The names and logos in them stay as
 ../../TRADEMARKS.md says.
+pitomd-wordmark.svg is the PITO MD wordmark, copied by ../../bin/marks from the
+PITO MD brand masters; it is not under the MIT licence (see ../../NOTICE.md and
+../../TRADEMARKS.md).

@@ -1054,6 +1054,8 @@ issue.
 
 ## Licence
 
+<img src="docs/images/pitomd-wordmark.svg" width="320" alt="PITO MD">
+
 The code is MIT licensed: see [LICENSE](LICENSE), by Catalin Ilinca. The PITO MD
 name and its logos, and the names and logos of every PITO MD app and game, are ©
 Catalin Ilinca, all rights reserved, and are not covered by the MIT licence;
