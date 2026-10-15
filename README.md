@@ -44,11 +44,11 @@ cargo add pito-tui --git https://github.com/gmrdad82/pito-tui --tag v1.0.1
 or by hand in `Cargo.toml`:
 
 ```toml
-pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v1.0.1" }
+pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v1.0.2" }
 ```
 
-That one line brings ratatui 0.30, crossterm 0.29, pito-header v0.2.0,
-pito-footer v0.4.0, pito-hourglass v0.1.3 and pito-list v0.8.0, reachable as
+That one line brings ratatui 0.30, crossterm 0.29, pito-header v1.0.1,
+pito-footer v1.0.1, pito-hourglass v1.0.1 and pito-list v1.0.1, reachable as
 `pito_tui::ratatui`, `pito_tui::crossterm`, `pito_tui::header`,
 `pito_tui::footer`, `pito_tui::hourglass` and `pito_tui::list`.
 
