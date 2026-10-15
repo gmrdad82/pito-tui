@@ -24,7 +24,7 @@ pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "{{tag}}" }
 
 The crate is not on crates.io; it is pinned by its git tag. That one line
 brings ratatui 0.30, crossterm 0.29, pito-header v1.0.1, pito-footer v1.0.1,
-pito-hourglass v1.0.1 and pito-list v1.0.1, reachable as
+pito-hourglass v1.0.1 and pito-list v1.0.2, reachable as
 `pito_tui::ratatui`, `pito_tui::crossterm`, `pito_tui::header`,
 `pito_tui::footer`, `pito_tui::hourglass` and `pito_tui::list`, so the app
 needs no other line for them.

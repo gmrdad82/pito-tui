@@ -38,17 +38,17 @@ With Rust installed, the same lines work on Linux, macOS and Windows:
 ```sh
 cargo new hello
 cd hello
-cargo add pito-tui --git https://github.com/gmrdad82/pito-tui --tag v1.0.1
+cargo add pito-tui --git https://github.com/gmrdad82/pito-tui --tag v1.0.3
 ```
 
 or by hand in `Cargo.toml`:
 
 ```toml
-pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v1.0.2" }
+pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v1.0.3" }
 ```
 
 That one line brings ratatui 0.30, crossterm 0.29, pito-header v1.0.1,
-pito-footer v1.0.1, pito-hourglass v1.0.1 and pito-list v1.0.1, reachable as
+pito-footer v1.0.1, pito-hourglass v1.0.1 and pito-list v1.0.2, reachable as
 `pito_tui::ratatui`, `pito_tui::crossterm`, `pito_tui::header`,
 `pito_tui::footer`, `pito_tui::hourglass` and `pito_tui::list`.
 
