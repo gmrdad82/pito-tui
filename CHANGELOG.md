@@ -4,6 +4,12 @@ Every release of pito-tui, newest first. Versions follow [Semantic
 Versioning](https://semver.org/): from 1.0.0 on, only a change in the first
 number may break an app; the middle number adds, the last one fixes.
 
+## v1.0.3 — 2026-10-16
+
+### Changed
+
+- Pins pito-list at v1.0.2, the same API as v1.0.1.
+
 ## v1.0.2 — 2026-10-16
 
 The API is the same as 1.0.1: nothing to change in your app.
