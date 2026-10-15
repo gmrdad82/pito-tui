@@ -6,13 +6,15 @@ number may break an app; the middle number adds, the last one fixes.
 
 ## v1.0.2 — 2026-10-16
 
+The API is the same as 1.0.1: nothing to change in your app.
+
 ### Added
 
-- The README shows the PITO MD wordmark at its Licence section, copied by a new bin/marks from the PITO MD brand masters at aa3aee8 and named…
-- Pins pito-header, pito-footer, pito-hourglass and pito-list at v1.0.1, each the same API as the version pinned before (0.2.0, 0.4.0, 0.1.3.
+- The README shows the PITO MD wordmark in its Licence section.
 
 ### Changed
 
+- pito-tui now brings pito-header, pito-footer, pito-hourglass and pito-list v1.0.1 (from 0.2.0, 0.4.0, 0.1.3 and 0.8.0), each with the same API as before.
 - CI saves its cargo cache only from main.
 
 ## v1.0.1 — 2026-10-14
