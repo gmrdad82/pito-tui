@@ -1,5 +1,5 @@
 The GIFs in this folder are captures of this crate's own example (examples/demo.rs),
-recorded with prec from ../../render/terminal.toml and made into GIFs with pconv.
+recorded with prec from ../../render/terminal.toml and made into GIFs with pcod (pito-codecs).
 frames-bars.png is a chart of that example's own frame-time bench, drawn with pcmp
 (pito-compare) from frames.toml beside it. All are © 2026 Cătălin Ilinca, under the
 MIT licence like the code (see ../../LICENSE). The names and logos in them stay as

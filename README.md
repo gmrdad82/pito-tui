@@ -253,7 +253,7 @@ the crate that ties its terminal widgets together:
 
 Its README visuals come from the PITO MD tools too:
 [prec](https://github.com/gmrdad82/prec) records the demo frame by frame,
-[pconv](https://github.com/gmrdad82/pconv) turns the recordings into GIFs, and
+[pcod](https://github.com/gmrdad82/pito-codecs) (pito-codecs) turns the recordings into GIFs, and
 [pito-compare](https://github.com/gmrdad82/pito-compare) draws the frame-time
 chart.
 
@@ -1035,7 +1035,7 @@ broke: the frame pacing, the terminal restore, the key order, the load
 generations and the dump formats. Each release is listed in
 [CHANGELOG.md](CHANGELOG.md). The clips are the demo recorded in a pseudo-terminal by prec from
 [render/terminal.toml](render/terminal.toml) and its tapes, made into GIFs by
-pconv, and the chart is drawn by pcmp from
+pcod (pito-codecs), and the chart is drawn by pcmp from
 [docs/images/frames.toml](docs/images/frames.toml).
 
 `bin/docs-bundle` builds this crate's section of the PITO MD docs site: the
