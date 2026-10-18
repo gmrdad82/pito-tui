@@ -2,7 +2,6 @@
 
 # pito-tui
 
-[![CI](https://github.com/gmrdad82/pito-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/gmrdad82/pito-tui/actions/workflows/ci.yml)
 [![Version](https://img.shields.io/github/v/tag/gmrdad82/pito-tui)](https://github.com/gmrdad82/pito-tui/tags)
 
 The app shell for [PITO MD](https://pitomd.com) terminal apps, as one ratatui 0.30
@@ -24,7 +23,7 @@ the app, in any language.
   11 direct dependencies, 4 of them PITO MD's own.
 - **A 1.7 MB demo** (stripped release build), from 8,768 lines of Rust.
 
-Works on Linux, Windows and macOS (CI-tested on all three).
+Works on Linux, Windows and macOS.
 
 [pito-header]: https://github.com/gmrdad82/pito-header
 [pito-footer]: https://github.com/gmrdad82/pito-footer
@@ -1029,8 +1028,7 @@ with `crumb` naming where the user is.
 `bin/gate` runs `cargo fmt --check`, `cargo clippy --all-targets
 --all-features -- -D warnings`, the tests (`cargo nextest run`, then this
 README's example as a doctest) and the release build of the demo.
-`bin/gate --fast` leaves the release build out, and CI runs it on every push
-and pull request to main. The tests are a safety net for what would hurt if it
+`bin/gate --fast` leaves the release build out. The tests are a safety net for what would hurt if it
 broke: the frame pacing, the terminal restore, the key order, the load
 generations and the dump formats. Each release is listed in
 [CHANGELOG.md](CHANGELOG.md). The clips are the demo recorded in a pseudo-terminal by prec from
@@ -1041,8 +1039,7 @@ pcod (pito-codecs), and the chart is drawn by pcmp from
 `bin/docs-bundle` builds this crate's section of the PITO MD docs site: the
 guides and reference pages in [docs/pages](docs/pages), the changelog, the
 images and the `cargo doc` API, checked for broken links and packed into
-`tmp/docs-vX.Y.Z.tar.gz`. The release workflow runs it on every tag and
-attaches the bundle to the tag's GitHub Release.
+`tmp/docs-vX.Y.Z.tar.gz`, which each tag's GitHub Release carries.
 
 ## Contributing
 

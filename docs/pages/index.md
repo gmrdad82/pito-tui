@@ -29,7 +29,7 @@ the app, in any language.
   11 direct dependencies, 4 of them PITO MD's own.
 - **A 1.7 MB demo** (stripped release build), from 8,768 lines of Rust.
 
-Works on Linux, Windows and macOS (CI-tested on all three).
+Works on Linux, Windows and macOS.
 
 ## Speed
 
