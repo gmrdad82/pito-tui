@@ -30,6 +30,8 @@ Works on Linux, Windows and macOS.
 [pito-hourglass]: https://github.com/gmrdad82/pito-hourglass
 [pito-list]: https://github.com/gmrdad82/pito-list
 
+Got questions or doubts? Ping me on Discord: https://discord.gg/XsNcn3kYzn
+
 ## Install and first use
 
 With Rust installed, the same lines work on Linux, macOS and Windows:
