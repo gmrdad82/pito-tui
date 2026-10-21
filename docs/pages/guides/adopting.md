@@ -56,7 +56,7 @@ shell deletes that glue; the app's screens and data stay as they are.
 | Key routing: release, quit guard, confirm, input, help, nav | `Tui::key`, in that order |
 | Quit guard wiring: busy count, wording, tick, deadline, notice, bar | `Screen::busy`, `Words::again` and `Words::busy`, `quit`, `quit_window` |
 | A confirm gathered from several places | `Cx::confirm` and `Screen::answer` |
-| Header assembly: title, help word, a lead beside it, a status fitted to the room, facts, a breadcrumb kept in step | `Screen::lead`, `status_parts`, `facts`, `crumb`, `selected` and `back`, `keep_facts` |
+| Header assembly: title, help word, a lead beside it, a status fitted to the room, facts, a breadcrumb kept in step | `Screen::lead`, `status_parts`, `badge`, `facts`, `crumb`, `selected` and `back`, `keep_facts` |
 | Footer assembly: hints, notice, legend, confirm, input, version, height | `Screen::hints`, `input`, `notice`, `legend`, `Cx::say`, `Words::leave`; the version slot is wired |
 | A panel of running work above the footer and a screen listing it, with a detail view | `Activities`, fed by `Cx::activity`, `activities` and `forget`; or the app's own `Band` and `Tui::overlay` screen |
 | A screen of its own opened over any other by a key, with unlit tabs and its own breadcrumb | `Tui::overlay(section, keys, screen)` |

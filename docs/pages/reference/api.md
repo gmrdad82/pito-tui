@@ -50,6 +50,7 @@ pub trait Screen<E>: Any {                                 // every method but d
   fn hints(&self) -> Vec<Hint>;  fn facts(&self) -> Vec<(String, Style)>;
   fn status(&self) -> Option<(String, Style)>;
   fn status_parts(&self, room: u16) -> Vec<(String, Style)>;  // default: status() as one part
+  fn badge(&self) -> &[Span];  // after the status and a space; Span = (Cow<'static, str>, Style)
   fn lead(&self, room: u16) -> Vec<(String, Style)>;      // beside the help word
   fn left(&self, room: u16, help: Option<&str>) -> Option<Vec<(String, Style)>>;  // the whole left side
   fn notice(&self) -> Option<Notice>;  fn legend(&self) -> Option<&str>;

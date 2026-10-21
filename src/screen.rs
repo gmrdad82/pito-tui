@@ -96,6 +96,10 @@ pub trait Screen<E>: Any {
         self.status().into_iter().collect()
     }
 
+    fn badge(&self) -> &[Span] {
+        &[]
+    }
+
     fn lead(&self, _room: u16) -> Vec<(String, Style)> {
         Vec::new()
     }

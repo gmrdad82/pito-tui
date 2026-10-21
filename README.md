@@ -386,8 +386,8 @@ chart.
   is shown. Without `head`, the header is pito-header's as before, and
   `header_look` applies to it.
 - **The app slot.** `Tui::app(screen)` adds one app-level screen that is
-  never drawn as content. Its `lead`, `left` and `status_parts` feed the
-  title rule on every screen (a screen's own show only when it gives
+  never drawn as content. Its `lead`, `left`, `status_parts` and `badge`
+  feed the title rule on every screen (a screen's own show only when it gives
   none), so app-wide indicators come from one place. It hears app-wide
   keys first in `Screen::claim(key, cx) -> bool`, over a gate, a typing
   screen or any screen (`Cx::typing()` says when the screen in front takes
@@ -632,6 +632,7 @@ pub trait Screen<E>: Any {                                 // every method but d
   fn hints(&self) -> Vec<Hint>;  fn facts(&self) -> Vec<(String, Style)>;
   fn status(&self) -> Option<(String, Style)>;
   fn status_parts(&self, room: u16) -> Vec<(String, Style)>;  // default: status() as one part
+  fn badge(&self) -> &[Span];  // after the status and a space; Span = (Cow<'static, str>, Style)
   fn lead(&self, room: u16) -> Vec<(String, Style)>;      // beside the help word
   fn left(&self, room: u16, help: Option<&str>) -> Option<Vec<(String, Style)>>;  // the whole left side
   fn notice(&self) -> Option<Notice>;  fn legend(&self) -> Option<&str>;
@@ -818,7 +819,7 @@ shell deletes that glue; the app's screens and data stay as they are.
 | Key routing: release, quit guard, confirm, input, help, nav | `Tui::key`, in that order |
 | Quit guard wiring: busy count, wording, tick, deadline, notice, bar | `Screen::busy`, `Words::again` and `Words::busy`, `quit`, `quit_window` |
 | A confirm gathered from several places | `Cx::confirm` and `Screen::answer` |
-| Header assembly: title, help word, a lead beside it, a status fitted to the room, facts, a breadcrumb kept in step | `Screen::lead`, `status_parts`, `facts`, `crumb`, `selected` and `back`, `keep_facts` |
+| Header assembly: title, help word, a lead beside it, a status fitted to the room, facts, a breadcrumb kept in step | `Screen::lead`, `status_parts`, `badge`, `facts`, `crumb`, `selected` and `back`, `keep_facts` |
 | Footer assembly: hints, notice, legend, confirm, input, version, height | `Screen::hints`, `input`, `notice`, `legend`, `Cx::say`, `Words::leave`; the version slot is wired |
 | A panel of running work above the footer and a screen listing it, with a detail view | `Activities`, fed by `Cx::activity`, `activities` and `forget`; or the app's own `Band` and `Tui::overlay` screen |
 | A screen of its own opened over any other by a key, with unlit tabs and its own breadcrumb | `Tui::overlay(section, keys, screen)` |

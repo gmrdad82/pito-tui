@@ -205,13 +205,39 @@ impl<E: Send + 'static> Tui<E> {
         left
     }
 
-    fn right(&self, index: usize, room: u16) -> Vec<(String, Style)> {
+    fn right(&self, index: usize, room: u16, buf: &mut Vec<(String, Style)>) -> usize {
         let (app, screen) = self.sides(index);
-        let parts = app.status_parts(room);
-        if parts.iter().any(|(text, _)| !text.is_empty()) {
-            return parts;
+        let mut badge = app.badge();
+        if badge.iter().all(|(text, _)| text.is_empty()) {
+            badge = screen.badge();
         }
-        screen.status_parts(room)
+        let taken = badge
+            .iter()
+            .fold(0u16, |sum, (text, _)| sum.saturating_add(width(text)));
+        let shown = badge.iter().any(|(text, _)| !text.is_empty()) && taken <= room;
+        let room = if shown {
+            room.saturating_sub(taken.saturating_add(1))
+        } else {
+            room
+        };
+        let mut status = app.status_parts(room);
+        if status.iter().all(|(text, _)| text.is_empty()) {
+            status = screen.status_parts(room);
+        }
+        let mut used = 0;
+        for (text, style) in &status {
+            put(buf, &mut used, text, *style);
+        }
+        if !shown {
+            return used;
+        }
+        if status.iter().any(|(text, _)| !text.is_empty()) {
+            put(buf, &mut used, " ", Style::new());
+        }
+        for (text, style) in badge {
+            put(buf, &mut used, text, *style);
+        }
+        used
     }
 
     pub(crate) fn header<'a>(
@@ -587,14 +613,16 @@ impl<E: Send + 'static> Tui<E> {
         let facts = screen.facts();
         let room = room(width, &title);
         let left = self.left(index, room);
-        let status = self.right(index, room);
+        let mut parts = std::mem::take(&mut self.right_parts);
+        let used = self.right(index, room, &mut parts);
+        let status = &parts[..used];
         let line = Rect::new(area.x + layout.side, area.y + layout.top, width, 1);
         let mut below;
         if self.gated || self.head.is_some() {
             let top = line.y.min(bottom);
             if self.gated {
                 if top < bottom {
-                    self.title_rule(frame.buffer_mut(), line, &self.title, &left, &status);
+                    self.title_rule(frame.buffer_mut(), line, &self.title, &left, status);
                 }
                 below = (top + 1).min(bottom);
             } else {
@@ -605,14 +633,14 @@ impl<E: Send + 'static> Tui<E> {
                     index,
                     &facts,
                     &left,
-                    &status,
+                    status,
                 );
                 below = y;
                 self.rows = rows;
             }
             self.top = Rect::default();
         } else {
-            let header = self.header(&title, &facts, &left, &status);
+            let header = self.header(&title, &facts, &left, status);
             let top = Rect::new(
                 line.x,
                 line.y,
@@ -641,6 +669,7 @@ impl<E: Send + 'static> Tui<E> {
                 below += height;
             }
         }
+        self.right_parts = parts;
         below = below.saturating_add(layout.head_gap).min(bottom);
         let screen = &self.screens[index].screen;
         let again = self.quit.notice().filter(|text| !text.is_empty());
@@ -728,4 +757,16 @@ impl<E: Send + 'static> Tui<E> {
         }
         self.draw_toasts(frame, content);
     }
+}
+
+fn put(buf: &mut Vec<(String, Style)>, used: &mut usize, text: &str, style: Style) {
+    match buf.get_mut(*used) {
+        Some(slot) => {
+            slot.0.clear();
+            slot.0.push_str(text);
+            slot.1 = style;
+        }
+        None => buf.push((text.to_string(), style)),
+    }
+    *used += 1;
 }

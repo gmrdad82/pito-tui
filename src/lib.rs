@@ -33,7 +33,7 @@ pub use copy::{COPY_MAX, base64, copy};
 pub use filter::{Filter, Turn, matches};
 pub use head::{Focus, Head, Numbers, Row};
 pub use headless::Bench;
-pub use label::Label;
+pub use label::{Label, Span};
 pub use layer::{Choice, Field, Modal, Takeover, Toast};
 pub use layout::{Edge, GAP, Layout, PAD, SIDE, Spot, TOP};
 pub use log::Log;

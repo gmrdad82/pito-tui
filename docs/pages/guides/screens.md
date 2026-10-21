@@ -60,6 +60,11 @@ impl Screen<Msg> for Journal {
 - `status` or `status_parts(room)` sit on the right of the title rule, and
   `lead(room)` on its left beside the help word; each is told the room it
   has, so it can drop a part rather than see it cut.
+- `badge()` draws a short pill of `Span` parts (a licence tag, say) at the
+  right end of the same rule, after the status and one space. It borrows parts
+  the screen keeps in its own state and updates only when they change, so a
+  steady badge allocates nothing per frame; a badge wider than the room is left
+  out rather than cut.
 - `notice` keeps a line in the footer in any tone for as long as the screen
   returns it; `Cx::say(text, tone)` shows one until the next key.
 
@@ -137,8 +142,8 @@ sections, facts and crumbs.
 ## One app-wide screen
 
 `Tui::app(screen)` adds a screen that is never drawn as content. Its `lead`,
-`left` and `status_parts` feed the title rule on every screen, and it hears
-app-wide keys first in `claim`:
+`left`, `status_parts` and `badge` feed the title rule on every screen, and it
+hears app-wide keys first in `claim`:
 
 ```rust
 impl Screen<Msg> for App {

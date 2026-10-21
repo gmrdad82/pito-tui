@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -18,7 +19,8 @@ use pito_tui::ratatui::{
     widgets::Paragraph,
 };
 use pito_tui::{
-    Activities, Activity, Band, Cx, Flow, Job, Palette, Phase, Screen, Tui, Words, dump,
+    Activities, Activity, Band, Cx, Flow, Head, Job, Palette, Phase, Row, Screen, Span, Tui, Words,
+    dump,
 };
 
 #[derive(Default)]
@@ -276,6 +278,69 @@ fn a_drilled_in_screen_keeps_its_facts_row_on_ask_and_its_status_keeps_each_styl
         assert!(text.contains("build"), "{text}");
         assert_eq!(rows(&frame, "1 failed", red), shown, "{text}");
         assert_eq!(rows(&frame, "3 passed", red), 0, "{text}");
+    }
+}
+
+struct Badged {
+    status: bool,
+    badge: Vec<Span>,
+}
+
+impl Badged {
+    fn new(status: bool) -> Self {
+        let gold = Style::new().fg(Color::Yellow);
+        Self {
+            status,
+            badge: vec![
+                (Cow::Borrowed("◖"), gold),
+                (Cow::Borrowed("PRO"), gold.add_modifier(Modifier::BOLD)),
+                (Cow::Borrowed("◗"), gold),
+            ],
+        }
+    }
+}
+
+impl Screen<u32> for Badged {
+    fn draw(&mut self, _frame: &mut Frame, _area: Rect, _palette: &Palette) {}
+
+    fn status_parts(&self, _room: u16) -> Vec<(String, Style)> {
+        if self.status {
+            vec![("3 synced".into(), Style::new())]
+        } else {
+            Vec::new()
+        }
+    }
+
+    fn badge(&self) -> &[Span] {
+        &self.badge
+    }
+}
+
+#[test]
+fn the_badge_follows_the_status_after_one_space_at_the_right_end_of_the_header() {
+    let ends = |text: &str, tail: &str| {
+        text.lines().any(|line| {
+            line.find(tail)
+                .is_some_and(|at| !line[at + tail.len()..].chars().any(char::is_alphanumeric))
+        })
+    };
+    for headed in [false, true] {
+        for (status, tail, gone) in [(true, "3 synced ◖PRO◗", ""), (false, "◖PRO◗", "synced")]
+        {
+            let tui = Tui::<u32>::new("probe", "1.2.3", Color::Blue);
+            let tui = if headed {
+                tui.head(Head::new([Row::Title]))
+            } else {
+                tui
+            };
+            let mut tui = tui.screen(Section::new("Plan"), Badged::new(status));
+            tui.start();
+            for _ in 0..2 {
+                let text = dump::text(&tui.frame(60, 16));
+                assert!(ends(&text, tail), "{text}");
+                assert!(gone.is_empty() || !text.contains(gone), "{text}");
+            }
+        }
     }
 }
 
