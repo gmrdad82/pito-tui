@@ -240,6 +240,11 @@ $ cargo run --release --example demo -- --dump 72x14 --keys "tab"
 `Term` turns on raw mode, the alternate screen and bracketed paste, remembers
 each one, and turns exactly those off again on quit, on an error, on a hangup
 or termination signal, and on a panic, before the panic message prints.
+On the alternate screen (not on Windows) it also asks the terminal for key
+event types and turns off its alternate scroll, so the wheel sends no arrows
+where the terminal honours that, and in kitty the wheel's arrow
+press-and-release pairs are dropped; either way the wheel doesn't move a list
+like arrow keys, and real arrows and held keys work as before.
 
 ## Part of PITO MD
 
@@ -308,7 +313,11 @@ chart.
   when the app asks), remembers each one it turned on, and turns exactly
   those off again on quit, on an error, on a hangup or a termination
   signal while the loop runs, and on a panic on the UI thread, before the
-  panic message prints. A panic on a worker thread leaves the
+  panic message prints. On the alternate screen (not on Windows) it pushes
+  the keyboard event-type flags and turns off alternate scroll, so the wheel
+  sends no arrows where the terminal honours that, in kitty the wheel's arrow
+  pairs are dropped, and the wheel doesn't move a list like arrow keys; real
+  arrows and held keys are unchanged. A panic on a worker thread leaves the
   running app alone. The app's own panic hook still runs after it, and a
   hook that ends the process calls `pito_tui::restore()` first: any thread
   may call it, the first call gives the terminal back and waits for a frame

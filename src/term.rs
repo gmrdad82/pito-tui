@@ -7,7 +7,8 @@ use std::thread::{self, ThreadId};
 use crossterm::cursor::Show;
 use crossterm::event::{
     DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
-    EnableFocusChange, EnableMouseCapture,
+    EnableFocusChange, EnableMouseCapture, PopKeyboardEnhancementFlags,
+    PushKeyboardEnhancementFlags,
 };
 use crossterm::terminal::{
     self, BeginSynchronizedUpdate, Clear, ClearType, EndSynchronizedUpdate, EnterAlternateScreen,
@@ -17,11 +18,17 @@ use crossterm::{execute, queue};
 use ratatui::backend::CrosstermBackend;
 use ratatui::{DefaultTerminal, Frame, Terminal};
 
+use crate::wheel::KEY_FLAGS;
+
 pub(crate) const RAW: u8 = 1;
 pub(crate) const ALTERNATE: u8 = 2;
 pub(crate) const PASTE: u8 = 4;
 pub(crate) const MOUSE: u8 = 8;
 pub(crate) const FOCUS: u8 = 16;
+pub(crate) const KEYS: u8 = 32;
+
+const SCROLL_OFF: &[u8] = b"\x1b[?1007l";
+const SCROLL_ON: &[u8] = b"\x1b[?1007h";
 
 static ON: AtomicU8 = AtomicU8::new(0);
 
@@ -88,6 +95,10 @@ pub(crate) fn undo(on: &AtomicU8, out: &mut impl Write, raw: impl FnOnce()) -> u
     if was & PASTE != 0 {
         let _ = queue!(out, DisableBracketedPaste);
     }
+    if was & KEYS != 0 {
+        let _ = queue!(out, PopKeyboardEnhancementFlags);
+        let _ = out.write_all(SCROLL_ON);
+    }
     if was & ALTERNATE != 0 {
         let _ = queue!(out, LeaveAlternateScreen);
     }
@@ -121,6 +132,16 @@ fn switch(on: &AtomicU8, flag: u8, out: &mut impl Write, enable: bool) -> io::Re
         (FOCUS, false) => execute!(out, DisableFocusChange)?,
         (ALTERNATE, true) => execute!(out, EnterAlternateScreen)?,
         (ALTERNATE, false) => execute!(out, LeaveAlternateScreen)?,
+        (KEYS, true) => {
+            queue!(out, PushKeyboardEnhancementFlags(KEY_FLAGS))?;
+            out.write_all(SCROLL_OFF)?;
+            out.flush()?;
+        }
+        (KEYS, false) => {
+            queue!(out, PopKeyboardEnhancementFlags)?;
+            out.write_all(SCROLL_ON)?;
+            out.flush()?;
+        }
         _ => {}
     }
     if enable {
@@ -136,9 +157,15 @@ fn turn_on(modes: Modes) -> io::Result<()> {
     terminal::enable_raw_mode()?;
     ON.fetch_or(RAW, Ordering::SeqCst);
     switch(&ON, ALTERNATE, &mut out, modes.alternate)?;
+    #[cfg(not(windows))]
+    switch(&ON, KEYS, &mut out, modes.alternate)?;
     switch(&ON, PASTE, &mut out, modes.paste)?;
     switch(&ON, MOUSE, &mut out, modes.mouse)?;
     switch(&ON, FOCUS, &mut out, modes.focus)
+}
+
+pub(crate) fn keys() -> bool {
+    ON.load(Ordering::SeqCst) & KEYS != 0
 }
 
 fn live() -> bool {
@@ -260,6 +287,24 @@ mod tests {
         assert_eq!(undo(&on, &mut again, || raw += 1), 0);
         assert!(again.is_empty());
         assert_eq!(raw, 1);
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn the_keyboard_flags_are_popped_on_the_alternate_screen_before_it_is_left() {
+        let on = AtomicU8::new(RAW | ALTERNATE | KEYS);
+        let mut out = Vec::new();
+        assert_eq!(undo(&on, &mut out, || {}), RAW | ALTERNATE | KEYS);
+        let written = String::from_utf8(out).unwrap();
+        let pop = written.find("\x1b[<1u").expect("popped the keyboard flags");
+        let scroll = written
+            .find("\x1b[?1007h")
+            .expect("gave alternate scroll back");
+        let leave = written
+            .find("\x1b[?1049l")
+            .expect("left the alternate screen");
+        assert!(pop < scroll && scroll < leave, "{written:?}");
+        assert_eq!(written.matches("\x1b[<1u").count(), 1, "{written:?}");
     }
 
     #[test]

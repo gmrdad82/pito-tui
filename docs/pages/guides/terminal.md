@@ -23,6 +23,14 @@ turned on, and turns exactly those off again:
 
 A panic on a worker thread leaves the running app alone.
 
+On the alternate screen (not on Windows), `Term` also pushes the keyboard
+event-type flags and turns off the terminal's alternate scroll, and undoes
+both before it leaves that screen. Where the terminal honours alternate
+scroll, the wheel then sends no arrows at all. In kitty, with the mouse not
+captured, each wheel step still arrives as an arrow press and its release a
+few milliseconds later; the shell drops those pairs, so the wheel doesn't move
+a list like arrow keys. Real arrows and held keys are unchanged.
+
 ## An app's own panic hook
 
 A hook the app installs before `run` still runs, after the shell has given
@@ -54,6 +62,9 @@ An app that keeps its own loop uses the same parts: `Term::enter(Modes)`,
 `listen(sender)` for the input thread, `Waker` for its workers, `Pace` and
 `wait_until(now, dirty, &pace, deadlines)` for the pacing, and
 `Tui::run_in(&mut term)` to run the shell inside a terminal it already
-holds.
+holds. It reads input through `listen`, never `crossterm::event::read()`
+directly: under the keyboard flags kitty also reports key releases and
+repeats, and `listen` drops the releases and the wheel's pairs and hands a
+repeat on as a press.
 
 Next: [Move an existing app onto the shell](../adopting/).

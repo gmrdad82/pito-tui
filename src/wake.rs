@@ -3,11 +3,14 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 use std::thread::{self, JoinHandle};
+use std::time::Instant;
 
 use crossterm::event::{self, Event};
 
 use crate::activity::Activity;
 use crate::command::Report;
+use crate::term;
+use crate::wheel::WheelFilter;
 
 #[derive(Debug)]
 #[non_exhaustive]
@@ -75,14 +78,38 @@ impl<E: Send + 'static> Waker<E> {
 
 pub fn listen<E: Send + 'static>(sender: Sender<Wake<E>>) -> JoinHandle<()> {
     thread::spawn(move || {
+        let mut filter = WheelFilter::default();
+        let mut out = Vec::new();
         loop {
-            let read = event::read();
-            let failed = read.is_err();
-            let wake = match read {
-                Ok(input) => Wake::Input(input),
-                Err(error) => Wake::Lost(error),
+            let read = match filter.deadline() {
+                Some(due) => match event::poll(due.saturating_duration_since(Instant::now())) {
+                    Ok(true) => event::read().map(Some),
+                    Ok(false) => Ok(None),
+                    Err(error) => Err(error),
+                },
+                None => event::read().map(Some),
             };
-            if sender.send(wake).is_err() || failed {
+            let now = Instant::now();
+            filter.expire(now, &mut out);
+            let lost = match read {
+                Ok(Some(input)) if term::keys() => {
+                    filter.feed(input, now, &mut out);
+                    None
+                }
+                Ok(Some(input)) => {
+                    filter.pass(input, &mut out);
+                    None
+                }
+                Ok(None) => None,
+                Err(error) => Some(error),
+            };
+            for input in out.drain(..) {
+                if sender.send(Wake::Input(input)).is_err() {
+                    return;
+                }
+            }
+            if let Some(error) = lost {
+                let _ = sender.send(Wake::Lost(error));
                 return;
             }
         }

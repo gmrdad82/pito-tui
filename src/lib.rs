@@ -25,6 +25,7 @@ mod signal;
 mod term;
 pub mod text;
 mod wake;
+mod wheel;
 mod words;
 
 pub use activity::{Activities, Activity};
