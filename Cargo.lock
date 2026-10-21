@@ -455,8 +455,8 @@ dependencies = [
 
 [[package]]
 name = "pito-header"
-version = "1.0.1"
-source = "git+https://github.com/gmrdad82/pito-header?tag=v1.0.1#207a036d92de2663b149d168fa576f56979154b7"
+version = "1.1.0"
+source = "git+https://github.com/gmrdad82/pito-header?tag=v1.1.0#c47d746b55136145a1b0aed28c403585ae5ae773"
 dependencies = [
  "crossterm",
  "ratatui",

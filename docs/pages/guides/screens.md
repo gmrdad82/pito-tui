@@ -26,9 +26,12 @@ The shell draws them as numbered tabs. With the default keys (`NavKeys::HEY`)
 `tab` and `shift+tab` move between groups (between tabs when there is one
 group, as here), `]` and `[` between the tabs of a group, a digit goes to that
 tab, and `esc` or `q` go back. `Tui::nav_keys(..)` changes them, and
-`NavKeys::NONE` turns them off. `.short(..)` is the name used when the full one
-doesn't fit. A screen is started the first time it is shown, and hears
-`entered` each time the nav brings it up again.
+`NavKeys::NONE` turns them off. Tabs are numbered from 1, the tenth on `0`;
+`NavKeys::HEY.zero_first(true)` numbers them from `0` instead, and tabs past
+the tenth then show no digit and are reached with `]`, `[` and the group keys.
+`.short(..)` is the name used when the full one doesn't fit. A screen is
+started the first time it is shown, and hears `entered` each time the nav
+brings it up again.
 
 ## What a screen tells the header and footer
 

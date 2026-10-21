@@ -319,6 +319,7 @@ impl<E: Send + 'static> Tui<E> {
             .map_or(Numbers::Across, |head| head.numbers);
         let lone = self.head.as_ref().is_some_and(|head| head.lone) && tabs.len() == 1;
         let offset = place.number.saturating_sub(place.section + 1);
+        let zero_first = self.model.keys.zero_first;
         let items = tabs
             .iter()
             .enumerate()
@@ -326,8 +327,8 @@ impl<E: Send + 'static> Tui<E> {
                 label: &self.model.tabs[*tab].label,
                 number: match numbers {
                     _ if lone => None,
-                    Numbers::Across => Some(offset + at + 1),
-                    Numbers::InGroup => Some(at + 1),
+                    Numbers::Across => head::shown(offset + at + 1, zero_first),
+                    Numbers::InGroup => head::shown(at + 1, zero_first),
                     Numbers::Off => None,
                 },
                 on: at == place.section,

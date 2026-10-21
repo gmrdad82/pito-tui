@@ -92,9 +92,27 @@ fn spans_width<T: AsRef<str>>(spans: &[(T, Style)]) -> u16 {
     })
 }
 
-fn digits(number: usize) -> String {
-    let shown = if number == 10 { 0 } else { number };
-    shown.to_string()
+fn digits(number: usize, buf: &mut [u8; 20]) -> &str {
+    let mut at = buf.len();
+    let mut rest = number;
+    loop {
+        at -= 1;
+        buf[at] = b'0' + (rest % 10) as u8;
+        rest /= 10;
+        if rest == 0 {
+            break;
+        }
+    }
+    std::str::from_utf8(&buf[at..]).unwrap_or_default()
+}
+
+pub(crate) fn shown(number: usize, zero_first: bool) -> Option<usize> {
+    match number {
+        1..=10 if zero_first => Some(number - 1),
+        _ if zero_first => None,
+        10 => Some(0),
+        _ => Some(number),
+    }
 }
 
 pub(crate) struct Pen<'a> {
@@ -282,7 +300,7 @@ impl<'a> Item<'a> {
     fn width(&self, kind: Kind, form: Form) -> u16 {
         let body = self.body(kind, form).width();
         let number = self.number.map_or(0, |number| {
-            width(&digits(number)).saturating_add(u16::from(body > 0))
+            width(digits(number, &mut [0; 20])).saturating_add(u16::from(body > 0))
         });
         number.saturating_add(2).saturating_add(body)
     }
@@ -291,7 +309,7 @@ impl<'a> Item<'a> {
         let body = self.body(kind, form);
         pen.put(" ", style);
         if let Some(number) = self.number {
-            pen.put(&digits(number), style);
+            pen.put(digits(number, &mut [0; 20]), style);
             if body.width() > 0 {
                 pen.put(" ", style);
             }

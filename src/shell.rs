@@ -794,10 +794,11 @@ impl<E: Send + 'static> Tui<E> {
         if !self.model.keys.digits {
             return Digit::Nav;
         }
-        let number = if digit == '0' {
-            10
-        } else {
-            digit as usize - '0' as usize
+        let digit = digit as usize - '0' as usize;
+        let number = match digit {
+            _ if self.model.keys.zero_first => digit + 1,
+            0 => 10,
+            _ => digit,
         };
         let lone = head.lone;
         let swallow = self.model.keys.swallow_digits;

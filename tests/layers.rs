@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use pito_tui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use pito_tui::footer::{Hint, Key, Tone as Said};
+use pito_tui::header::NavKeys;
 use pito_tui::layer::Event;
 use pito_tui::ratatui::{
     Frame, buffer::Buffer, layout::Rect, style::Color, style::Modifier, style::Style,
@@ -202,6 +203,72 @@ fn the_nav_rebuilds_from_a_predicate_and_number_and_group_keys_follow_what_is_dr
     );
     let shown = text(&mut tui);
     assert!(!shown.contains("Inbox") && !shown.contains("2 Sent"));
+}
+
+fn eleven(head: Option<Head>, keys: NavKeys) -> Tui<u32> {
+    let tui = Tui::new("digits", "1.0.0", Color::Blue).nav_keys(keys);
+    let tui = match head {
+        Some(head) => tui.head(head),
+        None => tui,
+    };
+    (1..=11).fold(tui.group("All"), |tui, n| {
+        tui.screen(format!("S{n}"), Plain::<1>::default())
+    })
+}
+
+fn zero_first_numbers_tabs_from_zero(head: Option<Head>) {
+    let mut tui = eleven(head.clone(), NavKeys::HEY.zero_first(true));
+    tui.start();
+    let shown = dump::text(&tui.frame(160, 20));
+    assert!(shown.contains("0 S1 "), "{shown}");
+    assert!(shown.contains("9 S10 "), "{shown}");
+    assert!(
+        shown.lines().any(|line| line.ends_with("9 S10  S11")) && !shown.contains(" 10 S11"),
+        "{shown}"
+    );
+    tui.key(press(KeyCode::Char('5')));
+    assert_eq!(tui.current(), Some(5));
+    tui.key(press(KeyCode::Char('0')));
+    assert_eq!(tui.current(), Some(0));
+    tui.key(press(KeyCode::Char('9')));
+    assert_eq!(tui.current(), Some(9));
+    tui.key(press(KeyCode::Char(']')));
+    assert_eq!(tui.current(), Some(10));
+    let mut tui = eleven(head, NavKeys::HEY);
+    tui.start();
+    let shown = dump::text(&tui.frame(160, 20));
+    assert!(
+        shown.contains("1 S1 ") && shown.contains("0 S10 "),
+        "{shown}"
+    );
+    tui.key(press(KeyCode::Char('5')));
+    tui.key(press(KeyCode::Char('1')));
+    assert_eq!(tui.current(), Some(0));
+    tui.key(press(KeyCode::Char('0')));
+    assert_eq!(tui.current(), Some(9));
+}
+
+#[test]
+fn zero_first_numbers_the_plain_header_tabs_from_zero() {
+    zero_first_numbers_tabs_from_zero(None);
+}
+
+#[test]
+fn zero_first_numbers_the_headed_tabs_from_zero() {
+    zero_first_numbers_tabs_from_zero(Some(Head::new([Row::Title, Row::Groups, Row::Sections])));
+}
+
+#[test]
+fn zero_first_numbers_the_tabs_of_a_group_from_zero() {
+    let head = Head::new([Row::Title, Row::Groups, Row::Sections]).numbers(Numbers::InGroup);
+    let mut tui = eleven(Some(head), NavKeys::HEY.zero_first(true));
+    tui.start();
+    tui.key(press(KeyCode::Char('5')));
+    assert_eq!(tui.current(), Some(5));
+    tui.key(press(KeyCode::Char('0')));
+    assert_eq!(tui.current(), Some(0));
+    tui.key(press(KeyCode::Char('9')));
+    assert_eq!(tui.current(), Some(9));
 }
 
 #[derive(Default)]

@@ -272,7 +272,10 @@ chart.
   between them with the app's nav keys, and starts a screen the first time
   it is shown. A screen hears each time the nav brings it up (`entered`):
   a tab, group or digit key, the digit of the screen already shown too, a
-  click on its tab, or `go`; not the first screen at start.
+  click on its tab, or `go`; not the first screen at start. Tabs are
+  numbered from 1, the tenth on `0`; `NavKeys::HEY.zero_first(true)` numbers
+  them from `0`, and tabs past the tenth then show no digit and are reached
+  with `]`, `[` and the group keys.
 - **Loads that can't land late.** A screen hands the shell its read
   (`load`), the shell runs it on a worker and delivers the answer
   (`loaded`) only if it is still the newest one: each read carries a
