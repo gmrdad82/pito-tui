@@ -4,6 +4,22 @@ Every release of pito-tui, newest first. Versions follow [Semantic
 Versioning](https://semver.org/): from 1.0.0 on, only a change in the first
 number may break an app; the middle number adds, the last one fixes.
 
+## v1.1.0 — 2026-10-21
+
+### Added
+
+- `Screen::badge` puts a short coloured pill (a licence tag, say) at the right end of the header rule, after the status and one space. It borrows the parts the screen keeps, so a steady badge costs nothing per frame; a badge wider than its room is left out rather than cut.
+- Tabs can be numbered from 0: with `NavKeys::HEY.zero_first(true)` the first tab is on `0`, the next nine on `1` to `9`, and tabs past the tenth show no digit and are reached with `]`, `[` and the group keys. Every other app keeps today's numbering.
+
+### Fixed
+
+- In kitty, the mouse wheel no longer moves a list as if arrow keys were pressed: on the alternate screen the shell turns off alternate scroll and drops the wheel's arrow pairs, while held keys and real arrows work as before.
+
+### Changed
+
+- Pins pito-header at v1.1.0.
+- The README names pcod (pito-codecs) as the tool that makes its GIFs, and has a line to ask questions on Discord.
+
 ## v1.0.3 — 2026-10-16
 
 ### Changed
