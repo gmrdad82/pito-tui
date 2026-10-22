@@ -14,7 +14,7 @@ use pito_tui::ratatui::{
 };
 use pito_tui::{
     Choice, Cx, Flow, Head, Job, Layout, Modal, Palette, Phase, Pick, Row, Screen, Takeover,
-    Toast, Tone, Tui, Words, dump,
+    Toast, Tone, Tui, Wake, Words, dump,
 };
 
 type Act = fn(&mut Cx<'_, u32>);
@@ -275,8 +275,11 @@ fn a_title_and_title_spans_replace_the_app_name_with_their_styles() {
     tui.key(ch('s'));
     let frame = tui.frame(72, 20);
     assert!(dump::text(&frame).contains("RedPlain"));
-    assert!(colours(&frame, "Red").iter().all(|fg| *fg == red.fg.unwrap()));
-    assert!(colours(&frame, "Plain").iter().all(|fg| *fg != Color::Red));
+    let reds = colours(&frame, "Red");
+    let plains = colours(&frame, "Plain");
+    assert!(!reds.is_empty() && !plains.is_empty());
+    assert!(reds.iter().all(|fg| *fg == red.fg.unwrap()));
+    assert!(plains.iter().all(|fg| *fg != Color::Red));
 }
 
 #[test]
@@ -315,11 +318,21 @@ fn a_role_paints_the_title_in_its_style_until_it_is_cleared() {
 }
 
 #[test]
-fn a_palette_from_a_screen_becomes_the_apps_palette() {
-    let mut tui = app(Script::default().on('p', |cx| cx.palette(Palette::new(Color::Red))));
-    assert_eq!(*tui.current_palette(), Palette::new(Color::Blue));
+fn a_palette_from_a_screen_becomes_the_apps_palette_and_repaints_the_title() {
+    let mut tui = base()
+        .head(Head::new([Row::Title, Row::Sections]))
+        .screen(
+            Section::new("Main"),
+            Script::default().on('p', |cx| cx.palette(Palette::new(Color::Red))),
+        );
+    tui.start();
+    let title = |tui: &mut Tui<u32>| colours(&tui.frame(72, 20), "probe");
+    let blue = title(&mut tui);
+    assert!(!blue.is_empty() && blue.iter().all(|fg| *fg == Color::Blue), "{blue:?}");
     tui.key(ch('p'));
     assert_eq!(*tui.current_palette(), Palette::new(Color::Red));
+    let red = title(&mut tui);
+    assert!(!red.is_empty() && red.iter().all(|fg| *fg == Color::Red), "{red:?}");
 }
 
 #[test]
@@ -429,8 +442,14 @@ fn a_modal_list_reports_moves_and_the_choice_and_an_alert_closes_on_enter_or_q()
         tui.key(close);
         assert!(!shown(&mut tui).contains("all good"));
     }
-    let closed: Vec<u64> = script(&mut tui).layers[2..].iter().map(|(id, _)| *id).collect();
-    assert_eq!(closed, [5, 6, 6]);
+    assert_eq!(
+        script(&mut tui).layers[2..],
+        [
+            (5, Layered::Closed),
+            (6, Layered::Closed),
+            (6, Layered::Closed),
+        ]
+    );
 }
 
 #[test]
@@ -495,7 +514,7 @@ fn a_gate_without_a_gate_screen_changes_nothing() {
 }
 
 #[test]
-fn detached_work_answers_its_screen_unless_an_epoch_came_first() {
+fn detached_work_answers_its_screen_and_an_epoch_drops_the_queued_work() {
     let mut tui = app(Script::default()
         .on('d', |cx| cx.detach(|| 41))
         .on('e', |cx| cx.epoch()));
@@ -522,6 +541,21 @@ fn a_wakers_message_sent_before_an_epoch_is_dropped_and_one_after_lands() {
 }
 
 #[test]
+fn a_stamped_wake_from_before_an_epoch_is_dropped_and_one_from_after_lands() {
+    let mut tui = app(Script::default().on('e', |cx| cx.epoch()));
+    let sender = tui.sender();
+    assert!(sender.send(Wake::Stamped(0, 0, 4)).is_ok());
+    tui.settle();
+    assert_eq!(script(&mut tui).events, [4]);
+    tui.key(ch('e'));
+    assert!(sender.send(Wake::Stamped(0, 0, 5)).is_ok());
+    assert!(sender.send(Wake::Stamped(1, 0, 6)).is_ok());
+    assert!(sender.send(Wake::Stamped(2, 0, 7)).is_ok());
+    tui.settle();
+    assert_eq!(script(&mut tui).events, [4, 6]);
+}
+
+#[test]
 fn an_epoch_drops_a_running_read_and_every_started_screen_reads_again() {
     let mut tui = app(Script::default().reading().on('e', |cx| cx.epoch()));
     tui.shot(72, 20, &[], false);
@@ -535,17 +569,33 @@ fn an_epoch_drops_a_running_read_and_every_started_screen_reads_again() {
 }
 
 #[test]
-fn a_reload_reads_again_and_a_late_answer_from_before_it_is_dropped() {
+fn a_reload_after_a_read_landed_reads_again_under_a_new_generation() {
     let mut tui = app(Script::default().reading().on('r', |cx| cx.reload()));
     tui.settle();
     assert_eq!(script(&mut tui).loaded, [1]);
     tui.key(ch('r'));
     tui.shot(72, 20, &[], false);
     assert_eq!(script(&mut tui).loads, 2);
-    assert!(!tui.loaded(0, 1, 9), "an answer from the first read");
+    assert!(!tui.loaded(0, 1, 1), "the first generation is spent");
     assert!(tui.loaded(0, 2, 2));
     assert_eq!(script(&mut tui).loaded, [1, 2]);
     assert!(!tui.loaded(7, 1, 1), "no such screen");
+}
+
+#[test]
+fn a_reload_while_a_read_runs_keeps_its_answer_then_reads_again() {
+    let mut tui = app(Script::default().reading().on('r', |cx| cx.reload()));
+    tui.shot(72, 20, &[], false);
+    assert_eq!(script(&mut tui).loads, 1);
+    tui.key(ch('r'));
+    tui.shot(72, 20, &[], false);
+    assert_eq!(script(&mut tui).loads, 1, "no second read while the first runs");
+    assert!(tui.loaded(0, 1, 1), "the running read still answers");
+    assert_eq!(script(&mut tui).loaded, [1]);
+    tui.shot(72, 20, &[], false);
+    assert_eq!(script(&mut tui).loads, 2, "the reload reads once the first landed");
+    assert!(tui.loaded(0, 2, 2));
+    assert_eq!(script(&mut tui).loaded, [1, 2]);
 }
 
 #[test]

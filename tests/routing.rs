@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::time::Duration;
 
 use pito_tui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -6,8 +8,8 @@ use pito_tui::header::{NavKeys, Section};
 use pito_tui::layer::Event as Layered;
 use pito_tui::ratatui::{Frame, layout::Rect, style::Color, widgets::Paragraph};
 use pito_tui::{
-    Activities, Cx, Flow, Head, Item, Job, Modal, Numbers, Palette, Phase, Pick, Row, Screen,
-    Takeover, Tui, Words, dump,
+    Activities, Cx, Flow, Focus, Head, Item, Job, Modal, Numbers, Palette, Phase, Pick, Row,
+    Screen, Takeover, Tui, Words, dump,
 };
 
 type Act = fn(&mut Cx<'_, u32>);
@@ -15,6 +17,7 @@ type Act = fn(&mut Cx<'_, u32>);
 #[derive(Default)]
 struct Rec<const ID: u8> {
     keys: Vec<KeyEvent>,
+    focus: Vec<Focus>,
     answers: Vec<bool>,
     picked: Vec<Option<usize>>,
     layers: Vec<(u64, Layered)>,
@@ -60,6 +63,7 @@ impl<const ID: u8> Screen<u32> for Rec<ID> {
 
     fn key(&mut self, key: KeyEvent, cx: &mut Cx<'_, u32>) {
         self.keys.push(key);
+        self.focus.push(cx.focus());
         if let KeyCode::Char(c) = key.code
             && let Some((_, act)) = self.on.iter().find(|(wanted, _)| *wanted == c)
         {
@@ -337,9 +341,8 @@ fn while_work_runs_the_second_ctrl_c_asks_and_no_or_ctrl_c_keeps_the_app() {
 }
 
 #[test]
-fn the_quit_guard_comes_before_a_takeover_a_modal_a_confirm_and_a_gate() {
-    let acts: [(char, Act); 4] = [
-        ('t', |cx| cx.takeover(Takeover::new(9, "Working"))),
+fn the_quit_guard_comes_before_a_modal_a_confirm_and_a_gate() {
+    let acts: [(char, Act); 3] = [
         ('m', |cx| cx.open(Modal::new(4, "Rename"))),
         ('d', |cx| cx.confirm("Delete it?")),
         ('g', |cx| cx.gate(true)),
@@ -351,9 +354,47 @@ fn the_quit_guard_comes_before_a_takeover_a_modal_a_confirm_and_a_gate() {
         tui.start();
         tui.key(ch(key));
         assert_eq!(tui.key(ctrl('c')), Flow::Stay, "{key}");
-        assert!(text(&mut tui).contains("again to leave") || key == 't', "{key}");
+        assert!(text(&mut tui).contains("again to leave"), "{key}");
         assert_eq!(tui.key(ctrl('c')), Flow::Quit, "{key}");
     }
+}
+
+#[test]
+fn a_ctrl_c_under_a_takeover_arms_the_guard_without_drawing_its_words() {
+    let mut tui = two(Rec::default().on('t', |cx| {
+        cx.takeover(Takeover::new(9, "Working hard").cancel(&[Key::Esc]));
+    }));
+    tui.key(ch('t'));
+    assert_eq!(tui.key(ctrl('c')), Flow::Stay);
+    let armed = text(&mut tui);
+    assert!(armed.contains("Working hard"), "{armed}");
+    assert!(!armed.contains("again to leave"), "{armed}");
+    assert!(one(&mut tui).layers.is_empty());
+    assert_eq!(tui.key(ctrl('c')), Flow::Quit);
+}
+
+#[test]
+fn a_takeover_comes_before_the_modal_under_it() {
+    let mut tui = two(Rec::default().on('b', |cx| {
+        cx.open(Modal::new(4, "Rename"));
+        cx.takeover(Takeover::new(9, "Working hard").cancel(&[Key::Esc]));
+    }));
+    tui.key(ch('b'));
+    for key in [ch('x'), press(KeyCode::Enter), press(KeyCode::Down), ch('q')] {
+        assert_eq!(tui.key(key), Flow::Stay);
+    }
+    assert!(one(&mut tui).layers.is_empty());
+    assert!(text(&mut tui).contains("Working hard"));
+    tui.key(press(KeyCode::Esc));
+    assert_eq!(one(&mut tui).layers, [(9, Layered::Closed)]);
+    let under = text(&mut tui);
+    assert!(under.contains("Rename") && !under.contains("Working hard"), "{under}");
+    tui.key(press(KeyCode::Esc));
+    assert_eq!(
+        one(&mut tui).layers,
+        [(9, Layered::Closed), (4, Layered::Closed)]
+    );
+    assert_eq!(one(&mut tui).codes(), [KeyCode::Char('b')]);
 }
 
 #[test]
@@ -461,13 +502,18 @@ fn an_open_pick_comes_before_the_app_claim_and_the_nav() {
 
 #[test]
 fn an_open_confirm_keeps_keys_from_the_claim_unless_they_are_let_through() {
+    let heard = Rc::new(RefCell::new(Vec::new()));
+    let seen = Rc::clone(&heard);
     let mut tui = base()
         .app(Claimer {
             claims: vec!['x'],
             ..Claimer::default()
         })
-        .through_keys(&[Key::Ctrl('r')])
-        .on_key(|key, _cx| key.code == KeyCode::Char('k'))
+        .through_keys(&[Key::Ctrl('r'), Key::Ctrl('t')])
+        .on_key(move |key, _cx| {
+            seen.borrow_mut().push(key.code);
+            key == ctrl('t')
+        })
         .screen(
             Section::new("One"),
             Rec::<1>::default().on('d', |cx| cx.confirm("Delete it?")),
@@ -478,9 +524,14 @@ fn an_open_confirm_keeps_keys_from_the_claim_unless_they_are_let_through() {
     assert!(tui.find::<Claimer>().unwrap().claimed.is_empty());
     tui.key(ctrl('r'));
     assert_eq!(one(&mut tui).keys, [ch('d'), ctrl('r')]);
+    assert_eq!(*heard.borrow(), [KeyCode::Char('d'), KeyCode::Char('r')]);
+    tui.key(ctrl('t'));
+    assert_eq!(one(&mut tui).keys, [ch('d'), ctrl('r')], "on_key took it");
+    assert_eq!(heard.borrow().len(), 3);
     assert!(text(&mut tui).contains("Delete it?"), "the confirm stays open");
     tui.key(ch('y'));
     assert_eq!(one(&mut tui).answers, [true]);
+    assert_eq!(heard.borrow().len(), 3, "the answer never reaches on_key");
 }
 
 #[test]
@@ -579,14 +630,7 @@ fn a_typing_screen_hears_letters_digits_and_nav_keys_as_text_but_not_ctrl_c() {
 }
 
 #[test]
-fn the_help_key_toggles_help_unless_the_app_has_none() {
-    let mut tui = two(Rec::default());
-    tui.key(ch('?'));
-    assert!(text(&mut tui).contains("? keys"));
-    tui.key(ch('?'));
-    assert!(!text(&mut tui).contains("? keys"));
-    assert!(one(&mut tui).keys.is_empty());
-
+fn without_help_the_help_key_reaches_the_screen() {
     let mut bare = base()
         .help(None)
         .screen(Section::new("One"), Rec::<1>::default());
@@ -614,6 +658,56 @@ fn an_overlay_key_comes_before_the_nav_keys_and_toggles_the_overlay() {
     assert_eq!(tui.find::<Rec<3>>().unwrap().codes(), [KeyCode::Char('1')]);
     tui.key(ch(']'));
     assert_eq!(tui.current(), Some(1), "it closes back to the tab it covered");
+}
+
+#[test]
+fn the_header_focus_keys_come_after_help_and_before_overlays_and_the_nav() {
+    let mut tui = base()
+        .head(Head::new([Row::Title, Row::Sections]))
+        .focus_keys(&[Key::Down, Key::Char('?')], &[Key::Up])
+        .screen(Section::new("One"), Rec::<1>::default())
+        .screen(Section::new("Two"), Rec::<2>::default())
+        .screen(Section::new("Three"), Rec::<3>::default())
+        .overlay(Section::new("Ops"), &[Key::Up], Rec::<4>::default());
+    tui.start();
+    tui.key(press(KeyCode::Right));
+    assert_eq!(tui.current(), Some(0));
+    assert_eq!(one(&mut tui).focus, [Focus::Content]);
+
+    tui.key(ch('?'));
+    assert!(text(&mut tui).contains("? keys"), "help comes first");
+    tui.key(ch('?'));
+
+    tui.key(press(KeyCode::Down));
+    tui.key(press(KeyCode::Right));
+    assert_eq!(tui.current(), Some(1));
+    tui.key(press(KeyCode::Right));
+    tui.key(press(KeyCode::Left));
+    assert_eq!(tui.current(), Some(1));
+    assert!(second(&mut tui).keys.is_empty());
+    tui.key(ch('z'));
+    assert_eq!(second(&mut tui).focus, [Focus::Sections]);
+    tui.key(press(KeyCode::Esc));
+    assert_eq!(tui.current(), Some(1), "esc gives focus back, it does not leave");
+    tui.key(press(KeyCode::Right));
+    assert_eq!(tui.current(), Some(1));
+    assert_eq!(second(&mut tui).focus, [Focus::Sections, Focus::Content]);
+
+    tui.key(press(KeyCode::Down));
+    tui.key(press(KeyCode::Enter));
+    tui.key(ch('z'));
+    assert_eq!(second(&mut tui).focus.last(), Some(&Focus::Content));
+    assert_eq!(
+        second(&mut tui).codes(),
+        [KeyCode::Char('z'), KeyCode::Right, KeyCode::Char('z')]
+    );
+
+    tui.key(press(KeyCode::Down));
+    tui.key(press(KeyCode::Up));
+    assert_eq!(tui.current(), Some(1), "the focus key wins over the overlay key");
+    assert_eq!(tui.find::<Rec<4>>().unwrap().started, 0);
+    tui.key(ch('3'));
+    assert_eq!(tui.current(), Some(2));
 }
 
 #[test]
@@ -808,6 +902,24 @@ fn an_across_head_with_lone_leaves_a_lone_groups_digit_to_the_screen() {
 }
 
 #[test]
+fn group_keys_come_before_the_digits_and_the_brackets() {
+    let mut tui = base()
+        .group("Work")
+        .screen(Section::new("One"), Rec::<1>::default())
+        .screen(Section::new("Two"), Rec::<2>::default())
+        .group("Tools")
+        .group_keys(&[Key::Char('2'), Key::Char(']')])
+        .screen(Section::new("Three"), Rec::<3>::default());
+    tui.start();
+    tui.key(ch('2'));
+    assert_eq!(tui.current(), Some(2), "2 is the group's key, not the second tab");
+    tui.key(ch('1'));
+    tui.key(ch(']'));
+    assert_eq!(tui.current(), Some(2), "] is the group's key, not the next tab");
+    assert!(one(&mut tui).keys.is_empty() && second(&mut tui).started == 0);
+}
+
+#[test]
 fn brackets_step_inside_a_group_and_wrap_without_leaving_it() {
     let mut tui = grouped(NavKeys::HEY, None);
     tui.key(ch(']'));
@@ -893,8 +1005,13 @@ fn back_keys_on_a_drilled_in_tab_call_back_and_otherwise_reach_the_screen() {
     tui.key(ch('q'));
     assert_eq!(one(&mut tui).backs, 1);
     assert!(one(&mut tui).keys.is_empty());
+    one(&mut tui).crumb = Some("detail".into());
+    tui.frame(72, 20);
     tui.key(press(KeyCode::Esc));
-    assert_eq!(one(&mut tui).backs, 1);
+    assert_eq!(one(&mut tui).backs, 2);
+    assert!(one(&mut tui).keys.is_empty());
+    tui.key(press(KeyCode::Esc));
+    assert_eq!(one(&mut tui).backs, 2);
     assert_eq!(one(&mut tui).codes(), [KeyCode::Esc]);
 }
 
@@ -952,6 +1069,10 @@ fn a_hidden_group_leaves_the_group_keys_and_the_builder_can_hide_one() {
     assert_eq!(tui.current(), Some(0), "one group left, no tab to move to");
     tui.key(ch('t'));
     assert_eq!(tui.current(), Some(0));
+    assert!(
+        one(&mut tui).keys.is_empty(),
+        "a hidden group's key is still swallowed"
+    );
     assert!(!tui.go(2));
 }
 
@@ -1004,7 +1125,43 @@ fn go_takes_tabs_and_overlays_but_not_the_gate_the_app_or_nothing() {
 }
 
 #[test]
-fn tabs_keep_their_order_and_the_activity_board_stays_after_them() {
+fn go_from_a_screen_takes_tabs_and_overlays_and_comes_after_show() {
+    let mut tui = base()
+        .gate(Door::default(), false)
+        .screen(
+            Section::new("One"),
+            Rec::<1>::default()
+                .on('g', |cx| cx.go(1))
+                .on('o', |cx| cx.go(2))
+                .on('x', |cx| cx.go(3))
+                .on('h', |cx| {
+                    cx.go(1);
+                    cx.show(|item| item != Item::Tab(1));
+                }),
+        )
+        .screen(Section::new("Two"), Rec::<2>::default())
+        .overlay(Section::new("Ops"), &[Key::Char('O')], Rec::<3>::default());
+    tui.start();
+    assert_eq!(tui.names(), ["One", "Two", "Ops", ""]);
+    tui.key(ch('g'));
+    assert_eq!(tui.current(), Some(1));
+    assert_eq!(second(&mut tui).started, 1);
+    tui.key(ch('1'));
+    tui.key(ch('o'));
+    assert_eq!(tui.current(), Some(2));
+    assert_eq!(tui.find::<Rec<3>>().unwrap().started, 1);
+    tui.key(press(KeyCode::Esc));
+    assert_eq!(tui.current(), Some(0));
+    tui.key(ch('x'));
+    assert_eq!(tui.current(), Some(0), "the gate is never a go target");
+    assert_eq!(tui.find::<Door>().unwrap().started, 0);
+    assert!(!text(&mut tui).contains("the door"));
+    tui.key(ch('h'));
+    assert_eq!(tui.current(), Some(0), "the tab was hidden before go ran");
+}
+
+#[test]
+fn tabs_keep_their_order_and_the_activity_board_comes_after_every_tab_and_overlay() {
     let jobs = || Activities::new(Section::new("Jobs")).keys(&[Key::Char('o')]);
     let mut tui = base()
         .overlay(Section::new("Ops"), &[Key::Char('O')], Rec::<3>::default())
@@ -1013,7 +1170,7 @@ fn tabs_keep_their_order_and_the_activity_board_stays_after_them() {
         .app(Claimer::default())
         .screen(Section::new("Two"), Rec::<2>::default())
         .screen(Section::new("Four"), Rec::<4>::default());
-    assert_eq!(&tui.names()[..5], ["One", "Two", "Four", "Ops", "Jobs"]);
+    assert_eq!(tui.names(), ["One", "Two", "Four", "Ops", "Jobs", ""]);
     tui.start();
     tui.key(ch('3'));
     assert_eq!(tui.find::<Rec<4>>().unwrap().started, 1);
