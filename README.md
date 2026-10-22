@@ -475,8 +475,7 @@ chart.
   only the back keys, its own breadcrumb row (the section's name, then the
   screen's crumb: "Operations / update pfx"), and its confirms and picks
   answered to it. Overlays come after every tab and keep their builder
-  order with the gate and the app; one added after `Tui::activities` still
-  comes before the activity screen. A screen that wants a digit to switch
+  order with the gate and the app; one added after `Tui::activities` comes before the activity screen, and so before a gate or app added after it. A screen that wants a digit to switch
   tabs from it calls `Cx::go`.
 - **Commands on the band.** `Cx::run(id, label, Command)` runs a child
   command and follows the `--progress json` lines the PITO MD command-line
