@@ -1,5 +1,6 @@
 use std::cell::Cell;
 use std::rc::Rc;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use pito_tui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -101,8 +102,11 @@ fn lone(spot: Spot, width: u16, height: u16) -> (u16, u16) {
 }
 
 fn tall() -> u16 {
-    let (top, bottom) = lone(Spot::TOP, 120, 40);
-    bottom - top + 1
+    static TALL: OnceLock<u16> = OnceLock::new();
+    *TALL.get_or_init(|| {
+        let (top, bottom) = lone(Spot::TOP, 120, 40);
+        bottom - top + 1
+    })
 }
 
 struct Area {
@@ -152,20 +156,38 @@ fn check(buffer: &Buffer, spot: Spot, from: usize, count: usize, fit: usize, are
         let Some((top, bottom)) = boxed(buffer, *at, &label(*n)) else {
             panic!("{} is whole:\n{text}", label(*n));
         };
-        assert_eq!(bottom - top + 1, tall, "{} is one toast tall:\n{text}", label(*n));
-        assert!(top >= area.top, "{} stays off the top rows:\n{text}", label(*n));
+        assert_eq!(
+            bottom - top + 1,
+            tall,
+            "{} is one toast tall:\n{text}",
+            label(*n)
+        );
+        assert!(
+            top >= area.top,
+            "{} stays off the top rows:\n{text}",
+            label(*n)
+        );
         assert!(bottom < area.bottom, "{} stays inside:\n{text}", label(*n));
     }
 }
 
 fn overflow(spot: Spot, width: u16, height: u16, count: usize) {
     let fit = fits(spot, width, height);
-    assert!(fit >= 1 && fit < count, "{spot:?} at {width}x{height} fits {fit}");
+    assert!(
+        fit >= 1 && fit < count,
+        "{spot:?} at {width}x{height} fits {fit}"
+    );
     let area = area(width, height);
     let mut tui = tui(many(spot, count, Duration::from_secs(1)), false);
     let buffer = tui.frame(width, height);
     check(&buffer, spot, 0, count, fit, &area);
     let edge = found(&buffer, &label(0)).map(|(_, y)| y);
+    assert_eq!(
+        edge,
+        Some(lone(spot, width, height).0 + 1),
+        "the oldest sits where a lone toast does:\n{}",
+        dump::text(&buffer)
+    );
     tui.advance(Duration::from_secs(1));
     let buffer = tui.frame(width, height);
     assert!(found(&buffer, &label(0)).is_none(), "the oldest has left");
@@ -229,6 +251,8 @@ fn a_full_bottom_stack_never_draws_above_its_top() {
             .min()
             .unwrap_or_else(|| panic!("the stack shows at {width}x{height}:\n{text}"));
         assert!(stack >= area.top, "the stack stays inside:\n{text}");
+        let fit = fits(Spot::BOTTOM, width, height);
+        check(&buffer, Spot::BOTTOM, 0, count, fit, &area);
         for y in 0..stack {
             for x in 0..width {
                 assert_eq!(
@@ -252,8 +276,10 @@ fn a_toast_in_an_area_shorter_than_itself_draws_nothing() {
             let content = seen.get();
             let mut tui = tui(vec![Toast::new(label(0)).at(spot)], true);
             let buffer = tui.frame(60, height);
-            if !content.is_empty() && content.height < tall {
-                short += 1;
+            if content.is_empty() || content.height < tall {
+                if !content.is_empty() {
+                    short += 1;
+                }
                 assert_eq!(
                     dump::text(&buffer),
                     dump::text(&plain),
@@ -262,19 +288,22 @@ fn a_toast_in_an_area_shorter_than_itself_draws_nothing() {
                 );
                 continue;
             }
-            match found(&buffer, &label(0)) {
-                Some(at) => assert!(
-                    boxed(&buffer, at, &label(0)).is_some(),
-                    "{spot:?} at height {height} is whole:\n{}",
+            let at = found(&buffer, &label(0)).unwrap_or_else(|| {
+                panic!(
+                    "{spot:?} in a {}-row area shows:\n{}",
+                    content.height,
                     dump::text(&buffer)
-                ),
-                None => assert_eq!(
-                    dump::text(&buffer),
-                    dump::text(&plain),
-                    "{spot:?} at height {height} leaves no trace"
-                ),
-            }
+                )
+            });
+            assert!(
+                boxed(&buffer, at, &label(0)).is_some(),
+                "{spot:?} at height {height} is whole:\n{}",
+                dump::text(&buffer)
+            );
         }
     }
-    assert!(short > 0, "some height leaves a content area shorter than a toast");
+    assert!(
+        short > 0,
+        "some height leaves a content area shorter than a toast"
+    );
 }
