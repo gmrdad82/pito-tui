@@ -8,6 +8,7 @@ use pito_tui::crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use pito_tui::footer::Key;
+use pito_tui::footer::{Input, InputBar};
 use pito_tui::header::Section;
 use pito_tui::ratatui::{
     Frame,
@@ -16,8 +17,9 @@ use pito_tui::ratatui::{
     style::{Color, Style},
     widgets::Paragraph,
 };
-use pito_tui::footer::{Input, InputBar};
-use pito_tui::{Activities, Activity, Cx, Flow, Item, Palette, Screen, Tui, Wake, Words, dump};
+use pito_tui::{
+    Activities, Activity, Cx, Flow, Head, Item, Palette, Row, Screen, Tui, Wake, Words, dump,
+};
 
 type Log = Rc<RefCell<Vec<String>>>;
 type Act = fn(&mut Cx<'_, u32>);
@@ -232,7 +234,9 @@ fn drilled(log: &Log) -> Tui<u32> {
         .overlay(
             Section::new("Drill"),
             &[Key::Char('D')],
-            Probe::new("drill", log).on('h', |cx| cx.show(|item| item != Item::Tab(0))),
+            Probe::new("drill", log)
+                .on('h', |cx| cx.show(|item| item != Item::Tab(0)))
+                .on('k', |cx| cx.show(|item| item != Item::Tab(1))),
         );
     tui.start();
     tui
@@ -287,6 +291,33 @@ fn a_started_tab_swapped_in_under_an_overlay_hears_entered_again_when_back_leave
 }
 
 #[test]
+fn a_tab_moved_away_and_back_under_an_overlay_hears_nothing_when_it_closes() {
+    let log = log();
+    let mut tui = drilled(&log);
+    tui.key(ch('D'));
+    tui.key(ch('h'));
+    tui.key(ch('k'));
+    tui.key(ch('D'));
+    assert_eq!(tui.current(), Some(0));
+    assert_eq!(heard_by(&log, "one"), ["one start"]);
+    assert!(heard_by(&log, "two").is_empty());
+}
+
+#[test]
+fn a_move_under_an_overlay_is_forgotten_once_a_go_closes_the_overlay() {
+    let log = log();
+    let mut tui = drilled(&log);
+    tui.key(ch('D'));
+    tui.key(ch('h'));
+    assert!(tui.go(1));
+    assert_eq!(heard_by(&log, "two"), ["two start", "two entered"]);
+    tui.key(ch('D'));
+    tui.key(ch('D'));
+    assert_eq!(tui.current(), Some(1));
+    assert_eq!(heard_by(&log, "two"), ["two start", "two entered"]);
+}
+
+#[test]
 fn an_event_before_start_starts_no_screen_and_start_keeps_the_app_first() {
     let log = log();
     let mut tui = base()
@@ -296,10 +327,7 @@ fn an_event_before_start_starts_no_screen_and_start_keeps_the_app_first() {
     assert_eq!(tui.handle(Wake::Event(0, 5)), Flow::Stay);
     assert_eq!(lines(&log), ["main event 4", "main event 5"]);
     tui.start();
-    assert_eq!(
-        lines(&log)[2..],
-        ["app start", "main start"]
-    );
+    assert_eq!(lines(&log)[2..], ["app start", "main start"]);
 }
 
 #[test]
@@ -380,6 +408,7 @@ fn a_role_named_twice_paints_in_its_last_style() {
     let first = Color::Rgb(200, 1, 1);
     let last = Color::Rgb(1, 200, 1);
     let mut tui = base()
+        .head(Head::new([Row::Title, Row::Sections]))
         .role("busy", Style::new().fg(first))
         .role("busy", Style::new().fg(last))
         .screen(
@@ -419,7 +448,8 @@ fn lit_again_relights_an_open_confirm_only_while_the_guard_is_armed() {
     let mut dark = build(false);
     let (shone, plain) = (lit.frame(60, 16), dark.frame(60, 16));
     assert!(painted(&shone, ACCENT) > painted(&plain, ACCENT));
-    assert!(dump::text(&plain).contains("again to leave"));
+    assert!(dump::text(&shone).contains("again to leave"));
+    assert!(!dump::text(&plain).contains("again to leave"));
     assert!(dump::text(&plain).contains("Delete it?"));
     lit.advance(Duration::from_secs(1));
     dark.advance(Duration::from_secs(1));

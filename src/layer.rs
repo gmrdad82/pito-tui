@@ -511,7 +511,9 @@ impl Modal {
     fn line(&self) -> Option<(&str, Tone)> {
         if let Some((part, choice)) = self.armed {
             let warning = match self.parts.get(part) {
-                Some(Part::List(choices)) => choices.all.get(choice).and_then(|it| it.confirm.as_deref()),
+                Some(Part::List(choices)) => {
+                    choices.all.get(choice).and_then(|it| it.confirm.as_deref())
+                }
                 _ => None,
             };
             if let Some(warning) = warning {
@@ -774,7 +776,9 @@ mod tests {
     }
 
     fn names(count: usize) -> Vec<Choice> {
-        (0..count).map(|n| Choice::new(format!("item {n:02}"))).collect()
+        (0..count)
+            .map(|n| Choice::new(format!("item {n:02}")))
+            .collect()
     }
 
     #[test]
@@ -841,7 +845,9 @@ mod tests {
         assert_eq!(modal.value(1), Some("bob"));
         let buffer = shot(&mut modal, 120, 40);
         let shown = dump::text(&buffer);
-        for word in ["Settings", "pick one", "Name", "bob", "red", "blue", "saved"] {
+        for word in [
+            "Settings", "pick one", "Name", "bob", "red", "blue", "saved",
+        ] {
             assert!(shown.contains(word), "{word} is drawn:\n{shown}");
         }
         assert_eq!(boxed(&buffer).map(|place| place.width), Some(50));
@@ -899,7 +905,11 @@ mod tests {
         let modal = Modal::new(1, "F").field(Field::new("A")).focus(9);
         assert_eq!(modal.focused(), 0, "an index past the parts is ignored");
         let modal = Modal::new(1, "F").focus(1).field(Field::new("A"));
-        assert_eq!(modal.focused(), 0, "focus before the part exists is ignored");
+        assert_eq!(
+            modal.focused(),
+            0,
+            "focus before the part exists is ignored"
+        );
         let modal = Modal::new(1, "F")
             .field(Field::new("A"))
             .field(Field::new("B"))
@@ -958,10 +968,7 @@ mod tests {
         modal.key(press(KeyCode::Backspace));
         assert_eq!(modal.value(0), Some("ac"));
         modal.key(press(KeyCode::Home));
-        assert!(matches!(
-            modal.key(press(KeyCode::Left)),
-            Outcome::Stay
-        ));
+        assert!(matches!(modal.key(press(KeyCode::Left)), Outcome::Stay));
         modal.key(press(KeyCode::Delete));
         assert_eq!(modal.value(0), Some("c"));
         modal.key(press(KeyCode::End));
@@ -973,7 +980,10 @@ mod tests {
         modal.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
         assert_eq!(modal.value(0), Some(""));
         modal.key(press(KeyCode::Tab));
-        assert!(matches!(modal.paste("z"), Outcome::Stay), "a list takes no paste");
+        assert!(
+            matches!(modal.paste("z"), Outcome::Stay),
+            "a list takes no paste"
+        );
         assert!(matches!(
             modal.key(press(KeyCode::Char('q'))),
             Outcome::Stay
@@ -1005,7 +1015,11 @@ mod tests {
         assert_eq!(modal.choice(1), Some(2));
         modal.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
         typed(&mut modal, "ray gam");
-        assert_eq!(modal.choice(1), Some(3), "every word must match, in any order");
+        assert_eq!(
+            modal.choice(1),
+            Some(3),
+            "every word must match, in any order"
+        );
         typed(&mut modal, "zz");
         assert_eq!(modal.choice(1), None);
         assert!(matches!(modal.key(press(KeyCode::Enter)), Outcome::Stay));
@@ -1039,7 +1053,11 @@ mod tests {
         modal.key(press(KeyCode::Backspace));
         modal.key(press(KeyCode::Backspace));
         typed(&mut modal, "alp");
-        assert_eq!(modal.choice(1), Some(0), "a lost choice falls to the first left");
+        assert_eq!(
+            modal.choice(1),
+            Some(0),
+            "a lost choice falls to the first left"
+        );
         assert!(matches!(
             modal.key(press(KeyCode::Enter)),
             Outcome::Heard(Event::Chosen { part: 1, choice: 0 })
@@ -1069,10 +1087,7 @@ mod tests {
             modal.key(press(KeyCode::Enter)),
             Outcome::Heard(Event::Submitted { part: 1 })
         ));
-        assert!(matches!(
-            modal.key(press(KeyCode::Down)),
-            Outcome::Stay
-        ));
+        assert!(matches!(modal.key(press(KeyCode::Down)), Outcome::Stay));
     }
 
     #[test]
@@ -1106,8 +1121,14 @@ mod tests {
     #[test]
     fn an_armed_confirm_does_not_carry_to_another_list() {
         let mut modal = Modal::new(1, "Two")
-            .list([Choice::new("keep"), Choice::new("wipe").confirm("again wipes")])
-            .list([Choice::new("Danger").skip(), Choice::new("burn").confirm("again burns")]);
+            .list([
+                Choice::new("keep"),
+                Choice::new("wipe").confirm("again wipes"),
+            ])
+            .list([
+                Choice::new("Danger").skip(),
+                Choice::new("burn").confirm("again burns"),
+            ]);
         modal.key(press(KeyCode::Down));
         assert!(matches!(modal.key(press(KeyCode::Enter)), Outcome::Stay));
         modal.key(press(KeyCode::Tab));
@@ -1126,8 +1147,14 @@ mod tests {
     #[test]
     fn the_warning_shown_is_the_armed_lists_own() {
         let mut modal = Modal::new(1, "Two")
-            .list([Choice::new("keep"), Choice::new("wipe").confirm("again wipes")])
-            .list([Choice::new("Danger").skip(), Choice::new("burn").confirm("again burns")])
+            .list([
+                Choice::new("keep"),
+                Choice::new("wipe").confirm("again wipes"),
+            ])
+            .list([
+                Choice::new("Danger").skip(),
+                Choice::new("burn").confirm("again burns"),
+            ])
             .focus(1);
         modal.key(press(KeyCode::Enter));
         assert_eq!(modal.line(), Some(("again burns", Tone::Warn)));
@@ -1142,8 +1169,14 @@ mod tests {
             .cancel_keys(&[Key::Char('n')])
             .close_keys(&[Key::Char('y')]);
         assert!(matches!(modal.key(press(KeyCode::Esc)), Outcome::Stay));
-        assert!(matches!(modal.key(press(KeyCode::Char('n'))), Outcome::Close));
-        assert!(matches!(modal.key(press(KeyCode::Char('y'))), Outcome::Close));
+        assert!(matches!(
+            modal.key(press(KeyCode::Char('n'))),
+            Outcome::Close
+        ));
+        assert!(matches!(
+            modal.key(press(KeyCode::Char('y'))),
+            Outcome::Close
+        ));
         let mut typing = Modal::new(1, "C")
             .field(Field::new("A"))
             .close_keys(&[Key::Char('y')]);
@@ -1163,7 +1196,10 @@ mod tests {
             assert!(matches!(alert.key(press(code)), Outcome::Close));
         }
         let mut alert = Modal::alert(4, "Heads up", [Line::from("disk full")]);
-        assert!(matches!(alert.key(press(KeyCode::Char('x'))), Outcome::Stay));
+        assert!(matches!(
+            alert.key(press(KeyCode::Char('x'))),
+            Outcome::Stay
+        ));
     }
 
     #[test]
@@ -1282,7 +1318,9 @@ mod tests {
     #[test]
     fn the_status_line_wears_each_tone_and_an_empty_one_takes_no_room() {
         for tone in TONES {
-            let mut modal = Modal::new(1, "S").text([Line::from("x")]).status("toned", tone);
+            let mut modal = Modal::new(1, "S")
+                .text([Line::from("x")])
+                .status("toned", tone);
             let buffer = shot(&mut modal, 60, 20);
             let at = found(&buffer, "toned");
             assert!(
@@ -1290,7 +1328,9 @@ mod tests {
                 "{tone:?}"
             );
         }
-        let mut modal = Modal::new(1, "S").text([Line::from("x")]).status("", Tone::Bad);
+        let mut modal = Modal::new(1, "S")
+            .text([Line::from("x")])
+            .status("", Tone::Bad);
         assert_eq!(modal.line(), None);
         assert_eq!(boxed(&shot(&mut modal, 60, 20)).map(|b| b.height), Some(3));
     }
@@ -1319,7 +1359,10 @@ mod tests {
             }
             for y in place.top()..place.bottom() {
                 let edge = buffer[(place.right() - 1, y)].symbol();
-                assert!(["│", "╮", "╯"].contains(&edge), "{width} edge {edge:?} at {y}");
+                assert!(
+                    ["│", "╮", "╯"].contains(&edge),
+                    "{width} edge {edge:?} at {y}"
+                );
             }
         }
     }

@@ -110,7 +110,7 @@ pub struct Tui<E> {
     focus_keys: (&'static [Key], &'static [Key]),
     pub(crate) screens: Vec<Slot<E>>,
     pub(crate) open: Option<usize>,
-    moved: bool,
+    moved: Option<Option<usize>>,
     pub(crate) board: Option<usize>,
     pub(crate) band: Option<Box<dyn Band>>,
     pub(crate) top_band: Option<Box<dyn Band>>,
@@ -203,7 +203,7 @@ impl<E: Send + 'static> Tui<E> {
             eager: false,
             keep_facts: false,
             lit_again: true,
-            moved: false,
+            moved: None,
             out: Outbox::new(sender),
             inbox,
             moment: Instant::now(),
@@ -1153,7 +1153,9 @@ impl<E: Send + 'static> Tui<E> {
 
     fn close(&mut self) {
         self.open = None;
-        if std::mem::take(&mut self.moved) {
+        if let Some(under) = self.moved.take()
+            && under != self.model.current_screen()
+        {
             self.focus = Focus::Content;
             self.enter();
         }
@@ -1161,7 +1163,7 @@ impl<E: Send + 'static> Tui<E> {
 
     fn enter(&mut self) {
         if self.open.is_none() {
-            self.moved = false;
+            self.moved = None;
         }
         if let Some(index) = self.current() {
             self.begin(index);
@@ -1305,11 +1307,12 @@ impl<E: Send + 'static> Tui<E> {
             (None, Some(_)) => self.taken = None,
             _ => {}
         }
+        let under = self.model.current_screen();
         if let Some(shown) = self.out.show.take()
             && self.model.show(&*shown)
         {
             if self.open.is_some() {
-                self.moved = true;
+                self.moved.get_or_insert(under);
             } else {
                 self.focus = Focus::Content;
                 self.enter();
@@ -1656,6 +1659,7 @@ mod tests {
         seen: Vec<String>,
         on: Vec<(char, Act)>,
         sources: &'static [&'static str],
+        serves: bool,
     }
 
     impl Probe {
@@ -1685,6 +1689,11 @@ mod tests {
             self.sources = sources;
             self
         }
+
+        fn serving(mut self) -> Self {
+            self.serves = true;
+            self
+        }
     }
 
     impl Screen<u32> for Probe {
@@ -1706,6 +1715,10 @@ mod tests {
 
         fn sources(&self) -> &[&str] {
             self.sources
+        }
+
+        fn load(&mut self) -> Option<Job<u32>> {
+            self.serves.then(|| Box::new(|| 7u32) as Job<u32>)
         }
 
         fn start(&mut self, _cx: &mut Cx<'_, u32>) {
@@ -1950,7 +1963,10 @@ mod tests {
         assert_eq!(tui.taken, Some(t0));
         assert_eq!(seen(&tui, "main"), ["start", "o true"]);
         tui.event(0, 8);
-        assert_eq!(tui.out.takeover.as_ref().map(|(_, taken)| taken.id), Some(2));
+        assert_eq!(
+            tui.out.takeover.as_ref().map(|(_, taken)| taken.id),
+            Some(2)
+        );
         assert_eq!(tui.taken, Some(t0));
         tui.event(0, 9);
         assert_eq!(tui.taken, None);
@@ -1992,13 +2008,19 @@ mod tests {
         let mut tui = base()
             .screen(
                 "Main",
-                Probe::new("main").reading(&["feed"]).on('f', |cx| {
-                    cx.changed("feed");
-                    true
-                }),
+                Probe::new("main")
+                    .reading(&["feed"])
+                    .serving()
+                    .on('f', |cx| {
+                        cx.changed("feed");
+                        true
+                    }),
             )
-            .screen("Other", Probe::new("other").reading(&["mail"]))
-            .screen("Both", Probe::new("both").reading(&["mail", "feed"]));
+            .screen("Other", Probe::new("other").reading(&["mail"]).serving())
+            .screen(
+                "Both",
+                Probe::new("both").reading(&["mail", "feed"]).serving(),
+            );
         tui.start();
         for slot in &mut tui.screens {
             slot.stale = false;
@@ -2006,10 +2028,20 @@ mod tests {
         assert_eq!(tui.key(ch('f')), Flow::Stay);
         let stale: Vec<bool> = tui.screens.iter().map(|slot| slot.stale).collect();
         assert_eq!(stale, [true, false, true]);
-        let read: Vec<usize> = tui.reads().iter().map(|(index, ..)| *index).collect();
-        assert_eq!(read, Vec::<usize>::new());
+        let generation = tui.screens[0].generation;
+        let read: Vec<(usize, u64)> = tui
+            .reads()
+            .iter()
+            .map(|(index, generation, _)| (*index, *generation))
+            .collect();
+        assert_eq!(read, [(0, generation + 1)]);
+        assert_eq!(tui.screens[0].reading, Some(generation + 1));
         assert!(!tui.screens[0].stale);
-        assert!(tui.screens[2].stale, "a screen never started waits for its read");
+        assert!(
+            tui.screens[2].stale,
+            "a screen never started waits for its read"
+        );
+        assert_eq!(tui.screens[2].reading, None);
     }
 
     #[test]

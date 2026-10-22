@@ -77,7 +77,9 @@ fn more(tui: &mut Tui<u32>, queue: Vec<Act>) {
 }
 
 fn heard(tui: &Tui<u32>) -> Vec<(u64, Event)> {
-    tui.find::<Host>().map(|host| host.heard.clone()).unwrap_or_default()
+    tui.find::<Host>()
+        .map(|host| host.heard.clone())
+        .unwrap_or_default()
 }
 
 fn frame(tui: &mut Tui<u32>) -> Buffer {
@@ -100,13 +102,12 @@ fn found(buffer: &Buffer, needle: &str) -> Option<(u16, u16)> {
     })
 }
 
-fn found_on(buffer: &Buffer, y: u16, needle: &str) -> Option<u16> {
+fn shows_on(buffer: &Buffer, y: u16, needle: &str) -> bool {
     let area = buffer.area;
     let line: String = (area.left()..area.right())
         .map(|x| buffer[(x, y)].symbol().to_string())
         .collect();
-    let at = line.find(needle)?;
-    u16::try_from(line[..at].chars().count()).ok()
+    line.contains(needle)
 }
 
 fn palette() -> Palette {
@@ -119,11 +120,17 @@ fn a_takeover_draws_its_title_and_label_and_leaves_only_on_its_cancel_keys() {
         Takeover::new(5, "Moving house").label("hang on"),
     )]);
     let text = shown(&mut tui);
-    assert!(text.contains("Moving house") && text.contains("hang on"), "{text}");
+    assert!(
+        text.contains("Moving house") && text.contains("hang on"),
+        "{text}"
+    );
     assert!(!text.contains("One"), "a takeover hides the tabs");
     tui.key(press(KeyCode::Esc));
     tui.key(press(KeyCode::Char('y')));
-    assert!(shown(&mut tui).contains("Moving house"), "no cancel keys, no way out");
+    assert!(
+        shown(&mut tui).contains("Moving house"),
+        "no cancel keys, no way out"
+    );
     assert!(heard(&tui).is_empty());
     assert_eq!(
         tui.find::<Host>().map(|host| host.keys.len()),
@@ -149,7 +156,10 @@ fn a_takeover_title_keeps_the_styles_of_its_spans() {
     )]);
     let buffer = frame(&mut tui);
     let text = dump::text(&buffer);
-    assert!(text.contains("Moving") && !text.contains("ignored"), "{text}");
+    assert!(
+        text.contains("Moving") && !text.contains("ignored"),
+        "{text}"
+    );
     let at = found(&buffer, "Moving");
     assert_eq!(at.map(|at| buffer[at].fg), Some(Color::Red));
     let after = at.map(|(x, y)| buffer[(x + 3, y)].fg);
@@ -167,11 +177,17 @@ fn a_takeover_covers_an_open_modal_and_its_toasts_until_it_ends() {
     assert!(text.contains("Busy") && !text.contains("Rename") && !text.contains("Saved it"));
     tui.key(press(KeyCode::Char('a')));
     tui.paste("bc");
-    assert!(heard(&tui).is_empty(), "the modal under a takeover hears nothing");
+    assert!(
+        heard(&tui).is_empty(),
+        "the modal under a takeover hears nothing"
+    );
     tui.key(press(KeyCode::Esc));
     assert_eq!(heard(&tui), [(2, Event::Closed)]);
     let text = shown(&mut tui);
-    assert!(text.contains("Rename") && text.contains("Saved it"), "{text}");
+    assert!(
+        text.contains("Rename") && text.contains("Saved it"),
+        "{text}"
+    );
     assert!(!text.contains("abc"), "{text}");
 }
 
@@ -196,12 +212,16 @@ fn a_modal_in_the_shell_takes_paste_keys_and_closes_with_its_event() {
     assert!(text.contains("Lock") && !text.contains("Home"), "{text}");
     let row = found(&buffer, "Find").map(|(_, y)| y);
     assert!(row.is_some(), "{text}");
-    assert!(found_on(&buffer, row.unwrap_or(0), "lo").is_some(), "{text}");
+    assert!(shows_on(&buffer, row.unwrap_or(0), "lo"), "{text}");
     tui.key(press(KeyCode::Backspace));
     tui.key(press(KeyCode::Backspace));
     let buffer = frame(&mut tui);
     let at = found(&buffer, "Home");
-    assert_eq!(at.map(|at| buffer[at].fg), Some(Color::Green), "a choice keeps its span style");
+    assert_eq!(
+        at.map(|at| buffer[at].fg),
+        Some(Color::Green),
+        "a choice keeps its span style"
+    );
     tui.key(press(KeyCode::Enter));
     assert_eq!(
         heard(&tui).last(),
@@ -220,7 +240,10 @@ fn a_skipped_choice_is_never_chosen_and_a_confirm_choice_asks_before_it_is() {
     ]))]);
     tui.key(press(KeyCode::Up));
     tui.key(press(KeyCode::Enter));
-    assert!(heard(&tui).is_empty(), "the heading cannot be chosen; erase only arms");
+    assert!(
+        heard(&tui).is_empty(),
+        "the heading cannot be chosen; erase only arms"
+    );
     let buffer = frame(&mut tui);
     let at = found(&buffer, "enter again erases");
     assert_eq!(
@@ -282,7 +305,10 @@ fn a_toast_is_drawn_at_each_spot() {
         let middle = x + 4;
         match spot.x {
             Edge::Start => assert!(middle < WIDTH / 3, "{name} at {x}"),
-            Edge::Middle => assert!((WIDTH / 3..2 * WIDTH / 3).contains(&middle), "{name} at {x}"),
+            Edge::Middle => assert!(
+                (WIDTH / 3..2 * WIDTH / 3).contains(&middle),
+                "{name} at {x}"
+            ),
             _ => assert!(middle > 2 * WIDTH / 3, "{name} at {x}"),
         }
         match spot.y {
@@ -309,7 +335,11 @@ fn toasts_at_one_spot_stack_inward_and_close_ranks_when_one_leaves() {
     let (first, second, third) = (row("first"), row("second"), row("third"));
     assert_eq!(second, first.map(|y| y + 3));
     assert_eq!(third, first.map(|y| y + 6));
-    assert_eq!(row("low two"), row("low one").map(|y| y - 3), "bottom stacks grow up");
+    assert_eq!(
+        row("low two"),
+        row("low one").map(|y| y - 3),
+        "bottom stacks grow up"
+    );
     tui.advance(Duration::from_secs(1));
     let buffer = frame(&mut tui);
     assert!(found(&buffer, "first").is_none(), "its second is up");
@@ -321,7 +351,11 @@ fn toasts_at_one_spot_stack_inward_and_close_ranks_when_one_leaves() {
 fn a_toast_leaves_exactly_when_its_time_is_up() {
     let mut tui = run(vec![
         Act::Toast(Toast::new("default")),
-        Act::Toast(Toast::new("brief").lasting(Duration::from_millis(500)).at(Spot::BOTTOM)),
+        Act::Toast(
+            Toast::new("brief")
+                .lasting(Duration::from_millis(500))
+                .at(Spot::BOTTOM),
+        ),
     ]);
     tui.advance(Duration::from_millis(499));
     let text = shown(&mut tui);
@@ -330,7 +364,10 @@ fn a_toast_leaves_exactly_when_its_time_is_up() {
     let text = shown(&mut tui);
     assert!(text.contains("default") && !text.contains("brief"));
     tui.advance(Duration::from_millis(2499));
-    assert!(shown(&mut tui).contains("default"), "three seconds by default");
+    assert!(
+        shown(&mut tui).contains("default"),
+        "three seconds by default"
+    );
     tui.advance(Duration::from_millis(1));
     assert!(!shown(&mut tui).contains("default"));
 }
@@ -378,7 +415,11 @@ fn more_toasts_than_fit_are_dropped_not_drawn_out_of_bounds() {
         (left + 1..right).all(|at| buffer[(at, y)].symbol() == "a"),
         "the text fills the box and is cut at its right border"
     );
-    assert_eq!(buffer[(right, y - 1)].symbol(), "╮", "the top right corner is drawn");
+    assert_eq!(
+        buffer[(right, y - 1)].symbol(),
+        "╮",
+        "the top right corner is drawn"
+    );
 }
 
 #[test]
@@ -405,5 +446,9 @@ fn a_toast_raised_while_a_modal_is_open_draws_over_it_and_takes_no_keys() {
     tui.key(press(KeyCode::Char('z')));
     assert_eq!(heard(&tui), [(1, Event::Edited { part: 0 })]);
     more(&mut tui, Vec::new());
-    assert_eq!(heard(&tui).len(), 2, "x typed into the modal, not the screen");
+    assert_eq!(
+        heard(&tui).len(),
+        2,
+        "x typed into the modal, not the screen"
+    );
 }
