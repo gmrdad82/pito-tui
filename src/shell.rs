@@ -1317,6 +1317,9 @@ impl<E: Send + 'static> Tui<E> {
         if let Some(screen) = self.out.go.take() {
             self.go(screen);
         }
+        if let Some(index) = self.current() {
+            self.begin(index);
+        }
     }
 
     fn stop(&mut self, id: u64) -> Vec<Activity> {
@@ -1615,4 +1618,421 @@ impl<E: Send + 'static> Tui<E> {
 
 fn lone(section: Section) -> Nav {
     Nav::new(vec![Group::new("").section(section)]).keys(NavKeys::NONE)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::process::Command;
+
+    use crossterm::event::{KeyCode, KeyModifiers};
+    use ratatui::Frame;
+    use ratatui::widgets::Paragraph;
+
+    use super::*;
+    use crate::command::Stream;
+    use crate::copy::COPY_MAX;
+    use crate::layer::Takeover;
+
+    type Act = fn(&mut Cx<'_, u32>) -> bool;
+
+    #[derive(Default)]
+    struct Probe {
+        name: &'static str,
+        due: Option<Instant>,
+        loading: bool,
+        seen: Vec<String>,
+        on: Vec<(char, Act)>,
+    }
+
+    impl Probe {
+        fn new(name: &'static str) -> Self {
+            Probe {
+                name,
+                ..Probe::default()
+            }
+        }
+
+        fn on(mut self, key: char, act: Act) -> Self {
+            self.on.push((key, act));
+            self
+        }
+
+        fn due(mut self, at: Instant) -> Self {
+            self.due = Some(at);
+            self
+        }
+
+        fn loading(mut self) -> Self {
+            self.loading = true;
+            self
+        }
+    }
+
+    impl Screen<u32> for Probe {
+        fn draw(&mut self, frame: &mut Frame, area: Rect, _palette: &Palette) {
+            frame.render_widget(Paragraph::new(self.name), area);
+        }
+
+        fn phase(&self) -> Phase<'_> {
+            if self.loading {
+                Phase::Loading("waiting".into())
+            } else {
+                Phase::Ready
+            }
+        }
+
+        fn deadline(&self) -> Option<Instant> {
+            self.due
+        }
+
+        fn start(&mut self, _cx: &mut Cx<'_, u32>) {
+            self.seen.push("start".into());
+        }
+
+        fn tick(&mut self, _cx: &mut Cx<'_, u32>) {
+            self.seen.push("tick".into());
+        }
+
+        fn key(&mut self, key: KeyEvent, cx: &mut Cx<'_, u32>) {
+            if let KeyCode::Char(c) = key.code
+                && let Some((_, act)) = self.on.iter().find(|(wanted, _)| *wanted == c)
+            {
+                let kept = act(cx);
+                self.seen.push(format!("{c} {kept}"));
+            }
+        }
+
+        fn event(&mut self, event: u32, cx: &mut Cx<'_, u32>) {
+            match event {
+                0 => self.loading = false,
+                9 => cx.end_takeover(),
+                _ => {}
+            }
+            self.seen.push(format!("event {event}"));
+        }
+
+        fn heard(&mut self, id: u64, heard: Heard, _cx: &mut Cx<'_, u32>) {
+            let what = match heard {
+                Heard::Line { text, .. } => text,
+                Heard::Exit(exit) => format!("{exit:?}"),
+            };
+            self.seen.push(format!("heard {id} {what}"));
+        }
+    }
+
+    struct Due(Instant);
+
+    impl Band for Due {
+        fn height(&self, _room: u16, _now: Instant) -> u16 {
+            0
+        }
+
+        fn draw(&mut self, _frame: &mut Frame, _area: Rect, _palette: &Palette, _now: Instant) {}
+
+        fn deadline(&self, _now: Instant) -> Option<Instant> {
+            Some(self.0)
+        }
+    }
+
+    fn ch(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
+    }
+
+    fn ctrl_c() -> KeyEvent {
+        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)
+    }
+
+    fn ms(millis: u64) -> Duration {
+        Duration::from_millis(millis)
+    }
+
+    fn base() -> Tui<u32> {
+        Tui::new("probe", "1.0.0", Color::Blue)
+    }
+
+    fn order(tui: &Tui<u32>) -> Vec<&'static str> {
+        tui.screens
+            .iter()
+            .map(|slot| {
+                let any: &dyn Any = slot.screen.as_ref();
+                any.downcast_ref::<Probe>()
+                    .map_or("board", |probe| probe.name)
+            })
+            .collect()
+    }
+
+    fn seen(tui: &Tui<u32>, name: &str) -> Vec<String> {
+        tui.screens
+            .iter()
+            .find_map(|slot| {
+                let any: &dyn Any = slot.screen.as_ref();
+                any.downcast_ref::<Probe>()
+                    .filter(|probe| probe.name == name)
+            })
+            .map(|probe| probe.seen.clone())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn deadlines_list_the_guard_the_screens_the_bands_the_toasts_and_the_glass_in_order() {
+        let tui = base()
+            .quit_window(ms(1000))
+            .hourglass_timing(ms(300), ms(200));
+        let t0 = tui.moment;
+        let mut tui = tui
+            .screen(
+                "Main",
+                Probe::new("main")
+                    .due(t0 + ms(5000))
+                    .loading()
+                    .on('t', |cx| {
+                        cx.toast(Toast::new("saved").lasting(ms(2000)));
+                        true
+                    }),
+            )
+            .band(Due(t0 + ms(7000)))
+            .top_band(Due(t0 + ms(6000)));
+        tui.start();
+        tui.frame(60, 16);
+        tui.key(ch('t'));
+        tui.key(ctrl_c());
+        assert_eq!(
+            tui.deadlines(),
+            [
+                Some(t0 + ms(1000)),
+                Some(t0 + ms(5000)),
+                Some(t0 + ms(6000)),
+                Some(t0 + ms(2000)),
+                Some(t0 + ms(300)),
+            ]
+        );
+        assert_eq!(tui.advance(ms(1000)), Flow::Stay);
+        assert_eq!(tui.moment, t0 + ms(1000));
+        assert!(!tui.quit.armed());
+        assert_eq!(tui.deadlines()[0], None);
+        assert_eq!(tui.deadlines()[3], Some(t0 + ms(2000)));
+        tui.moment = t0 + ms(2000);
+        assert_eq!(tui.ticks(), Some(Flow::Stay));
+        assert!(tui.toasts.is_empty());
+        assert_eq!(tui.deadlines()[3], None);
+        assert_eq!(tui.ticks(), None);
+        assert_eq!(seen(&tui, "main"), ["start", "t true"]);
+    }
+
+    #[test]
+    fn an_app_with_nothing_pending_has_no_deadline_and_nothing_to_tick() {
+        let mut tui = base().screen("Main", Probe::new("main"));
+        tui.start();
+        tui.frame(60, 16);
+        assert_eq!(tui.deadlines(), [None; 5]);
+        assert_eq!(tui.ticks(), None);
+        assert!(!tui.animating());
+    }
+
+    #[test]
+    fn a_screen_never_shown_has_no_deadline_unless_the_app_is_eager_and_a_ticked_one_leaves() {
+        let build = |eager: bool| {
+            let tui = base().eager(eager);
+            let t0 = tui.moment;
+            let mut tui = tui
+                .screen("One", Probe::new("one"))
+                .screen("Two", Probe::new("two").due(t0 + ms(500)));
+            tui.start();
+            (tui, t0)
+        };
+        let (mut lazy, t0) = build(false);
+        assert_eq!(lazy.deadlines()[1], None);
+        assert!(lazy.go(1));
+        assert_eq!(lazy.deadlines()[1], Some(t0 + ms(500)));
+
+        let (mut eager, t0) = build(true);
+        assert_eq!(eager.deadlines()[1], Some(t0 + ms(500)));
+        eager.advance(ms(499));
+        assert!(seen(&eager, "two").is_empty());
+        eager.advance(ms(1));
+        assert_eq!(seen(&eager, "two"), ["tick"]);
+        assert_eq!(eager.deadlines()[1], None);
+        eager.advance(ms(500));
+        assert_eq!(seen(&eager, "two"), ["tick"]);
+    }
+
+    #[test]
+    fn the_glass_deadline_is_its_delay_while_loading_then_its_least_time_once_shown_and_loaded() {
+        let tui = base().hourglass_timing(ms(300), ms(200));
+        let t0 = tui.moment;
+        let mut tui = tui.screen("Main", Probe::new("main").loading());
+        tui.start();
+        assert_eq!(tui.deadlines()[4], None);
+        tui.frame(60, 16);
+        assert_eq!(tui.deadlines()[4], Some(t0 + ms(300)));
+        assert!(!tui.animating());
+        tui.advance(ms(300));
+        tui.frame(60, 16);
+        assert_eq!(tui.screens[0].glass, Some(t0 + ms(300)));
+        assert!(tui.animating());
+        assert_eq!(tui.deadlines()[4], None);
+        tui.event(0, 0);
+        assert_eq!(tui.deadlines()[4], Some(t0 + ms(500)));
+        tui.advance(ms(199));
+        tui.frame(60, 16);
+        assert_eq!(tui.screens[0].glass, Some(t0 + ms(300)));
+        tui.advance(ms(1));
+        tui.frame(60, 16);
+        assert_eq!(tui.screens[0].glass, None);
+        assert_eq!(tui.deadlines()[4], None);
+        assert!(!tui.animating());
+    }
+
+    #[test]
+    fn a_copy_up_to_copy_max_is_queued_and_a_longer_one_is_refused() {
+        let mut tui = base().screen(
+            "Main",
+            Probe::new("main")
+                .on('s', |cx| cx.copy("short"))
+                .on('m', |cx| cx.copy("x".repeat(COPY_MAX)))
+                .on('l', |cx| cx.copy("x".repeat(COPY_MAX + 1))),
+        );
+        tui.start();
+        for key in ['s', 'm', 'l'] {
+            assert_eq!(tui.key(ch(key)), Flow::Stay);
+        }
+        assert_eq!(seen(&tui, "main"), ["start", "s true", "m true", "l false"]);
+        let lengths: Vec<usize> = tui.out.copies.iter().map(String::len).collect();
+        assert_eq!(lengths, [5, COPY_MAX]);
+    }
+
+    #[test]
+    fn a_takeover_clock_starts_when_it_opens_and_stops_when_it_ends() {
+        let tui = base();
+        let t0 = tui.moment;
+        let mut tui = tui.screen(
+            "Main",
+            Probe::new("main").on('o', |cx| {
+                cx.takeover(Takeover::new(1, "Busy"));
+                true
+            }),
+        );
+        tui.start();
+        assert_eq!(tui.taken, None);
+        tui.key(ch('o'));
+        assert_eq!(tui.taken, Some(t0));
+        assert!(tui.animating());
+        tui.advance(ms(800));
+        tui.key(ch('o'));
+        assert_eq!(tui.taken, Some(t0));
+        tui.event(0, 9);
+        assert_eq!(tui.taken, None);
+        assert!(!tui.animating());
+        tui.advance(ms(200));
+        tui.key(ch('o'));
+        assert_eq!(tui.taken, Some(t0 + ms(1000)));
+    }
+
+    #[test]
+    fn a_reload_a_stop_or_a_change_for_nothing_leaves_every_screen_and_the_board_alone() {
+        let mut tui = base()
+            .activities(Activities::new(Section::new("Jobs")))
+            .screen(
+                "Main",
+                Probe::new("main").on('k', |cx| {
+                    cx.stop(77);
+                    cx.changed("nobody");
+                    true
+                }),
+            );
+        tui.start();
+        for slot in &mut tui.screens {
+            slot.stale = false;
+        }
+        tui.out.reload.push(9);
+        assert_eq!(tui.key(ch('k')), Flow::Stay);
+        assert!(tui.screens.iter().all(|slot| !slot.stale));
+        assert!(tui.board().is_some_and(|board| board.list.is_empty()));
+        assert!(tui.inbox.try_recv().is_err());
+        tui.out.reload.push(0);
+        assert_eq!(tui.apply(), Flow::Stay);
+        assert!(tui.screens[0].stale);
+        assert!(!tui.screens[1].stale);
+    }
+
+    #[test]
+    fn a_command_report_reaches_its_screen_line_by_line_and_its_exit_ends_the_board_row() {
+        let tui = base().activities(Activities::new(Section::new("Jobs")));
+        let t0 = tui.moment;
+        let mut tui = tui.screen(
+            "Main",
+            Probe::new("main")
+                .on('r', |cx| {
+                    cx.run(5, "build", Command::new("true"));
+                    true
+                })
+                .on('w', |cx| {
+                    cx.run(6, "watch", Command::new("true"));
+                    true
+                }),
+        );
+        tui.start();
+        tui.key(ch('r'));
+        tui.key(ch('w'));
+        let line = |text: &str| Heard::Line {
+            stream: Stream::Stdout,
+            text: text.into(),
+            progress: None,
+        };
+        let failed = Report {
+            activity: Activity::new(5, "build", t0),
+            heard: vec![line("compiling"), Heard::Exit(Exit::Code(1))],
+        };
+        assert_eq!(tui.handle(Wake::Command(0, failed)), Flow::Stay);
+        assert_eq!(
+            seen(&tui, "main")[3..],
+            ["heard 5 compiling", "heard 5 Code(1)"]
+        );
+        let lost = Report {
+            activity: Activity::new(6, "watch", t0).status("half"),
+            heard: vec![line("still going")],
+        };
+        assert_eq!(tui.handle(Wake::Command(9, lost)), Flow::Stay);
+        assert_eq!(seen(&tui, "main").len(), 5);
+        let board = tui.board().unwrap();
+        let row = |id: u64| {
+            board
+                .list
+                .iter()
+                .find(|activity| activity.id == id)
+                .map(|activity| (activity.state, activity.ended, activity.status.clone()))
+        };
+        assert_eq!(row(5), Some((State::Failed, Some(t0), String::new())));
+        assert_eq!(row(6), Some((State::Running, None, "half".to_string())));
+    }
+
+    #[test]
+    fn a_second_app_or_gate_replaces_the_first_and_the_board_keeps_its_place() {
+        let mut tui = base()
+            .screen("One", Probe::new("one"))
+            .activities(Activities::new(Section::new("Jobs")))
+            .app(Probe::new("app1"))
+            .gate(Probe::new("gate1"), false)
+            .app(Probe::new("app2"))
+            .gate(Probe::new("gate2"), true)
+            .screen("Two", Probe::new("two"));
+        assert_eq!(order(&tui), ["one", "two", "board", "app2", "gate2"]);
+        assert_eq!(tui.board, Some(2));
+        assert!(tui.board().is_some());
+        assert_eq!(tui.names(), ["One", "Two", "Jobs", "", ""]);
+        assert_eq!(tui.current(), Some(4));
+        tui.start();
+        assert_eq!(seen(&tui, "app2"), ["start"]);
+        assert_eq!(seen(&tui, "gate2"), ["start"]);
+        assert!(seen(&tui, "one").is_empty());
+
+        let tui = base()
+            .screen("One", Probe::new("one"))
+            .app(Probe::new("app1"))
+            .activities(Activities::new(Section::new("Jobs")))
+            .app(Probe::new("app2"));
+        assert_eq!(order(&tui), ["one", "board", "app2"]);
+        assert_eq!(tui.board, Some(1));
+        assert!(tui.board().is_some());
+    }
 }
