@@ -602,11 +602,15 @@ impl<E: Send + 'static> Tui<E> {
             };
             let mut place = toast.spot.place(area, wide, TOAST);
             let by = shift.saturating_mul(TOAST);
-            place.y = match toast.spot.y {
-                Edge::End => place.y.saturating_sub(by).max(area.y),
-                _ => place.y.saturating_add(by),
+            let moved = match toast.spot.y {
+                Edge::End => place.y.checked_sub(by),
+                _ => place.y.checked_add(by),
             };
-            if place.bottom() > area.bottom() || place.y < area.y {
+            let Some(y) = moved else {
+                continue;
+            };
+            place.y = y;
+            if place.height < TOAST || place.y < area.y || place.bottom() > area.bottom() {
                 continue;
             }
             let style = self.drawn.tone(toast.tone);

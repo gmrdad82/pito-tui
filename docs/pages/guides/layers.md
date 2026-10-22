@@ -21,7 +21,8 @@ cx.toast(
 A toast is an app-wide notice over the content, top right unless placed
 elsewhere, stacked with the others at its spot. It survives screen changes
 and leaves on its own after `.lasting(..)` (3 s unless set), with one
-redraw.
+redraw. Toasts at one spot stack from its edge in arrival order, and one
+that doesn't fit is left out until older ones leave.
 
 ## A band under the header
 
