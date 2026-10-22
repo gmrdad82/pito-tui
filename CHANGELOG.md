@@ -4,6 +4,12 @@ Every release of pito-tui, newest first. Versions follow [Semantic
 Versioning](https://semver.org/): from 1.0.0 on, only a change in the first
 number may break an app; the middle number adds, the last one fixes.
 
+## v1.2.2 — 2026-10-23
+
+### Fixed
+
+- Toasts at the bottom of a short terminal no longer pile up on the top row over each other: a toast that doesn't fit whole at its spot is left out until older ones leave, at every edge.
+
 ## v1.2.1 — 2026-10-23
 
 ### Fixed
