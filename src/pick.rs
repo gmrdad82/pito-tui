@@ -149,3 +149,233 @@ impl Pick {
         frame.render_widget(view, inner);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use pito_header::Section;
+    use ratatui::{Terminal, backend::TestBackend, style::Color};
+
+    use super::*;
+    use crate::dump;
+    use crate::screen::{Cx, Screen};
+    use crate::shell::Tui;
+
+    struct Asker {
+        options: Vec<String>,
+        start: Option<usize>,
+        picked: Vec<Option<usize>>,
+        keys: Vec<KeyCode>,
+    }
+
+    impl Asker {
+        fn new(count: usize) -> Self {
+            Asker {
+                options: (0..count).map(|index| format!("choice {index:02}")).collect(),
+                start: None,
+                picked: Vec::new(),
+                keys: Vec::new(),
+            }
+        }
+    }
+
+    impl Screen<()> for Asker {
+        fn draw(&mut self, _frame: &mut Frame, _area: Rect, _palette: &Palette) {}
+
+        fn key(&mut self, key: KeyEvent, cx: &mut Cx<'_, ()>) {
+            self.keys.push(key.code);
+            if key.code == KeyCode::Char('p') {
+                let mut pick = Pick::new("Pick one", self.options.clone());
+                if let Some(index) = self.start {
+                    pick = pick.selected(index);
+                }
+                cx.pick(pick);
+            }
+        }
+
+        fn picked(&mut self, choice: Option<usize>, _cx: &mut Cx<'_, ()>) {
+            self.picked.push(choice);
+        }
+    }
+
+    fn press(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn asking(asker: Asker) -> Tui<()> {
+        let mut tui = Tui::new("probe", "1.2.3", Color::Blue)
+            .screen(Section::new("One"), asker)
+            .screen(Section::new("Two"), Asker::new(0));
+        tui.start();
+        tui.key(press(KeyCode::Char('p')));
+        tui
+    }
+
+    fn picked(tui: &Tui<()>) -> &[Option<usize>] {
+        &tui.find::<Asker>().unwrap().picked
+    }
+
+    fn keys(tui: &mut Tui<()>, codes: &[KeyCode]) {
+        for code in codes {
+            tui.key(press(*code));
+        }
+    }
+
+    #[test]
+    fn arrows_move_the_choice_and_enter_picks_it() {
+        let mut tui = asking(Asker::new(3));
+        assert!(dump::text(&tui.frame(60, 16)).contains("Pick one"));
+        keys(&mut tui, &[KeyCode::Down, KeyCode::Down, KeyCode::Up, KeyCode::Enter]);
+        assert_eq!(picked(&tui), [Some(1)]);
+        assert!(!dump::text(&tui.frame(60, 16)).contains("Pick one"));
+        assert_eq!(tui.find::<Asker>().unwrap().keys, [KeyCode::Char('p')]);
+    }
+
+    #[test]
+    fn vim_keys_and_the_ends_move_the_choice() {
+        let mut tui = asking(Asker::new(5));
+        keys(&mut tui, &[KeyCode::Char('j'), KeyCode::Char('j'), KeyCode::Char('k'), KeyCode::Enter]);
+        tui.key(press(KeyCode::Char('p')));
+        keys(&mut tui, &[KeyCode::Char('G'), KeyCode::Enter]);
+        tui.key(press(KeyCode::Char('p')));
+        keys(&mut tui, &[KeyCode::End, KeyCode::Home, KeyCode::Enter]);
+        assert_eq!(picked(&tui), [Some(1), Some(4), Some(0)]);
+    }
+
+    #[test]
+    fn the_pick_stops_at_its_first_and_last_choice() {
+        let mut tui = asking(Asker::new(3));
+        keys(&mut tui, &[KeyCode::Up, KeyCode::Enter]);
+        tui.key(press(KeyCode::Char('p')));
+        keys(&mut tui, &[KeyCode::Down; 9]);
+        tui.key(press(KeyCode::Enter));
+        assert_eq!(picked(&tui), [Some(0), Some(2)]);
+    }
+
+    #[test]
+    fn a_digit_neither_picks_nor_leaves_for_another_screen() {
+        let mut tui = asking(Asker::new(3));
+        keys(&mut tui, &[KeyCode::Char('2'), KeyCode::Char('3')]);
+        assert!(picked(&tui).is_empty());
+        assert_eq!(tui.current(), Some(0));
+        assert!(dump::text(&tui.frame(60, 16)).contains("Pick one"));
+        tui.key(press(KeyCode::Enter));
+        assert_eq!(picked(&tui), [Some(0)]);
+    }
+
+    #[test]
+    fn escape_or_q_cancels_with_none() {
+        let mut tui = asking(Asker::new(3));
+        keys(&mut tui, &[KeyCode::Down, KeyCode::Esc]);
+        tui.key(press(KeyCode::Char('p')));
+        tui.key(press(KeyCode::Char('q')));
+        assert_eq!(picked(&tui), [None, None]);
+        assert!(!dump::text(&tui.frame(60, 16)).contains("Pick one"));
+    }
+
+    #[test]
+    fn the_app_s_cancel_keys_replace_the_default_ones() {
+        struct Custom(Vec<Option<usize>>);
+        impl Screen<()> for Custom {
+            fn draw(&mut self, _frame: &mut Frame, _area: Rect, _palette: &Palette) {}
+            fn key(&mut self, _key: KeyEvent, cx: &mut Cx<'_, ()>) {
+                cx.pick(Pick::new("Pick", ["a", "b"]).cancel_keys(&[Key::Char('x')]));
+            }
+            fn picked(&mut self, choice: Option<usize>, _cx: &mut Cx<'_, ()>) {
+                self.0.push(choice);
+            }
+        }
+        let mut tui = Tui::new("probe", "1.2.3", Color::Blue).screen(Section::new("One"), Custom(Vec::new()));
+        tui.start();
+        tui.key(press(KeyCode::Char('p')));
+        keys(&mut tui, &[KeyCode::Char('q'), KeyCode::Esc]);
+        assert!(tui.find::<Custom>().unwrap().0.is_empty());
+        tui.key(press(KeyCode::Char('x')));
+        assert_eq!(tui.find::<Custom>().unwrap().0, [None]);
+    }
+
+    #[test]
+    fn a_single_choice_is_picked_whatever_the_arrows_do() {
+        let mut tui = asking(Asker::new(1));
+        keys(&mut tui, &[KeyCode::Down, KeyCode::Up, KeyCode::Down, KeyCode::Enter]);
+        assert_eq!(picked(&tui), [Some(0)]);
+    }
+
+    #[test]
+    fn a_pick_can_start_on_a_chosen_row() {
+        let mut asker = Asker::new(4);
+        asker.start = Some(2);
+        let mut tui = asking(asker);
+        keys(&mut tui, &[KeyCode::Down, KeyCode::Enter]);
+        assert_eq!(picked(&tui), [Some(3)]);
+    }
+
+    #[test]
+    fn choices_past_the_screen_height_scroll_to_keep_the_choice_in_view() {
+        let mut tui = asking(Asker::new(40));
+        let text = dump::text(&tui.frame(60, 16));
+        assert!(text.contains("choice 00") && !text.contains("choice 39"), "{text}");
+        tui.key(press(KeyCode::End));
+        let text = dump::text(&tui.frame(60, 16));
+        assert!(text.contains("choice 39") && !text.contains("choice 00"), "{text}");
+        keys(&mut tui, &[KeyCode::Up; 3]);
+        let text = dump::text(&tui.frame(60, 16));
+        assert!(text.contains("choice 36"), "{text}");
+        tui.key(press(KeyCode::Enter));
+        assert_eq!(picked(&tui), [Some(36)]);
+    }
+
+    fn drawn(pick: &mut Pick, width: u16, height: u16) -> Vec<String> {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|frame| pick.draw(frame, frame.area(), &Palette::new(Color::Blue)))
+            .unwrap();
+        let text = dump::text(terminal.backend().buffer());
+        let mut rows: Vec<String> = text.lines().map(str::to_string).collect();
+        rows.resize(usize::from(height), String::new());
+        rows
+    }
+
+    #[test]
+    fn a_small_pick_is_a_rounded_box_as_tall_as_its_choices_with_its_title_on_top() {
+        let mut pick = Pick::new("Colour", ["red", "green"]);
+        let rows = drawn(&mut pick, 60, 20);
+        let top = rows.iter().position(|row| row.contains("Colour")).unwrap();
+        assert!(rows[top].contains('╭') && rows[top].contains('╮'), "{rows:?}");
+        assert!(rows[top + 1].contains("red"), "{rows:?}");
+        assert!(rows[top + 2].contains("green"), "{rows:?}");
+        assert!(rows[top + 3].contains('╰'), "{rows:?}");
+        let left = rows[top].find('╭').unwrap();
+        let width = rows[top].chars().count() - rows[top][..left].chars().count();
+        assert_eq!(width, NARROWEST);
+        assert_eq!(top, (20 - 4) / 3);
+    }
+
+    #[test]
+    fn a_pick_never_draws_wider_or_taller_than_its_area() {
+        let mut pick = Pick::new("A title far wider than the screen it sits on", (0..50).map(|i| i.to_string()));
+        let rows = drawn(&mut pick, 20, 6);
+        assert_eq!(rows.len(), 6);
+        assert!(rows[0].starts_with('╭'), "{rows:?}");
+        assert!(rows[5].starts_with('╰'), "{rows:?}");
+        assert!(rows.iter().all(|row| row.chars().count() <= 20));
+    }
+
+    #[test]
+    fn a_full_pick_fills_its_area_with_the_title_on_the_first_row_and_choices_after_a_gap() {
+        let mut pick = Pick::new("Everything", ["one", "two"]).full(true);
+        let rows = drawn(&mut pick, 40, 8);
+        assert_eq!(rows[0], "Everything");
+        assert_eq!(rows[1], "");
+        assert!(rows[2].contains("one") && rows[3].contains("two"), "{rows:?}");
+        assert!(rows.iter().all(|row| !row.contains('╭')));
+    }
+
+    #[test]
+    fn a_pick_with_no_choices_draws_its_box_and_title_alone() {
+        let mut pick = Pick::new("Nothing", Vec::<String>::new());
+        let rows = drawn(&mut pick, 40, 10);
+        let top = rows.iter().position(|row| row.contains("Nothing")).unwrap();
+        assert!(rows[top + 1].contains('╰'), "{rows:?}");
+    }
+}

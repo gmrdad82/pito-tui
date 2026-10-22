@@ -635,6 +635,8 @@ impl<E: Send + 'static> Screen<E> for Board {
 
 #[cfg(test)]
 mod tests {
+    use ratatui::{Terminal, backend::TestBackend, buffer::Buffer};
+
     use super::*;
 
     fn kept(board: &Board, id: u64) -> &Activity {
@@ -697,5 +699,261 @@ mod tests {
         board.change(Change::Forget(1), later);
         board.change(Change::Ran(ran(1, "run", "three", later)), later);
         assert!(board.list.iter().all(|kept| kept.id != 1));
+    }
+
+
+    fn palette() -> Palette {
+        Palette::new(Color::Blue)
+    }
+
+    fn banded(board: &Board, width: u16, height: u16, now: Instant) -> Buffer {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|frame| board.band(frame, frame.area(), &palette(), now))
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    fn rows(buffer: &Buffer) -> Vec<String> {
+        crate::dump::text(buffer)
+            .lines()
+            .map(str::to_string)
+            .chain(std::iter::repeat(String::new()))
+            .take(usize::from(buffer.area.height))
+            .collect()
+    }
+
+    fn posted(count: u64, now: Instant) -> Board {
+        let words = Activities::new(Section::new("Jobs")).more(|hidden| format!("+{hidden} more"));
+        let mut board = Board::new(words, now);
+        for id in 0..count {
+            let started = now + Duration::from_millis(id);
+            let activity = Activity::new(id, format!("job{id:02}"), started);
+            board.change(Change::Put(activity), started);
+        }
+        board
+    }
+
+    #[test]
+    fn only_done_failed_and_stopped_are_finished() {
+        assert!(!State::Running.finished());
+        assert!(!State::Waiting.finished());
+        assert!(State::Done.finished());
+        assert!(State::Failed.finished());
+        assert!(State::Stopped.finished());
+        assert_eq!(State::default(), State::Running);
+    }
+
+    #[test]
+    fn each_state_has_its_own_glyph_and_tone() {
+        let now = Instant::now();
+        let palette = palette();
+        let of = |state: State| Activity::new(1, "a", now).state(state);
+        assert_eq!(mark(&of(State::Running), now, &palette), ("⠋", palette.accent));
+        assert_eq!(
+            mark(&of(State::Running), now + SPIN, &palette),
+            ("⠙", palette.accent)
+        );
+        assert_eq!(mark(&of(State::Waiting), now, &palette), ("⧗", palette.muted));
+        assert_eq!(mark(&of(State::Done), now, &palette), ("✓", palette.good));
+        assert_eq!(mark(&of(State::Failed), now, &palette), ("✗", palette.bad));
+        assert_eq!(mark(&of(State::Stopped), now, &palette), ("■", palette.muted));
+        assert_eq!(tone(&of(State::Done), &palette), palette.good);
+        assert_eq!(tone(&of(State::Failed), &palette), palette.bad);
+        assert_eq!(tone(&of(State::Stopped), &palette), palette.muted);
+        assert_eq!(tone(&of(State::Running), &palette), palette.muted);
+        assert_eq!(tone(&of(State::Waiting), &palette), palette.muted);
+        assert_ne!(palette.good, palette.bad);
+    }
+
+    #[test]
+    fn the_gauge_shows_while_running_and_goes_when_finished() {
+        let now = Instant::now();
+        let running = Activity::new(1, "a", now).progress(0.5);
+        assert_eq!(gauge(&running), format!("{} {:>5}", bar(0.5, BAR), "50%"));
+        assert_eq!(
+            gauge(&running.clone().estimate(true)),
+            format!("{} {:>5}", bar(0.5, BAR), "≈50%")
+        );
+        assert_eq!(metered(&running, &palette()), palette().accent);
+        assert_eq!(metered(&running.clone().estimate(true), &palette()), palette().muted);
+        assert_eq!(gauge(&running.clone().state(State::Done)), "");
+        assert_eq!(gauge(&Activity::new(2, "b", now)), "");
+    }
+
+    #[test]
+    fn a_finished_activity_lingers_then_leaves_and_a_running_one_never_does() {
+        let now = Instant::now();
+        let done = Activity::new(1, "a", now).state(State::Done).ended(now);
+        assert!(done.shown(now));
+        assert!(done.shown(now + LINGER - Duration::from_nanos(1)));
+        assert!(!done.shown(now + LINGER));
+        assert_eq!(done.wake(now), Some(now + LINGER));
+        assert_eq!(done.wake(now + LINGER), None);
+        let running = Activity::new(2, "b", now);
+        assert!(running.shown(now + LINGER * 100));
+        assert_eq!(running.wake(now), Some(now + SPIN));
+        let waiting = Activity::new(3, "c", now).state(State::Waiting);
+        assert_eq!(waiting.wake(now + SPIN), Some(now + SECOND));
+        let unstamped = Activity::new(4, "d", now).state(State::Failed);
+        assert!(unstamped.shown(now + LINGER * 100));
+        assert_eq!(unstamped.wake(now), None);
+    }
+
+    #[test]
+    fn the_board_stamps_the_end_of_a_finished_post_once() {
+        let now = Instant::now();
+        let later = now + SECOND;
+        let mut board = Board::new(Activities::new(Section::new("Jobs")), now);
+        board.change(Change::Put(Activity::new(1, "a", now).state(State::Done)), now);
+        assert_eq!(kept(&board, 1).ended, Some(now));
+        board.change(Change::Put(Activity::new(1, "a", now).state(State::Done)), later);
+        assert_eq!(kept(&board, 1).ended, Some(now));
+        assert_eq!(kept(&board, 1).took(later + SECOND), Duration::ZERO);
+        assert!(board.banded(now).len() == 1 && board.banded(now + LINGER).is_empty());
+        assert_eq!(board.list.len(), 1);
+    }
+
+    #[test]
+    fn the_band_lists_the_newest_first_and_hides_when_the_app_turns_it_off() {
+        let now = Instant::now();
+        let mut board = posted(3, now);
+        let ids: Vec<u64> = board.banded(now).iter().map(|shown| shown.id).collect();
+        assert_eq!(ids, [2, 1, 0]);
+        let text = rows(&banded(&board, 60, 3, now + SECOND));
+        assert!(text[0].contains("job02"), "{text:?}");
+        assert!(text[2].contains("job00"), "{text:?}");
+        board.change(Change::Band(false), now);
+        assert!(board.banded(now).is_empty());
+        assert!(rows(&banded(&board, 60, 3, now)).iter().all(String::is_empty));
+        assert_eq!(board.wake(now, false), None);
+        assert!(board.wake(now, true).is_some());
+    }
+
+    #[test]
+    fn more_than_fit_takes_the_last_row_with_the_hidden_count() {
+        let now = Instant::now();
+        let board = posted(5, now);
+        let text = rows(&banded(&board, 60, 3, now + SECOND));
+        assert!(text[0].contains("job04") && text[1].contains("job03"), "{text:?}");
+        assert_eq!(text[2], "+3 more");
+        let shown = text.iter().filter(|row| row.contains("job")).count();
+        assert_eq!(shown + 3, 5);
+    }
+
+    #[test]
+    fn a_one_row_band_with_more_than_one_shows_only_the_more_row_with_them_all() {
+        let now = Instant::now();
+        let board = posted(3, now);
+        let text = rows(&banded(&board, 60, 1, now + SECOND));
+        assert_eq!(text, ["+3 more"]);
+        let one = posted(1, now);
+        let text = rows(&banded(&one, 60, 1, now + SECOND));
+        assert!(text[0].contains("job00"), "{text:?}");
+    }
+
+    #[test]
+    fn exactly_as_many_as_fit_show_without_the_more_row() {
+        let now = Instant::now();
+        let board = posted(3, now);
+        let text = rows(&banded(&board, 60, 3, now));
+        assert!(text.iter().all(|row| row.contains("job")), "{text:?}");
+        assert!(!text.iter().any(|row| row.contains("more")));
+    }
+
+    #[test]
+    fn without_more_words_every_row_shows_an_activity() {
+        let now = Instant::now();
+        let mut board = Board::new(Activities::new(Section::new("Jobs")), now);
+        for id in 0..5 {
+            board.change(Change::Put(Activity::new(id, "job", now)), now);
+        }
+        let text = rows(&banded(&board, 60, 3, now));
+        assert!(text.iter().all(|row| row.contains("job")), "{text:?}");
+    }
+
+    #[test]
+    fn a_band_row_carries_its_status_in_its_tone_and_fades_when_finished() {
+        let now = Instant::now();
+        let mut board = Board::new(Activities::new(Section::new("Jobs")), now);
+        board.change(
+            Change::Put(
+                Activity::new(1, "build", now)
+                    .state(State::Failed)
+                    .status("broke"),
+            ),
+            now,
+        );
+        let later = now + Duration::from_millis(1);
+        board.change(Change::Put(Activity::new(2, "watch", later)), later);
+        let buffer = banded(&board, 60, 2, later);
+        let text = rows(&buffer);
+        assert!(text[0].starts_with("⠋ watch"), "{text:?}");
+        assert!(text[1].starts_with("✗ build") && text[1].contains("broke"), "{text:?}");
+        let at = text[1].find("broke").unwrap();
+        let column = u16::try_from(text[1][..at].chars().count()).unwrap();
+        let cell = &buffer[(column, 1)];
+        assert_eq!(cell.fg, palette().bad.fg.unwrap());
+        assert!(cell.modifier.contains(Modifier::DIM));
+        let finished = &buffer[(2, 1)].modifier;
+        assert!(finished.contains(Modifier::BOLD | Modifier::DIM));
+        let running = &buffer[(2, 0)].modifier;
+        assert!(running.contains(Modifier::BOLD));
+        assert!(!running.contains(Modifier::DIM));
+    }
+
+    #[test]
+    fn a_wide_band_shows_the_gauge_and_a_narrow_one_drops_it() {
+        let now = Instant::now();
+        let mut board = Board::new(Activities::new(Section::new("Jobs")), now);
+        board.change(Change::Put(Activity::new(1, "sync", now).progress(0.25)), now);
+        let wide = rows(&banded(&board, 80, 1, now));
+        assert!(wide[0].contains("25%"), "{wide:?}");
+        let narrow = rows(&banded(&board, 40, 1, now));
+        assert!(!narrow[0].contains("25%"), "{narrow:?}");
+    }
+
+    #[test]
+    fn an_empty_band_or_a_band_with_no_room_draws_nothing() {
+        let now = Instant::now();
+        let board = Board::new(Activities::new(Section::new("Jobs")), now);
+        assert!(rows(&banded(&board, 60, 2, now)).iter().all(String::is_empty));
+        let board = posted(2, now);
+        let mut terminal = Terminal::new(TestBackend::new(60, 2)).unwrap();
+        terminal
+            .draw(|frame| board.band(frame, Rect::new(0, 0, 60, 0), &palette(), now))
+            .unwrap();
+        assert!(crate::dump::text(terminal.backend().buffer()).trim().is_empty());
+    }
+
+    #[test]
+    fn all_replaces_the_app_posts_and_keeps_the_shell_runs() {
+        let now = Instant::now();
+        let mut board = Board::new(Activities::new(Section::new("Jobs")), now);
+        board.change(Change::Put(Activity::new(1, "a", now)), now);
+        board.change(Change::Put(Activity::new(2, "b", now)), now);
+        board.change(Change::Run(Activity::new(3, "c", now)), now);
+        board.change(Change::All(vec![Activity::new(4, "d", now)]), now);
+        let mut ids: Vec<u64> = board.list.iter().map(|kept| kept.id).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, [3, 4]);
+        board.change(Change::All(Vec::new()), now);
+        assert_eq!(board.list.len(), 1);
+        board.change(Change::Forget(99), now);
+        assert_eq!(board.list.len(), 1);
+    }
+
+    #[test]
+    fn end_and_ran_touch_only_shell_runs() {
+        let now = Instant::now();
+        let mut board = Board::new(Activities::new(Section::new("Jobs")), now);
+        board.change(Change::Put(Activity::new(1, "app", now)), now);
+        board.change(Change::End(1, State::Failed), now);
+        board.change(Change::Ran(ran(1, "x", "y", now)), now);
+        let kept1 = kept(&board, 1);
+        assert_eq!((kept1.state, kept1.status.as_str()), (State::Running, ""));
+        assert!(kept1.detail.is_empty());
+        board.change(Change::End(7, State::Done), now);
+        assert!(board.list.iter().all(|kept| kept.id != 7));
     }
 }
