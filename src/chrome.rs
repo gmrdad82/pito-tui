@@ -95,11 +95,27 @@ fn light(buffer: &mut Buffer, plain: &Buffer, accent: Style) {
     }
 }
 
-fn spans(parts: &[(String, Style)]) -> Vec<Span> {
-    parts
-        .iter()
-        .map(|(text, style)| (text.clone().into(), *style))
+fn recycle<'a, 'b>(mut hints: Vec<Hint<'a>>) -> Vec<Hint<'b>> {
+    hints.clear();
+    hints
+        .into_iter()
+        .map(|_: Hint<'a>| Hint::<'b>::new("", ""))
         .collect()
+}
+
+fn fill<T: AsRef<str>>(buf: &mut Vec<(String, Style)>, parts: &[(T, Style)]) -> usize {
+    let mut used = 0;
+    for (text, style) in parts {
+        put(buf, &mut used, text.as_ref(), *style);
+    }
+    used
+}
+
+fn joined(buf: &mut String, spans: &[Span]) {
+    buf.clear();
+    for (text, _) in spans {
+        buf.push_str(text);
+    }
 }
 
 impl<E: Send + 'static> Tui<E> {
@@ -177,7 +193,7 @@ impl<E: Send + 'static> Tui<E> {
         (app, screen)
     }
 
-    fn left(&self, index: usize, room: u16) -> Vec<(String, Style)> {
+    fn left(&self, index: usize, room: u16, buf: &mut Vec<(String, Style)>) -> usize {
         let help = self
             .help
             .filter(|help| !help.open() && !self.gated)
@@ -186,7 +202,7 @@ impl<E: Send + 'static> Tui<E> {
         let (app, screen) = self.sides(index);
         for source in [app, screen] {
             if let Some(left) = source.left(room, help) {
-                return left;
+                return fill(buf, &left);
             }
         }
         let taken = help.map_or(0, |text| width(text).saturating_add(width(LEAD)));
@@ -194,15 +210,26 @@ impl<E: Send + 'static> Tui<E> {
         if lead.iter().all(|(text, _)| text.is_empty()) {
             lead = screen.lead(room.saturating_sub(taken));
         }
-        let mut left = Vec::new();
+        let mut used = 0;
         if let Some(text) = help {
-            left.push((text.to_string(), self.drawn.muted));
+            put(buf, &mut used, text, self.drawn.muted);
             if lead.iter().any(|(text, _)| !text.is_empty()) {
-                left.push((LEAD.to_string(), self.drawn.muted));
+                put(buf, &mut used, LEAD, self.drawn.muted);
             }
         }
-        left.extend(lead);
-        left
+        for (text, style) in &lead {
+            put(buf, &mut used, text, *style);
+        }
+        used
+    }
+
+    fn facts(&self, index: usize, buf: &mut Vec<(String, Style)>) -> usize {
+        let screen = &self.screens[index].screen;
+        let spans = screen.fact_spans();
+        if !spans.is_empty() {
+            return fill(buf, spans);
+        }
+        fill(buf, &screen.facts())
     }
 
     fn right(&self, index: usize, room: u16, buf: &mut Vec<(String, Style)>) -> usize {
@@ -280,20 +307,20 @@ impl<E: Send + 'static> Tui<E> {
             .unwrap_or_default()
     }
 
-    pub(crate) fn group_labels(&self) -> Labels<'_> {
+    pub(crate) fn group_labels(&self) -> Labels<'_, impl Iterator<Item = Item<'_>> + Clone> {
         let place = self.model.nav.place();
         let palette = &self.drawn;
+        let headings = &self.model.headings;
         let items = self
             .model
             .groups
             .iter()
             .enumerate()
-            .map(|(group, heading)| Item {
-                label: &self.model.headings[*heading].label,
+            .map(move |(group, heading)| Item {
+                label: &headings[*heading].label,
                 number: None,
                 on: group == place.group,
-            })
-            .collect();
+            });
         let on = if self.focus == Focus::Groups {
             palette.focus
         } else {
@@ -309,22 +336,27 @@ impl<E: Send + 'static> Tui<E> {
         }
     }
 
-    pub(crate) fn section_labels<'a>(&'a self, tail: &'a [(String, Style)]) -> Labels<'a> {
+    pub(crate) fn section_labels<'a>(
+        &'a self,
+        tail: &'a [(String, Style)],
+    ) -> Labels<'a, impl Iterator<Item = Item<'a>> + Clone> {
         let palette = &self.drawn;
         let place = self.model.nav.place();
-        let tabs = self.model.group_tabs();
+        let model = &self.model;
+        let heading = model.groups.get(place.group).copied();
+        let tabs = model
+            .visible
+            .iter()
+            .filter(move |tab| heading == Some(model.tabs[**tab].group));
         let numbers = self
             .head
             .as_ref()
             .map_or(Numbers::Across, |head| head.numbers);
-        let lone = self.head.as_ref().is_some_and(|head| head.lone) && tabs.len() == 1;
+        let lone = self.head.as_ref().is_some_and(|head| head.lone) && tabs.clone().count() == 1;
         let offset = place.number.saturating_sub(place.section + 1);
         let zero_first = self.model.keys.zero_first;
-        let items = tabs
-            .iter()
-            .enumerate()
-            .map(|(at, tab)| Item {
-                label: &self.model.tabs[*tab].label,
+        let items = tabs.enumerate().map(move |(at, tab)| Item {
+                label: &model.tabs[*tab].label,
                 number: match numbers {
                     _ if lone => None,
                     Numbers::Across => head::shown(offset + at + 1, zero_first),
@@ -332,8 +364,7 @@ impl<E: Send + 'static> Tui<E> {
                     Numbers::Off => None,
                 },
                 on: at == place.section,
-            })
-            .collect();
+            });
         let lit = self.open.is_none();
         let on = match (lit, self.focus) {
             (false, _) => palette.inactive,
@@ -383,9 +414,10 @@ impl<E: Send + 'static> Tui<E> {
         facts: &[(String, Style)],
         left: &[(String, Style)],
         status: &[(String, Style)],
-    ) -> (u16, Vec<(Row, Rect)>) {
+        rows: &mut Vec<(Row, Rect)>,
+    ) -> u16 {
         let Some(head) = self.head.as_ref() else {
-            return (line.y, Vec::new());
+            return line.y;
         };
         let palette = &self.drawn;
         let overlay = self
@@ -396,7 +428,6 @@ impl<E: Send + 'static> Tui<E> {
             });
         let nav = &self.model.nav;
         let mut y = line.y;
-        let mut rows = Vec::new();
         for row in &head.rows {
             if y >= bottom {
                 break;
@@ -414,23 +445,30 @@ impl<E: Send + 'static> Tui<E> {
                     rows.push((Row::Groups, at));
                 }
                 Row::Caption => {
-                    let caption = self.screens[index]
-                        .screen
-                        .caption()
-                        .map(|parts| spans(&parts));
-                    let group = self.model.groups.get(nav.place().group).map(|heading| {
-                        let name = self.model.headings[*heading].label.text().to_string();
-                        vec![(name.into(), Style::new())]
-                    });
-                    let middle = caption.or(group).unwrap_or_default();
-                    Rule {
-                        rule: palette.rule,
-                        base: palette.accent.add_modifier(Modifier::BOLD),
-                        middle: &middle,
-                        left: &[],
-                        right: &[],
+                    let base = palette.accent.add_modifier(Modifier::BOLD);
+                    let caption = self.screens[index].screen.caption();
+                    if let Some(middle) = &caption {
+                        Rule {
+                            rule: palette.rule,
+                            base,
+                            middle,
+                            left: &[],
+                            right: &[],
+                        }
+                        .draw(buf, at);
+                    } else {
+                        let group = self.model.groups.get(nav.place().group).map(|heading| {
+                            [(self.model.headings[*heading].label.text(), Style::new())]
+                        });
+                        Rule {
+                            rule: palette.rule,
+                            base,
+                            middle: group.as_ref().map_or(&[][..], |group| &group[..]),
+                            left: &[],
+                            right: &[],
+                        }
+                        .draw(buf, at);
                     }
-                    .draw(buf, at);
                 }
                 Row::Sections => {
                     if nav.count() == 0 {
@@ -465,7 +503,7 @@ impl<E: Send + 'static> Tui<E> {
             }
             y += 1;
         }
-        (y, rows)
+        y
     }
 
     fn time_glass(&mut self, index: usize) {
@@ -609,39 +647,43 @@ impl<E: Send + 'static> Tui<E> {
         let layout = self.layout;
         let width = area.width.saturating_sub(2 * layout.side);
         let bottom = area.bottom().saturating_sub(layout.bottom);
-        let title = self.title_text();
-        let screen = &self.screens[index].screen;
-        let facts = screen.facts();
+        let mut title = std::mem::take(&mut self.title_line);
+        joined(&mut title, &self.title);
+        let mut fact_parts = std::mem::take(&mut self.fact_parts);
+        let facts_used = self.facts(index, &mut fact_parts);
+        let facts = &fact_parts[..facts_used];
         let room = room(width, &title);
-        let left = self.left(index, room);
+        let mut left_parts = std::mem::take(&mut self.left_parts);
+        let left_used = self.left(index, room, &mut left_parts);
+        let left = &left_parts[..left_used];
         let mut parts = std::mem::take(&mut self.right_parts);
         let used = self.right(index, room, &mut parts);
         let status = &parts[..used];
+        let mut rows = std::mem::take(&mut self.rows);
         let line = Rect::new(area.x + layout.side, area.y + layout.top, width, 1);
         let mut below;
         if self.gated || self.head.is_some() {
             let top = line.y.min(bottom);
             if self.gated {
                 if top < bottom {
-                    self.title_rule(frame.buffer_mut(), line, &self.title, &left, status);
+                    self.title_rule(frame.buffer_mut(), line, &self.title, left, status);
                 }
                 below = (top + 1).min(bottom);
             } else {
-                let (y, rows) = self.stack(
+                below = self.stack(
                     frame.buffer_mut(),
                     line,
                     bottom,
                     index,
-                    &facts,
-                    &left,
+                    facts,
+                    left,
                     status,
+                    &mut rows,
                 );
-                below = y;
-                self.rows = rows;
             }
             self.top = Rect::default();
         } else {
-            let header = self.header(&title, &facts, &left, status);
+            let header = self.header(&title, facts, left, status);
             let top = Rect::new(
                 line.x,
                 line.y,
@@ -664,20 +706,39 @@ impl<E: Send + 'static> Tui<E> {
                 frame.render_widget(rule, Rect::new(top.x, below, width, 1));
                 below += 1;
             } else if self.keep_facts && dropped && below < bottom {
-                let row = self.facts_row(&facts);
+                let row = self.facts_row(facts);
                 let height = row.height().min(bottom - below);
                 frame.render_widget(row, Rect::new(top.x, below, width, height));
                 below += height;
             }
         }
+        self.rows = rows;
         self.right_parts = parts;
+        self.left_parts = left_parts;
+        self.fact_parts = fact_parts;
+        self.title_line = title;
         below = below.saturating_add(layout.head_gap).min(bottom);
         let screen = &self.screens[index].screen;
         let again = self.quit.notice().filter(|text| !text.is_empty());
-        let (mut hints, prompted) = match (self.out.modals.last(), &self.out.picking) {
-            (Some(top), _) => (top.modal.hints.clone(), true),
-            (None, Some(picking)) => (picking.pick.hints.clone(), true),
-            (None, None) => (screen.hints(), false),
+        let mut hints = recycle(std::mem::take(&mut self.hint_buf));
+        let prompted = match (self.out.modals.last(), &self.out.picking) {
+            (Some(top), _) => {
+                hints.extend_from_slice(&top.modal.hints);
+                true
+            }
+            (None, Some(picking)) => {
+                hints.extend_from_slice(&picking.pick.hints);
+                true
+            }
+            (None, None) => {
+                let list = screen.hint_list();
+                if list.is_empty() {
+                    hints.extend(screen.hints());
+                } else {
+                    hints.extend_from_slice(list);
+                }
+                false
+            }
         };
         if !self.gated {
             let shown = self.hints.iter().filter(|hint| !prompted || hint.pinned);
@@ -700,6 +761,7 @@ impl<E: Send + 'static> Tui<E> {
                 .render(place, &mut plain);
             light(frame.buffer_mut(), &plain, palette.accent);
         }
+        self.hint_buf = recycle(hints);
         let inner = area.width.saturating_sub(2 * layout.pad);
         let x = area.x + layout.pad;
         let mut floor = floor_line;

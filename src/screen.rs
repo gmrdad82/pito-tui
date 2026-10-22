@@ -84,8 +84,16 @@ pub trait Screen<E>: Any {
         Vec::new()
     }
 
+    fn hint_list(&self) -> &[Hint<'static>] {
+        &[]
+    }
+
     fn facts(&self) -> Vec<(String, Style)> {
         Vec::new()
+    }
+
+    fn fact_spans(&self) -> &[Span] {
+        &[]
     }
 
     fn status(&self) -> Option<(String, Style)> {
