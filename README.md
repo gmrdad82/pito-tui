@@ -210,6 +210,15 @@ Drawing the Log screen at 200x60 took 0.314 ms on average.
 
 ![A find in a 20,000-line log, stepping through the hits and to both ends, with the scrollbar and the range count](docs/images/log.gif)
 
+### Sections that fold
+
+`Folds` lays out a column of titled sections the user expands and collapses,
+one key for the section under the cursor and one for all of them. A collapsed
+section is one row, its title rule ending in a summary the app gives; the body
+slides open or shut like a curtain, eased, or at once under reduced motion.
+The state is plain data the app saves, and a steady column allocates nothing
+per frame.
+
 ### Headless runs, dumps and frame captures
 
 `Tui::shot` draws the app at any size after a list of keys, `dump::text` and
@@ -745,6 +754,15 @@ Filter::new(label) .placeholder(..) .hint(..) .keys(list::Keys) .start_keys(..) 
   view(&columns, &Palette) -> ListView, typing(), query(), active(), shown(), current(), list(), list_mut()
 pub enum Turn { Pass, Taken, Filtered, Open(index) }
 matches(text, query) -> bool                               // every word of the query, any case
+Folds::new([id]) .keys(one: &[footer::Key], all: &[footer::Key]) .still(bool) .lasting(Duration) .gap(rows)
+  .marks(open, shut) .lit(bool)                            // "▾" and "▸", a 180 ms eased fold, no keys by default
+  len(), is_empty(), id(index), index(id), is_shut(index), cursor(), point(index), set_still(bool)
+  toggle(index, now), toggle_all(now), set(index, shut, now), set_all(shut, now), key(KeyEvent, now) -> bool
+  state() -> FoldState, restore(&FoldState), moment(now), animating(), scroll(top), total(), top_of(index),
+  title_at(column, row) -> Option<index>, placed() -> &[Placed],
+  draw(frame, area, &Palette, &[Fold], FnMut(&mut Buffer, index, Rect))
+Fold { title: &[Span], summary: &[Span], rows }            // the summary shows on a collapsed title rule
+FoldState { sections: Vec<(id, collapsed)> };  Placed { title: Rect, body: Rect, rows, folding }
 
 dump::size("120x34"), dump::keys("tab / foo enter ctrl+c") -> Result<Vec<KeyEvent>, word>,
 dump::text(&Buffer), dump::ansi(&Buffer);  Bench { screen, frames, average, worst }

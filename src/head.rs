@@ -4,7 +4,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::label::{Label, Span};
 use crate::text::cells;
 
-const RULE: &str = "─";
+pub(crate) const RULE: &str = "─";
 const ELLIPSIS: &str = "…";
 const SIDE_MIN: u16 = 6;
 const GROUP_GAP: u16 = 2;

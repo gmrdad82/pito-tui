@@ -151,6 +151,15 @@ Filter::new(label) .placeholder(..) .hint(..) .keys(list::Keys) .start_keys(..) 
   view(&columns, &Palette) -> ListView, typing(), query(), active(), shown(), current(), list(), list_mut()
 pub enum Turn { Pass, Taken, Filtered, Open(index) }
 matches(text, query) -> bool                               // every word of the query, any case
+Folds::new([id]) .keys(one: &[footer::Key], all: &[footer::Key]) .still(bool) .lasting(Duration) .gap(rows)
+  .marks(open, shut) .lit(bool)                            // "▾" and "▸", a 180 ms eased fold, no keys by default
+  len(), is_empty(), id(index), index(id), is_shut(index), cursor(), point(index), set_still(bool)
+  toggle(index, now), toggle_all(now), set(index, shut, now), set_all(shut, now), key(KeyEvent, now) -> bool
+  state() -> FoldState, restore(&FoldState), moment(now), animating(), scroll(top), total(), top_of(index),
+  title_at(column, row) -> Option<index>, placed() -> &[Placed],
+  draw(frame, area, &Palette, &[Fold], FnMut(&mut Buffer, index, Rect))
+Fold { title: &[Span], summary: &[Span], rows }            // the summary shows on a collapsed title rule
+FoldState { sections: Vec<(id, collapsed)> };  Placed { title: Rect, body: Rect, rows, folding }
 
 dump::size("120x34"), dump::keys("tab / foo enter ctrl+c") -> Result<Vec<KeyEvent>, word>,
 dump::text(&Buffer), dump::ansi(&Buffer);  Bench { screen, frames, average, worst }
