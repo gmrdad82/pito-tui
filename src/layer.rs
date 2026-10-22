@@ -124,6 +124,7 @@ struct Choices {
     shown: Vec<usize>,
     list: List,
     rows: u16,
+    cut: u16,
 }
 
 impl Choices {
@@ -133,6 +134,7 @@ impl Choices {
             shown: Vec::new(),
             list: List::new().keys(Keys::new()),
             rows,
+            cut: 0,
         };
         choices.sift("");
         choices
@@ -171,6 +173,8 @@ impl Choices {
         u16::try_from(self.shown.len())
             .unwrap_or(u16::MAX)
             .clamp(1, self.rows.max(1))
+            .saturating_sub(self.cut)
+            .max(1)
     }
 }
 
@@ -219,7 +223,7 @@ pub struct Modal {
     pub(crate) close: &'static [Key],
     pub(crate) hints: Vec<Hint<'static>>,
     filter: Option<(usize, usize)>,
-    armed: Option<usize>,
+    armed: Option<(usize, usize)>,
 }
 
 pub(crate) enum Outcome {
@@ -385,6 +389,7 @@ impl Modal {
     }
 
     fn cycle(&mut self, by: isize) {
+        self.armed = None;
         let count = self.parts.len();
         if count == 0 {
             return;
@@ -420,8 +425,8 @@ impl Modal {
         let Some(choice) = choices.current() else {
             return Outcome::Stay;
         };
-        if choices.all[choice].confirm.is_some() && self.armed != Some(choice) {
-            self.armed = Some(choice);
+        if choices.all[choice].confirm.is_some() && self.armed != Some((part, choice)) {
+            self.armed = Some((part, choice));
             return Outcome::Stay;
         }
         self.armed = None;
@@ -504,11 +509,11 @@ impl Modal {
     }
 
     fn line(&self) -> Option<(&str, Tone)> {
-        if let Some(choice) = self.armed {
-            let warning = self.parts.iter().find_map(|part| match part {
-                Part::List(choices) => choices.all.get(choice)?.confirm.as_deref(),
+        if let Some((part, choice)) = self.armed {
+            let warning = match self.parts.get(part) {
+                Some(Part::List(choices)) => choices.all.get(choice).and_then(|it| it.confirm.as_deref()),
                 _ => None,
-            });
+            };
             if let Some(warning) = warning {
                 return Some((warning, Tone::Warn));
             }
@@ -520,6 +525,11 @@ impl Modal {
     }
 
     pub(crate) fn draw(&mut self, frame: &mut Frame, area: Rect, palette: &Palette) {
+        for part in &mut self.parts {
+            if let Part::List(choices) = part {
+                choices.cut = 0;
+            }
+        }
         let title = u16::try_from(cells(&self.title)).unwrap_or(u16::MAX);
         let line = self.line().map_or(0, |(text, _)| {
             u16::try_from(cells(text)).unwrap_or(u16::MAX)
@@ -546,7 +556,7 @@ impl Modal {
         for part in self.parts.iter_mut().rev() {
             if let Part::List(choices) = part {
                 let cut = spare.min(choices.height().saturating_sub(1));
-                choices.rows = choices.height() - cut;
+                choices.cut = cut;
                 spare -= cut;
             }
         }
@@ -686,7 +696,19 @@ impl Toast {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dump;
     use crossterm::event::KeyModifiers;
+    use ratatui::{Terminal, backend::TestBackend, buffer::Buffer, style::Color};
+
+    const TONES: [Tone; 7] = [
+        Tone::Ink,
+        Tone::Strong,
+        Tone::Muted,
+        Tone::Accent,
+        Tone::Good,
+        Tone::Warn,
+        Tone::Bad,
+    ];
 
     fn press(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
@@ -696,6 +718,63 @@ mod tests {
         for c in text.chars() {
             modal.key(press(KeyCode::Char(c)));
         }
+    }
+
+    fn palette() -> Palette {
+        Palette::new(Color::Blue)
+    }
+
+    fn shot_in(modal: &mut Modal, width: u16, height: u16, area: Rect) -> Buffer {
+        let Ok(mut terminal) = Terminal::new(TestBackend::new(width, height));
+        let Ok(_) = terminal.draw(|frame| modal.draw(frame, area, &palette()));
+        terminal.backend().buffer().clone()
+    }
+
+    fn shot(modal: &mut Modal, width: u16, height: u16) -> Buffer {
+        shot_in(modal, width, height, Rect::new(0, 0, width, height))
+    }
+
+    fn drawn(modal: &mut Modal, width: u16, height: u16) -> String {
+        dump::text(&shot(modal, width, height))
+    }
+
+    fn boxed(buffer: &Buffer) -> Option<Rect> {
+        let area = buffer.area;
+        let mut corner = None;
+        let mut end = None;
+        for y in area.top()..area.bottom() {
+            for x in area.left()..area.right() {
+                match buffer[(x, y)].symbol() {
+                    "╭" if corner.is_none() => corner = Some((x, y)),
+                    "╯" => end = Some((x, y)),
+                    _ => {}
+                }
+            }
+        }
+        let ((left, top), (right, bottom)) = (corner?, end?);
+        Some(Rect::new(left, top, right - left + 1, bottom - top + 1))
+    }
+
+    fn found(buffer: &Buffer, needle: &str) -> Option<(u16, u16)> {
+        let first = needle.chars().next()?.to_string();
+        let area = buffer.area;
+        (area.top()..area.bottom()).find_map(|y| {
+            (area.left()..area.right()).find_map(|x| {
+                let rest: String = (x..area.right().min(x + 64))
+                    .map(|at| buffer[(at, y)].symbol().to_string())
+                    .collect();
+                (buffer[(x, y)].symbol() == first && rest.starts_with(needle)).then_some((x, y))
+            })
+        })
+    }
+
+    fn wears(buffer: &Buffer, at: (u16, u16), style: Style) -> bool {
+        let cell = &buffer[at];
+        style.fg.is_none_or(|fg| cell.fg == fg) && cell.modifier.contains(style.add_modifier)
+    }
+
+    fn names(count: usize) -> Vec<Choice> {
+        (0..count).map(|n| Choice::new(format!("item {n:02}"))).collect()
     }
 
     #[test]
@@ -724,5 +803,542 @@ mod tests {
             Outcome::Heard(Event::Chosen { part: 1, choice: 2 })
         ));
         assert!(matches!(modal.key(press(KeyCode::Esc)), Outcome::Close));
+    }
+
+    #[test]
+    fn every_builder_lands_in_the_modal_and_every_accessor_reads_it_back() {
+        let mut modal = Modal::new(9, "Settings")
+            .text([Line::from("pick one")])
+            .field(
+                Field::new("Name")
+                    .placeholder("who")
+                    .input(Input::new().with("ann")),
+            )
+            .list([Choice::new("red"), Choice::new("blue")])
+            .status("saved", Tone::Good)
+            .width(50)
+            .hints([Hint::new("enter", "choose")])
+            .cancel_keys(&[Key::Char('x')])
+            .close_keys(&[Key::Ctrl('d')])
+            .focus(2);
+        assert_eq!(modal.id(), 9);
+        assert_eq!(modal.focused(), 2);
+        assert_eq!(modal.hints.len(), 1);
+        assert_eq!(modal.cancel, &[Key::Char('x')]);
+        assert_eq!(modal.close, &[Key::Ctrl('d')]);
+        assert_eq!(modal.value(1), Some("ann"));
+        assert_eq!(modal.value(0), None, "a text part has no value");
+        assert_eq!(modal.value(2), None, "a list has no value");
+        assert_eq!(modal.value(99), None);
+        assert_eq!(modal.choice(2), Some(0));
+        assert_eq!(modal.choice(1), None, "a field has no choice");
+        assert_eq!(modal.choice(99), None);
+        assert!(modal.input_mut(0).is_none());
+        assert!(modal.input_mut(99).is_none());
+        if let Some(input) = modal.input_mut(1) {
+            input.set("bob");
+        }
+        assert_eq!(modal.value(1), Some("bob"));
+        let buffer = shot(&mut modal, 120, 40);
+        let shown = dump::text(&buffer);
+        for word in ["Settings", "pick one", "Name", "bob", "red", "blue", "saved"] {
+            assert!(shown.contains(word), "{word} is drawn:\n{shown}");
+        }
+        assert_eq!(boxed(&buffer).map(|place| place.width), Some(50));
+        let at = found(&buffer, "saved");
+        assert!(at.is_some_and(|at| wears(&buffer, at, palette().good)));
+    }
+
+    #[test]
+    fn set_text_and_set_choices_only_touch_the_part_kind_they_name() {
+        let mut modal = Modal::new(1, "Edit")
+            .text([Line::from("before")])
+            .field(Field::new("Find"))
+            .list([Choice::new("one"), Choice::new("two")]);
+        assert!(modal.set_text(0, [Line::from("after")]));
+        assert!(!modal.set_text(1, [Line::from("lost")]));
+        assert!(!modal.set_text(7, [Line::from("lost")]));
+        assert!(!modal.set_choices(1, [Choice::new("lost")]));
+        assert!(!modal.set_choices(0, [Choice::new("lost")]));
+        assert!(!modal.set_choices(42, [Choice::new("lost")]));
+        assert!(modal.set_choices(2, [Choice::new("three"), Choice::new("four")]));
+        let shown = drawn(&mut modal, 80, 24);
+        assert!(shown.contains("after") && !shown.contains("before"));
+        assert!(shown.contains("three") && shown.contains("four"));
+        assert!(!shown.contains("lost") && !shown.contains("one"));
+        modal.set_status(Some(("busy".into(), Tone::Warn)));
+        assert_eq!(modal.line(), Some(("busy", Tone::Warn)));
+        modal.set_status(None);
+        assert_eq!(modal.line(), None);
+        assert!(!drawn(&mut modal, 80, 24).contains("busy"));
+    }
+
+    #[test]
+    fn set_choices_keeps_the_filter_query_and_drops_an_armed_confirm() {
+        let mut modal = Modal::new(1, "Go")
+            .field(Field::new("Find"))
+            .list([Choice::new("wipe").confirm("again wipes")])
+            .filter(0, 1);
+        modal.key(press(KeyCode::Enter));
+        assert_eq!(modal.line(), Some(("again wipes", Tone::Warn)));
+        typed(&mut modal, "b");
+        assert_eq!(modal.line(), None, "typing disarms");
+        modal.set_choices(1, [Choice::new("alpha"), Choice::new("beta")]);
+        assert_eq!(modal.choice(1), Some(1), "the query b still sifts");
+        let shown = drawn(&mut modal, 80, 24);
+        assert!(shown.contains("beta") && !shown.contains("alpha"));
+    }
+
+    #[test]
+    fn focus_lands_only_on_parts_that_take_it() {
+        let modal = Modal::new(1, "F")
+            .text([Line::from("hi")])
+            .field(Field::new("A"));
+        assert_eq!(modal.focused(), 1, "the first focusable part takes focus");
+        assert_eq!(modal.focus(0).focused(), 1, "a text part refuses focus");
+        let modal = Modal::new(1, "F").field(Field::new("A")).focus(9);
+        assert_eq!(modal.focused(), 0, "an index past the parts is ignored");
+        let modal = Modal::new(1, "F").focus(1).field(Field::new("A"));
+        assert_eq!(modal.focused(), 0, "focus before the part exists is ignored");
+        let modal = Modal::new(1, "F")
+            .field(Field::new("A"))
+            .field(Field::new("B"))
+            .focus(1)
+            .text([Line::from("late")]);
+        assert_eq!(modal.focused(), 1, "a later part keeps the chosen focus");
+    }
+
+    #[test]
+    fn tab_and_backtab_cycle_over_focusable_parts_only() {
+        let mut none = Modal::alert(1, "A", [Line::from("x")]);
+        assert!(matches!(none.key(press(KeyCode::Tab)), Outcome::Stay));
+        assert!(matches!(none.key(press(KeyCode::BackTab)), Outcome::Stay));
+        assert_eq!(none.focused(), 0);
+        let mut empty = Modal::new(1, "E");
+        empty.key(press(KeyCode::Tab));
+        assert_eq!(empty.focused(), 0);
+        let mut one = Modal::new(1, "O")
+            .text([Line::from("x")])
+            .field(Field::new("A"));
+        one.key(press(KeyCode::Tab));
+        assert_eq!(one.focused(), 1);
+        one.key(press(KeyCode::BackTab));
+        assert_eq!(one.focused(), 1);
+        let mut several = Modal::new(1, "S")
+            .text([Line::from("x")])
+            .field(Field::new("A"))
+            .text([Line::from("y")])
+            .list([Choice::new("c")])
+            .field(Field::new("B"));
+        let mut seen = Vec::new();
+        for _ in 0..4 {
+            several.key(press(KeyCode::Tab));
+            seen.push(several.focused());
+        }
+        assert_eq!(seen, [3, 4, 1, 3]);
+        let mut back = Vec::new();
+        for _ in 0..3 {
+            several.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
+            back.push(several.focused());
+        }
+        assert_eq!(back, [1, 4, 3]);
+    }
+
+    #[test]
+    fn a_field_takes_typing_paste_and_editing_keys() {
+        let mut modal = Modal::new(1, "Type")
+            .field(Field::new("Name"))
+            .list([Choice::new("one")]);
+        assert!(matches!(
+            modal.key(press(KeyCode::Char('a'))),
+            Outcome::Heard(Event::Edited { part: 0 })
+        ));
+        typed(&mut modal, "bc");
+        modal.key(press(KeyCode::Left));
+        modal.key(press(KeyCode::Backspace));
+        assert_eq!(modal.value(0), Some("ac"));
+        modal.key(press(KeyCode::Home));
+        assert!(matches!(
+            modal.key(press(KeyCode::Left)),
+            Outcome::Stay
+        ));
+        modal.key(press(KeyCode::Delete));
+        assert_eq!(modal.value(0), Some("c"));
+        modal.key(press(KeyCode::End));
+        assert!(matches!(
+            modal.paste("xy"),
+            Outcome::Heard(Event::Edited { part: 0 })
+        ));
+        assert_eq!(modal.value(0), Some("cxy"));
+        modal.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+        assert_eq!(modal.value(0), Some(""));
+        modal.key(press(KeyCode::Tab));
+        assert!(matches!(modal.paste("z"), Outcome::Stay), "a list takes no paste");
+        assert!(matches!(
+            modal.key(press(KeyCode::Char('q'))),
+            Outcome::Stay
+        ));
+        assert_eq!(modal.value(0), Some(""));
+    }
+
+    #[test]
+    fn a_filter_field_sifts_its_list_by_case_unicode_and_words() {
+        let mut modal = Modal::new(1, "Find")
+            .field(Field::new("Find"))
+            .list([
+                Choice::new("Alpha"),
+                Choice::new("beta"),
+                Choice::new("Ștefan"),
+                Choice::new("gamma ray"),
+            ])
+            .filter(0, 1);
+        let shown = drawn(&mut modal, 80, 24);
+        for name in ["Alpha", "beta", "Ștefan", "gamma ray"] {
+            assert!(shown.contains(name));
+        }
+        typed(&mut modal, "ALP");
+        assert_eq!(modal.choice(1), Some(0));
+        let shown = drawn(&mut modal, 80, 24);
+        assert!(shown.contains("Alpha") && !shown.contains("beta"));
+        modal.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+        typed(&mut modal, "ȘTE");
+        assert_eq!(modal.choice(1), Some(2));
+        modal.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+        typed(&mut modal, "ray gam");
+        assert_eq!(modal.choice(1), Some(3), "every word must match, in any order");
+        typed(&mut modal, "zz");
+        assert_eq!(modal.choice(1), None);
+        assert!(matches!(modal.key(press(KeyCode::Enter)), Outcome::Stay));
+        assert!(matches!(modal.key(press(KeyCode::Down)), Outcome::Stay));
+        let shown = drawn(&mut modal, 80, 24);
+        assert!(!shown.contains("gamma") && !shown.contains("Alpha"));
+        modal.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+        typed(&mut modal, "   ");
+        assert_eq!(modal.choice(1), Some(0), "a blank query shows everything");
+    }
+
+    #[test]
+    fn the_current_choice_follows_the_filter_while_it_still_matches() {
+        let mut modal = Modal::new(1, "Find")
+            .field(Field::new("Find"))
+            .list([
+                Choice::new("Alpha"),
+                Choice::new("beta"),
+                Choice::new("delta"),
+            ])
+            .filter(0, 1);
+        assert!(matches!(
+            modal.key(press(KeyCode::Down)),
+            Outcome::Heard(Event::Moved { part: 1, choice: 1 })
+        ));
+        assert_eq!(modal.focused(), 0, "arrows steer the list from the field");
+        typed(&mut modal, "ta");
+        assert_eq!(modal.choice(1), Some(1), "beta still matches and stays");
+        modal.key(press(KeyCode::Down));
+        assert_eq!(modal.choice(1), Some(2));
+        modal.key(press(KeyCode::Backspace));
+        modal.key(press(KeyCode::Backspace));
+        typed(&mut modal, "alp");
+        assert_eq!(modal.choice(1), Some(0), "a lost choice falls to the first left");
+        assert!(matches!(
+            modal.key(press(KeyCode::Enter)),
+            Outcome::Heard(Event::Chosen { part: 1, choice: 0 })
+        ));
+    }
+
+    #[test]
+    fn a_filter_with_wrong_parts_links_nothing() {
+        let mut modal = Modal::new(1, "Find")
+            .list([Choice::new("one"), Choice::new("two")])
+            .field(Field::new("Find"))
+            .filter(0, 1)
+            .focus(1);
+        typed(&mut modal, "two");
+        assert_eq!(modal.choice(0), Some(0), "nothing was sifted");
+        assert!(matches!(
+            modal.key(press(KeyCode::Enter)),
+            Outcome::Heard(Event::Submitted { part: 1 })
+        ));
+        let mut modal = Modal::new(1, "Find")
+            .field(Field::new("A"))
+            .field(Field::new("B"))
+            .list([Choice::new("one")])
+            .filter(0, 2)
+            .focus(1);
+        assert!(matches!(
+            modal.key(press(KeyCode::Enter)),
+            Outcome::Heard(Event::Submitted { part: 1 })
+        ));
+        assert!(matches!(
+            modal.key(press(KeyCode::Down)),
+            Outcome::Stay
+        ));
+    }
+
+    #[test]
+    fn enter_on_a_list_chooses_and_a_confirm_arms_first() {
+        let mut modal = Modal::new(1, "Pick").list([
+            Choice::new("keep"),
+            Choice::new("wipe").confirm("again wipes"),
+        ]);
+        assert!(matches!(
+            modal.key(press(KeyCode::Enter)),
+            Outcome::Heard(Event::Chosen { part: 0, choice: 0 })
+        ));
+        modal.key(press(KeyCode::Down));
+        assert!(matches!(modal.key(press(KeyCode::Enter)), Outcome::Stay));
+        let buffer = shot(&mut modal, 80, 24);
+        let at = found(&buffer, "again wipes");
+        assert!(at.is_some_and(|at| wears(&buffer, at, palette().warn)));
+        modal.key(press(KeyCode::Up));
+        modal.key(press(KeyCode::Down));
+        assert_eq!(modal.line(), None, "moving disarms");
+        assert!(matches!(modal.key(press(KeyCode::Enter)), Outcome::Stay));
+        assert!(matches!(
+            modal.key(press(KeyCode::Enter)),
+            Outcome::Heard(Event::Chosen { part: 0, choice: 1 })
+        ));
+        assert_eq!(modal.line(), None, "choosing disarms");
+        let mut quiet = Modal::new(1, "T").text([Line::from("x")]);
+        assert!(matches!(quiet.key(press(KeyCode::Enter)), Outcome::Stay));
+    }
+
+    #[test]
+    fn an_armed_confirm_does_not_carry_to_another_list() {
+        let mut modal = Modal::new(1, "Two")
+            .list([Choice::new("keep"), Choice::new("wipe").confirm("again wipes")])
+            .list([Choice::new("Danger").skip(), Choice::new("burn").confirm("again burns")]);
+        modal.key(press(KeyCode::Down));
+        assert!(matches!(modal.key(press(KeyCode::Enter)), Outcome::Stay));
+        modal.key(press(KeyCode::Tab));
+        assert_eq!(modal.focused(), 1);
+        assert_eq!(modal.line(), None, "a focus change disarms");
+        assert!(
+            matches!(modal.key(press(KeyCode::Enter)), Outcome::Stay),
+            "burn still asks first"
+        );
+        assert!(matches!(
+            modal.key(press(KeyCode::Enter)),
+            Outcome::Heard(Event::Chosen { part: 1, choice: 1 })
+        ));
+    }
+
+    #[test]
+    fn the_warning_shown_is_the_armed_lists_own() {
+        let mut modal = Modal::new(1, "Two")
+            .list([Choice::new("keep"), Choice::new("wipe").confirm("again wipes")])
+            .list([Choice::new("Danger").skip(), Choice::new("burn").confirm("again burns")])
+            .focus(1);
+        modal.key(press(KeyCode::Enter));
+        assert_eq!(modal.line(), Some(("again burns", Tone::Warn)));
+    }
+
+    #[test]
+    fn cancel_and_close_keys_close_and_replace_the_defaults() {
+        let mut modal = Modal::new(1, "C").list([Choice::new("a")]);
+        assert!(matches!(modal.key(press(KeyCode::Esc)), Outcome::Close));
+        let mut modal = Modal::new(1, "C")
+            .list([Choice::new("a")])
+            .cancel_keys(&[Key::Char('n')])
+            .close_keys(&[Key::Char('y')]);
+        assert!(matches!(modal.key(press(KeyCode::Esc)), Outcome::Stay));
+        assert!(matches!(modal.key(press(KeyCode::Char('n'))), Outcome::Close));
+        assert!(matches!(modal.key(press(KeyCode::Char('y'))), Outcome::Close));
+        let mut typing = Modal::new(1, "C")
+            .field(Field::new("A"))
+            .close_keys(&[Key::Char('y')]);
+        assert!(
+            matches!(typing.key(press(KeyCode::Char('y'))), Outcome::Close),
+            "a close key wins over typing"
+        );
+    }
+
+    #[test]
+    fn an_alert_shows_its_lines_and_closes_on_enter_q_and_esc() {
+        for code in [KeyCode::Enter, KeyCode::Char('q'), KeyCode::Esc] {
+            let mut alert = Modal::alert(4, "Heads up", [Line::from("disk full")]);
+            assert_eq!(alert.id(), 4);
+            let shown = drawn(&mut alert, 80, 24);
+            assert!(shown.contains("Heads up") && shown.contains("disk full"));
+            assert!(matches!(alert.key(press(code)), Outcome::Close));
+        }
+        let mut alert = Modal::alert(4, "Heads up", [Line::from("disk full")]);
+        assert!(matches!(alert.key(press(KeyCode::Char('x'))), Outcome::Stay));
+    }
+
+    #[test]
+    fn a_list_scrolls_past_its_rows() {
+        let mut modal = Modal::new(1, "Long").list_rows(names(30), 5);
+        let buffer = shot(&mut modal, 80, 24);
+        assert_eq!(boxed(&buffer).map(|place| place.height), Some(7));
+        for _ in 0..10 {
+            modal.key(press(KeyCode::Down));
+        }
+        assert_eq!(modal.choice(0), Some(10));
+        let shown = drawn(&mut modal, 80, 24);
+        assert!(shown.contains("item 10") && !shown.contains("item 00"));
+        modal.key(press(KeyCode::End));
+        assert_eq!(modal.choice(0), Some(29));
+        assert!(matches!(modal.key(press(KeyCode::Down)), Outcome::Stay));
+        assert!(drawn(&mut modal, 80, 24).contains("item 29"));
+        modal.key(press(KeyCode::Home));
+        modal.key(press(KeyCode::PageDown));
+        assert!(modal.choice(0).is_some_and(|at| at > 0));
+    }
+
+    #[test]
+    fn the_box_is_as_tall_as_its_parts_and_as_wide_as_its_widest() {
+        let mut modal = Modal::new(1, "Pick").list_rows(names(10), 4);
+        assert_eq!(boxed(&shot(&mut modal, 60, 30)).map(|b| b.height), Some(6));
+        let mut modal = modal.status("ready", Tone::Muted);
+        assert_eq!(boxed(&shot(&mut modal, 60, 30)).map(|b| b.height), Some(8));
+        let mut modal = Modal::new(1, "Pick").list([Choice::new("a".repeat(40))]);
+        assert_eq!(boxed(&shot(&mut modal, 120, 30)).map(|b| b.width), Some(47));
+        let mut modal = Modal::new(1, "P").text([Line::from("x")]);
+        assert_eq!(
+            boxed(&shot(&mut modal, 120, 30)).map(|b| b.width),
+            Some(NARROWEST)
+        );
+        let mut modal = Modal::new(1, "P").status("s".repeat(60), Tone::Ink);
+        assert_eq!(boxed(&shot(&mut modal, 120, 30)).map(|b| b.width), Some(64));
+        let mut modal = Modal::new(1, "P").field(Field::new("Label"));
+        assert_eq!(
+            boxed(&shot(&mut modal, 120, 30)).map(|b| b.width),
+            Some(5 + FIELD + 4)
+        );
+    }
+
+    fn crowded() -> Modal {
+        Modal::new(1, "A rather long title for a crowded modal")
+            .text((0..5).map(|n| Line::from(format!("line {n}"))))
+            .field(Field::new("Find").placeholder("type"))
+            .list_rows(names(40), 30)
+            .filter(1, 2)
+            .status("all good", Tone::Good)
+    }
+
+    #[test]
+    fn a_crowded_modal_fits_every_terminal_and_never_draws_outside_its_area() {
+        for (width, height) in [(120, 40), (200, 60), (20, 6), (10, 3), (4, 2), (1, 1)] {
+            let mut modal = crowded();
+            let outer = Rect::new(0, 0, width + 6, height + 4);
+            let area = Rect::new(3, 2, width, height);
+            let buffer = shot_in(&mut modal, outer.width, outer.height, area);
+            for y in 0..outer.height {
+                for x in 0..outer.width {
+                    if !area.contains((x, y).into()) {
+                        assert_eq!(buffer[(x, y)].symbol(), " ", "{width}x{height} at {x},{y}");
+                    }
+                }
+            }
+            let found = boxed(&buffer);
+            if width >= 20 {
+                assert!(found.is_some(), "{width}x{height} draws its box");
+            }
+            if let Some(place) = found {
+                assert!(area.contains(place.as_position()));
+                assert!(place.right() <= area.right() && place.bottom() <= area.bottom());
+            }
+        }
+        let shown = drawn(&mut crowded(), 120, 40);
+        assert!(shown.contains("line 4") && shown.contains("all good"));
+    }
+
+    #[test]
+    fn a_short_terminal_cuts_the_list_and_keeps_the_status() {
+        let mut modal = crowded();
+        let buffer = shot(&mut modal, 80, 16);
+        let shown = dump::text(&buffer);
+        assert!(shown.contains("all good"), "{shown}");
+        assert!(shown.contains("Find"));
+        assert_eq!(boxed(&buffer).map(|b| b.height), Some(16));
+    }
+
+    #[test]
+    fn a_list_cut_by_a_short_terminal_grows_back_when_it_is_tall_again() {
+        let mut modal = Modal::new(1, "Long").list_rows(names(12), 10);
+        shot(&mut modal, 80, 6);
+        let buffer = shot(&mut modal, 80, 30);
+        assert_eq!(boxed(&buffer).map(|b| b.height), Some(12));
+        assert!(dump::text(&buffer).contains("item 09"));
+    }
+
+    #[test]
+    fn a_list_narrowed_by_its_filter_grows_back_when_the_query_clears() {
+        let mut modal = Modal::new(1, "Go")
+            .field(Field::new("Find"))
+            .list(names(6))
+            .filter(0, 1);
+        typed(&mut modal, "03");
+        assert!(!drawn(&mut modal, 80, 24).contains("item 04"));
+        modal.key(press(KeyCode::Backspace));
+        modal.key(press(KeyCode::Backspace));
+        let shown = drawn(&mut modal, 80, 24);
+        for n in 0..6 {
+            assert!(shown.contains(&format!("item {n:02}")), "{shown}");
+        }
+    }
+
+    #[test]
+    fn the_status_line_wears_each_tone_and_an_empty_one_takes_no_room() {
+        for tone in TONES {
+            let mut modal = Modal::new(1, "S").text([Line::from("x")]).status("toned", tone);
+            let buffer = shot(&mut modal, 60, 20);
+            let at = found(&buffer, "toned");
+            assert!(
+                at.is_some_and(|at| wears(&buffer, at, palette().tone(tone))),
+                "{tone:?}"
+            );
+        }
+        let mut modal = Modal::new(1, "S").text([Line::from("x")]).status("", Tone::Bad);
+        assert_eq!(modal.line(), None);
+        assert_eq!(boxed(&shot(&mut modal, 60, 20)).map(|b| b.height), Some(3));
+    }
+
+    #[test]
+    fn wide_titles_and_texts_are_clipped_by_cells_inside_the_box() {
+        let title = "日本語のとても長いタイトルです";
+        let text = "幅の広い文字がたくさん並んでいる一行のテキストです";
+        for width in [24, 25, 31] {
+            let mut modal = Modal::new(1, title)
+                .text([Line::from(text)])
+                .status("状態の行もまた長くて幅が広い文字ばかりです", Tone::Warn)
+                .width(width);
+            let outer = Rect::new(0, 0, 60, 12);
+            let buffer = shot_in(&mut modal, 60, 12, outer);
+            let place = boxed(&buffer);
+            assert_eq!(place.map(|b| b.width), Some(width));
+            let Some(place) = place else { continue };
+            for y in 0..outer.height {
+                for x in place.right()..outer.width {
+                    assert_eq!(buffer[(x, y)].symbol(), " ", "{width} at {x},{y}");
+                }
+                for x in 0..place.left() {
+                    assert_eq!(buffer[(x, y)].symbol(), " ", "{width} at {x},{y}");
+                }
+            }
+            for y in place.top()..place.bottom() {
+                let edge = buffer[(place.right() - 1, y)].symbol();
+                assert!(["│", "╮", "╯"].contains(&edge), "{width} edge {edge:?} at {y}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_modal_wider_and_taller_than_its_area_fills_it_and_stops() {
+        let mut modal = Modal::new(1, "Huge")
+            .text((0..50).map(|n| Line::from(format!("row {n}"))))
+            .width(500);
+        let buffer = shot(&mut modal, 40, 10);
+        assert_eq!(boxed(&buffer), Some(Rect::new(0, 0, 40, 10)));
+        let shown = dump::text(&buffer);
+        assert!(shown.contains("row 0") && !shown.contains("row 9"));
+    }
+
+    #[test]
+    fn the_box_sits_a_third_down_and_centred() {
+        let mut modal = Modal::new(1, "Pick").list_rows(names(3), 3).width(40);
+        let place = boxed(&shot(&mut modal, 120, 40));
+        assert_eq!(place, Some(Rect::new(40, 11, 40, 5)));
     }
 }
