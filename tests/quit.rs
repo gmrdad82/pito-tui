@@ -6,7 +6,7 @@ use pito_tui::crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind,
 };
 use pito_tui::ratatui::{Frame, layout::Rect, style::Color};
-use pito_tui::{Cx, Flow, Job, Palette, Screen, Tui, Wake};
+use pito_tui::{Activity, Cx, Flow, Job, Palette, Screen, Tui, Wake};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum When {
@@ -17,6 +17,7 @@ enum When {
     Heard,
     Paste,
     Mouse,
+    Start,
     Entered,
     GoThenQuit,
     Never,
@@ -96,6 +97,12 @@ impl Screen<u32> for Quitter {
 
     fn heard(&mut self, _id: u64, _heard: Heard, cx: &mut Cx<'_, u32>) {
         self.hit("heard", When::Heard, cx);
+    }
+
+    fn start(&mut self, cx: &mut Cx<'_, u32>) {
+        if self.when == When::Start {
+            self.hit("start", When::Start, cx);
+        }
     }
 
     fn entered(&mut self, cx: &mut Cx<'_, u32>) {
@@ -369,4 +376,98 @@ fn a_screen_that_quits_as_it_is_entered_quits_the_key_that_led_there() {
     let mut tui = pair(Quitter::new(When::Never), true);
     assert_eq!(tui.key(press(KeyCode::Char('g'))), Flow::Quit);
     assert_eq!(entered(&tui), Some(1));
+}
+
+fn door_then(second: Quitter) -> Tui<u32> {
+    Tui::<u32>::new("quit", "1.0.0", Color::Blue)
+        .screen(
+            "One",
+            Door {
+                quits: false,
+                entered: 0,
+            },
+        )
+        .screen("Two", second)
+}
+
+fn activity() -> Wake<u32> {
+    Wake::Activity(Activity::new(1, "sim", Instant::now()))
+}
+
+#[test]
+fn a_first_screen_that_quits_on_its_start_quits_the_start() {
+    let mut tui =
+        Tui::<u32>::new("quit", "1.0.0", Color::Blue).screen("One", Quitter::new(When::Start));
+    assert_eq!(tui.start(), Flow::Quit);
+    assert_eq!(seen(&tui), ["start"]);
+    assert_eq!(tui.settle(), Flow::Stay);
+}
+
+#[test]
+fn an_app_screen_that_quits_on_its_start_quits_the_start() {
+    let mut tui = Tui::<u32>::new("quit", "1.0.0", Color::Blue)
+        .screen(
+            "One",
+            Door {
+                quits: false,
+                entered: 0,
+            },
+        )
+        .app(Quitter::new(When::Start));
+    assert_eq!(tui.start(), Flow::Quit);
+    assert_eq!(seen(&tui), ["start"]);
+}
+
+#[test]
+fn a_start_that_does_not_quit_stays() {
+    let mut tui =
+        Tui::<u32>::new("quit", "1.0.0", Color::Blue).screen("One", Quitter::new(When::Never));
+    assert_eq!(tui.start(), Flow::Stay);
+    assert!(seen(&tui).is_empty());
+}
+
+#[test]
+fn a_quit_from_the_start_of_a_screen_gone_to_surfaces_at_the_next_wake() {
+    let mut tui = door_then(Quitter::new(When::Start));
+    assert_eq!(tui.start(), Flow::Stay);
+    assert!(seen(&tui).is_empty());
+    assert!(tui.go(1));
+    assert_eq!(seen(&tui), ["start", "entered"]);
+    assert_eq!(tui.handle(activity()), Flow::Quit);
+    assert_eq!(tui.handle(activity()), Flow::Stay);
+}
+
+#[test]
+fn a_quit_from_entering_a_screen_gone_to_surfaces_at_the_next_settle_once() {
+    let mut tui = door_then(Quitter::new(When::Entered));
+    assert_eq!(tui.start(), Flow::Stay);
+    assert!(tui.go(1));
+    assert_eq!(tui.current(), Some(1));
+    assert_eq!(seen(&tui), ["entered"]);
+    assert_eq!(tui.settle(), Flow::Quit);
+    assert_eq!(tui.settle(), Flow::Stay);
+}
+
+#[test]
+fn a_go_before_start_that_quits_surfaces_from_the_start() {
+    let mut tui = door_then(Quitter::new(When::Entered));
+    assert!(tui.go(1));
+    assert_eq!(tui.start(), Flow::Quit);
+    assert_eq!(seen(&tui), ["entered"]);
+}
+
+#[test]
+fn a_go_that_is_refused_leaves_no_quit_behind() {
+    let mut tui = door_then(Quitter::new(When::Entered));
+    assert_eq!(tui.start(), Flow::Stay);
+    assert!(!tui.go(7));
+    assert!(seen(&tui).is_empty());
+    assert_eq!(tui.handle(activity()), Flow::Stay);
+    assert_eq!(tui.settle(), Flow::Stay);
+}
+
+#[test]
+fn an_activity_wake_with_no_quit_pending_stays() {
+    let mut tui = tui(Quitter::new(When::Never));
+    assert_eq!(tui.handle(activity()), Flow::Stay);
 }

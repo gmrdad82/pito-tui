@@ -474,10 +474,10 @@ chart.
   the activity screen opens: by its keys over any screen, the tabs unlit,
   only the back keys, its own breadcrumb row (the section's name, then the
   screen's crumb: "Operations / update pfx"), and its confirms and picks
-  answered to it. Overlays come after every tab, in the order added, and
-  before the activity screen, the gate and the app, wherever they sit in
-  the builder chain; a screen that wants a digit to switch tabs from it
-  calls `Cx::go`.
+  answered to it. Overlays come after every tab and keep their builder
+  order with the gate and the app; one added after `Tui::activities` still
+  comes before the activity screen. A screen that wants a digit to switch
+  tabs from it calls `Cx::go`.
 - **Commands on the band.** `Cx::run(id, label, Command)` runs a child
   command and follows the `--progress json` lines the PITO MD command-line
   tools print (version 1: one object a line with `state` start, progress,
@@ -631,7 +631,7 @@ Tui::new(name, version, accent: Color) -> Tui<E>          // E: the app's worker
   run() -> io::Result<()>, run_in(&mut Term)
   key(KeyEvent) -> Flow, paste(&str) -> Flow, mouse(MouseEvent) -> Flow, event(screen, E) -> Flow, handle(Wake<E>) -> Flow
   loaded(screen, generation, E) -> bool, landed(screen, generation, E) -> Option<Flow>  // None: a late or unknown load
-  changed(source), go(screen) -> bool, start()
+  changed(source), go(screen) -> bool, start() -> Flow  // a quit from go comes back from start, settle or the next wake
   pump(), settle() -> Flow, advance(Duration) -> Flow, draw(&mut Frame), busy(), current(), names()
   find::<T>(), find_mut::<T>(), sender(), waker(screen), set_palette(..), set_words(..), set_layout(..)
   frame(w, h) -> Buffer, shot(w, h, &[KeyEvent], settle) -> Buffer, bench(w, h, frames) -> Vec<Bench>

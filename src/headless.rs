@@ -32,7 +32,9 @@ impl<E: Send + 'static> Tui<E> {
     }
 
     pub fn shot(&mut self, width: u16, height: u16, keys: &[KeyEvent], settle: bool) -> Buffer {
-        self.start();
+        if self.start() == Flow::Quit {
+            return self.frame(width, height);
+        }
         self.ready(settle);
         for key in keys {
             self.frame(width, height);

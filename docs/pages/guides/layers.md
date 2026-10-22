@@ -121,10 +121,9 @@ $ demo --dump 80x12 --keys "ctrl+k l o c k enter"
 
 - `Tui::overlay(section, keys, screen)` opens an app's own screen over any
   screen by its keys, the way the activity screen opens: the tabs unlit, only
-  the back keys, its own breadcrumb row. Overlays come after every tab, in
-  the order added, and before the activity screen, the gate and the app, so
-  their indices for `go`, `waker` and `event` don't move with the builder
-  chain.
+  the back keys, its own breadcrumb row. Overlays come after every tab and
+  keep their builder order with the gate and the app; one added after
+  `Tui::activities` still comes before the activity screen.
 - `Tui::layout(Layout::new()...)` (or `Cx::layout`) sets the margins, the
   content's padding and the gaps under the header and above the footer. A
   `Spot` places a box by an `Edge` on each axis (`Start`, `Third`, `Middle`,

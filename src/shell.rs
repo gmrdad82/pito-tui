@@ -321,14 +321,7 @@ impl<E: Send + 'static> Tui<E> {
         screen: impl Screen<E>,
     ) -> Self {
         let role = Role::Overlay(lone(section), keys);
-        let at = self
-            .screens
-            .iter()
-            .position(|slot| matches!(slot.role, Role::Gate | Role::App))
-            .into_iter()
-            .chain(self.board)
-            .min()
-            .unwrap_or(self.screens.len());
+        let at = self.board.unwrap_or(self.screens.len());
         self.screens.insert(at, Slot::new(Box::new(screen), role));
         if let Some(board) = self.board.as_mut()
             && *board >= at
@@ -645,7 +638,7 @@ impl<E: Send + 'static> Tui<E> {
         }
     }
 
-    pub fn start(&mut self) {
+    pub fn start(&mut self) -> Flow {
         if let Some(app) = self.app_slot() {
             self.begin(app);
         }
@@ -653,6 +646,14 @@ impl<E: Send + 'static> Tui<E> {
             self.begin(index);
         }
         self.follow();
+        self.pending()
+    }
+
+    fn pending(&mut self) -> Flow {
+        if std::mem::take(&mut self.out.quit) {
+            return Flow::Quit;
+        }
+        Flow::Stay
     }
 
     pub fn busy(&self) -> usize {
@@ -1077,28 +1078,29 @@ impl<E: Send + 'static> Tui<E> {
     }
 
     pub fn handle(&mut self, wake: Wake<E>) -> Flow {
-        match wake {
-            Wake::Input(Event::Key(key)) => return self.key(key),
-            Wake::Input(Event::Paste(text)) => return self.paste(&text),
-            Wake::Input(Event::Mouse(mouse)) => return self.mouse(mouse),
-            Wake::Event(screen, event) => return self.event(screen, event),
-            Wake::Stamped(stamp, screen, event) => {
-                if stamp == self.out.stamp() {
-                    return self.event(screen, event);
-                }
+        let flow = match wake {
+            Wake::Input(Event::Key(key)) => self.key(key),
+            Wake::Input(Event::Paste(text)) => self.paste(&text),
+            Wake::Input(Event::Mouse(mouse)) => self.mouse(mouse),
+            Wake::Event(screen, event) => self.event(screen, event),
+            Wake::Stamped(stamp, screen, event) if stamp == self.out.stamp() => {
+                self.event(screen, event)
             }
             Wake::Loaded(screen, generation, event) => {
-                return self.landed(screen, generation, event).unwrap_or(Flow::Stay);
+                self.landed(screen, generation, event).unwrap_or(Flow::Stay)
             }
             Wake::Activity(activity) => {
                 self.out.changes.push(Change::Put(activity));
-                self.apply();
+                self.apply()
             }
-            Wake::Command(screen, report) => return self.heard(screen, report),
-            Wake::Signal(_) => return Flow::Quit,
-            _ => {}
+            Wake::Command(screen, report) => self.heard(screen, report),
+            Wake::Signal(_) => Flow::Quit,
+            _ => Flow::Stay,
+        };
+        match flow {
+            Flow::Quit => Flow::Quit,
+            Flow::Stay => self.pending(),
         }
-        Flow::Stay
     }
 
     fn heard(&mut self, screen: usize, report: Report) -> Flow {
@@ -1226,10 +1228,7 @@ impl<E: Send + 'static> Tui<E> {
 
     fn apply(&mut self) -> Flow {
         self.absorb();
-        if std::mem::take(&mut self.out.quit) {
-            return Flow::Quit;
-        }
-        Flow::Stay
+        self.pending()
     }
 
     fn absorb(&mut self) {
@@ -1412,6 +1411,9 @@ impl<E: Send + 'static> Tui<E> {
     }
 
     pub fn settle(&mut self) -> Flow {
+        if self.pending() == Flow::Quit {
+            return Flow::Quit;
+        }
         let mut flow = Flow::Stay;
         for _ in 0..SETTLE {
             let mut woke = false;
@@ -1551,7 +1553,9 @@ impl<E: Send + 'static> Tui<E> {
 
     fn serve(&mut self, term: &mut Term) -> io::Result<()> {
         self.tick();
-        self.start();
+        if self.start() == Flow::Quit {
+            return Ok(());
+        }
         self.pump();
         let mut pace = Pace::default();
         let mut dirty = true;

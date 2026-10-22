@@ -6,7 +6,7 @@ pub const ABOUT: &str = "≈";
 
 const LADDER: [char; 8] = ['⡀', '⡄', '⡆', '⡇', '⣇', '⣧', '⣷', '⣿'];
 const TRACK: char = '⣀';
-const NUDGE: f64 = 1e-9;
+const CLOSE: f64 = 4.0 * f64::EPSILON;
 
 fn clean(fraction: f64) -> f64 {
     if fraction.is_nan() {
@@ -16,9 +16,20 @@ fn clean(fraction: f64) -> f64 {
     }
 }
 
+fn floored(fraction: f64, total: usize) -> usize {
+    if total == 0 {
+        return 0;
+    }
+    let fraction = clean(fraction);
+    let steps = (fraction * total as f64).floor();
+    let next = (steps + 1.0) / total as f64;
+    let up = next - fraction <= CLOSE * next;
+    (steps as usize + usize::from(up)).min(total)
+}
+
 pub fn bar(fraction: f64, cells: usize) -> String {
     let total = cells * 8;
-    let steps = ((clean(fraction) * total as f64 + NUDGE).floor() as usize).min(total);
+    let steps = floored(fraction, total);
     let (full, part) = (steps / 8, steps % 8);
     let mut text: String = std::iter::repeat_n(LADDER[7], full).collect();
     if part > 0 {
@@ -30,7 +41,7 @@ pub fn bar(fraction: f64, cells: usize) -> String {
 }
 
 pub fn percent(fraction: f64) -> u32 {
-    (clean(fraction) * 100.0 + NUDGE).floor() as u32
+    floored(fraction, 100) as u32
 }
 
 pub fn share(fraction: f64, estimate: bool) -> String {
@@ -118,6 +129,32 @@ mod tests {
     fn percent_of_every_whole_hundredth_is_that_whole_number() {
         for whole in 0..=100 {
             assert_eq!(percent(f64::from(whole) / 100.0), whole, "{whole}%");
+        }
+    }
+
+    #[test]
+    fn a_huge_count_a_few_units_short_is_never_shown_done() {
+        let total = 100_000_000_000_u64;
+        for left in [1, 3, 1_000] {
+            let fraction = (total - left) as f64 / total as f64;
+            assert!(fraction < 1.0);
+            assert_eq!(percent(fraction), 99, "{left} left");
+            assert_eq!(share(fraction, false), "99%");
+            assert_eq!(eighths(&bar(fraction, 10)), 79, "{left} left");
+            assert_ne!(bar(fraction, 10), bar(1.0, 10));
+        }
+        assert_eq!(percent(1.0 - 1e-11), 99);
+        assert_eq!(percent(total as f64 / total as f64), 100);
+    }
+
+    #[test]
+    fn a_fraction_from_a_division_floors_to_its_exact_step() {
+        for count in [3_u64, 7, 25, 100, 1_000, 4_096, 1_000_000] {
+            for done in 0..=count.min(500) {
+                let fraction = done as f64 / count as f64;
+                let exact = (done * 100 / count) as u32;
+                assert_eq!(percent(fraction), exact, "{done}/{count}");
+            }
         }
     }
 

@@ -1191,8 +1191,8 @@ fn go_from_a_screen_takes_tabs_and_overlays_and_comes_after_show() {
             Section::new("One"),
             Rec::<1>::default()
                 .on('g', |cx| cx.go(1))
-                .on('o', |cx| cx.go(2))
-                .on('x', |cx| cx.go(3))
+                .on('o', |cx| cx.go(3))
+                .on('x', |cx| cx.go(2))
                 .on('h', |cx| {
                     cx.go(1);
                     cx.show(|item| item != Item::Tab(1));
@@ -1201,13 +1201,13 @@ fn go_from_a_screen_takes_tabs_and_overlays_and_comes_after_show() {
         .screen(Section::new("Two"), Rec::<2>::default())
         .overlay(Section::new("Ops"), &[Key::Char('O')], Rec::<3>::default());
     tui.start();
-    assert_eq!(tui.names(), ["One", "Two", "Ops", ""]);
+    assert_eq!(tui.names(), ["One", "Two", "", "Ops"]);
     tui.key(ch('g'));
     assert_eq!(tui.current(), Some(1));
     assert_eq!(second(&mut tui).started, 1);
     tui.key(ch('1'));
     tui.key(ch('o'));
-    assert_eq!(tui.current(), Some(2));
+    assert_eq!(tui.current(), Some(3));
     assert_eq!(tui.find::<Rec<3>>().unwrap().started, 1);
     tui.key(press(KeyCode::Esc));
     assert_eq!(tui.current(), Some(0));

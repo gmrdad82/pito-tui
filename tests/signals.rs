@@ -14,6 +14,8 @@ use rustix::process::{Pid, Signal, kill_process, test_kill_process};
 
 const APP: &str = "PITO_TUI_SIGNALS_APP";
 const NAME: &str = "a_hangup_or_a_termination_stops_every_command_then_ends_the_app_by_that_signal";
+const LEAVE: &str = "PITO_TUI_START_QUIT_APP";
+const LEAVING: &str = "an_app_whose_first_screen_quits_on_its_start_ends_without_waiting_for_input";
 
 struct Sims(PathBuf);
 
@@ -30,6 +32,16 @@ impl Screen<()> for Sims {
         }
         cx.forget(2);
         fs::write(self.0.join("app"), std::process::id().to_string()).unwrap();
+    }
+}
+
+struct Leaver;
+
+impl Screen<()> for Leaver {
+    fn draw(&mut self, _frame: &mut Frame, _area: Rect, _palette: &Palette) {}
+
+    fn start(&mut self, cx: &mut Cx<'_, ()>) {
+        cx.quit();
     }
 }
 
@@ -127,4 +139,45 @@ fn a_hangup_or_a_termination_stops_every_command_then_ends_the_app_by_that_signa
             assert_eq!(code, Some(128 + signal.as_raw()), "{signal:?}");
         }
     }
+}
+
+#[test]
+fn an_app_whose_first_screen_quits_on_its_start_ends_without_waiting_for_input() {
+    if std::env::var_os(LEAVE).is_some() {
+        Tui::new("leave", "0", Color::Blue)
+            .screen("Leave", Leaver)
+            .run()
+            .unwrap();
+        return;
+    }
+    let exe = std::env::current_exe().unwrap();
+    let line = format!(
+        "stty cols 80 rows 24; exec '{}' --exact {LEAVING} --nocapture",
+        exe.display()
+    );
+    let mut script = Command::new("script")
+        .args(["-qec", &line, "/dev/null"])
+        .env(LEAVE, "1")
+        .env("SHELL", "/bin/sh")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let limit = Instant::now() + Duration::from_secs(10);
+    let status = loop {
+        if let Some(status) = script.try_wait().unwrap() {
+            break Some(status);
+        }
+        if Instant::now() >= limit {
+            let _ = script.kill();
+            let _ = script.wait();
+            break None;
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
+    assert!(
+        status.is_some_and(|status| status.success()),
+        "the app still waited for input 10 s after its start quit: {status:?}"
+    );
 }
