@@ -4,6 +4,18 @@ Every release of pito-tui, newest first. Versions follow [Semantic
 Versioning](https://semver.org/): from 1.0.0 on, only a change in the first
 number may break an app; the middle number adds, the last one fixes.
 
+## v1.2.1 — 2026-10-23
+
+### Fixed
+
+- A tab that `Cx::show` brings up while an overlay is open now starts and loads when the overlay closes; before, it was drawn but never loaded.
+- A modal list cut short by a small terminal or narrowed by its filter grows back to its full rows once there is room again.
+- Arming a confirm in one of a modal's lists shows that list's own warning, not another list's at the same position.
+
+### Changed
+
+- About 60 new tests for the shell's wake handling, deadlines and builder, and for modals, takeovers and toasts; line coverage is now 94%.
+
 ## v1.2.0 — 2026-10-22
 
 ### Added
