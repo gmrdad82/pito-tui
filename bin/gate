@@ -6,4 +6,9 @@ cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo nextest run --all-features --no-tests=pass
 cargo test --all-features --doc
-[ "${1:-}" = --fast ] || cargo build --release --example demo
+if [ "${1:-}" = --fast ]; then
+  echo "fast gate: green"
+else
+  cargo build --release --example demo
+  echo "full gate: green"
+fi
