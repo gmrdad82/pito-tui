@@ -29,9 +29,30 @@ fn a_size_reads_width_by_height_with_either_x() {
 #[test]
 fn a_size_refuses_zero_missing_halves_letters_and_overflow() {
     for bad in [
-        "0x0", "0x40", "120x0", "x40", "120x", "x", "", "120", "wide", "abcxdef", "12ax40",
-        "120xforty", "65536x40", "120x65536", "99999999999x1", "-1x40", "120x-1", "1.5x40",
-        "120x40x2", "120 40", "120*40",
+        "0x0",
+        "0x40",
+        "120x0",
+        "x40",
+        "120x",
+        "x",
+        "",
+        "120",
+        "wide",
+        "abcxdef",
+        "12ax40",
+        "120xforty",
+        "65536x40",
+        "120x65536",
+        "99999999999x1",
+        "-1x40",
+        "120x-1",
+        "1.5x40",
+        "120x40x2",
+        "120 40",
+        "120*40",
+        "+120x40",
+        "120x+40",
+        "+1x+1",
     ] {
         assert_eq!(size(bad), None, "{bad:?}");
     }
@@ -39,8 +60,8 @@ fn a_size_refuses_zero_missing_halves_letters_and_overflow() {
 
 #[test]
 fn every_documented_key_name_reads_as_its_key() {
-    let names = keys("enter esc up down left right pgup pgdn home end backspace delete space tab")
-        .unwrap();
+    let names =
+        keys("enter esc up down left right pgup pgdn home end backspace delete space tab").unwrap();
     assert_eq!(
         names,
         [
@@ -71,7 +92,10 @@ fn every_documented_key_name_reads_as_its_key() {
 fn key_names_read_in_any_case() {
     assert_eq!(keys("ENTER").unwrap(), keys("enter").unwrap());
     assert_eq!(keys("PgUp PGDN").unwrap(), keys("pgup pgdn").unwrap());
-    assert_eq!(keys("Esc BackTab Space").unwrap(), keys("esc backtab space").unwrap());
+    assert_eq!(
+        keys("Esc BackTab Space").unwrap(),
+        keys("esc backtab space").unwrap()
+    );
     assert_eq!(keys("Tab").unwrap(), [plain(KeyCode::Tab)]);
 }
 
@@ -199,7 +223,7 @@ fn ansi_keeps_trailing_blanks_and_a_blank_row_still_resets() {
 }
 
 #[test]
-fn ansi_writes_every_modifier_and_the_bright_colours() {
+fn ansi_writes_the_six_styling_modifiers_and_the_bright_colours() {
     let mut frame = buffer(2, 1);
     let every = Modifier::BOLD
         | Modifier::DIM
@@ -263,5 +287,29 @@ fn ansi_writes_a_wide_character_once_and_only_changes_style_when_it_changes() {
     assert_eq!(
         ansi(&frame),
         "\x1b[?25l\x1b[2J\x1b[1;1H\x1b[0;32m日ab\x1b[0m"
+    );
+}
+
+#[test]
+fn ansi_drops_blinking_and_hidden_and_keeps_the_symbol() {
+    let mut frame = buffer(3, 1);
+    for (x, modifier) in [
+        Modifier::SLOW_BLINK,
+        Modifier::RAPID_BLINK,
+        Modifier::HIDDEN,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        frame.set_string(
+            x as u16,
+            0,
+            "s",
+            Style::new().fg(Color::Red).add_modifier(modifier),
+        );
+    }
+    assert_eq!(
+        ansi(&frame),
+        "\x1b[?25l\x1b[2J\x1b[1;1H\x1b[0;31msss\x1b[0m"
     );
 }

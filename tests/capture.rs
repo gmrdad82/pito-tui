@@ -104,7 +104,7 @@ fn escapes() -> Buffer {
         .set_fg(Color::Rgb(0x5B, 0x8C, 0xFF))
         .set_style(Style::new().add_modifier(Modifier::BOLD));
     buffer[(1, 0)].set_symbol("\t");
-    buffer[(2, 0)].set_symbol("\n");
+    buffer[(2, 0)].set_symbol("\n").set_fg(Color::LightRed);
     buffer[(3, 0)].set_symbol("\r");
     buffer.set_string(0, 1, "a  b", Style::new().add_modifier(Modifier::DIM));
     buffer[(3, 1)].set_bg(Color::Indexed(17));
@@ -115,7 +115,7 @@ const ESCAPES: &str = concat!(
     "pito-tui frame 1\n",
     "4 2\n",
     "\\\\\t\\t\t\\n\t\\r\n",
-    "1 #5B8CFF Reset 1\t3 Reset Reset 0\n",
+    "1 #5B8CFF Reset 1\t1 Reset Reset 0\t1 LightRed Reset 0\t1 Reset Reset 0\n",
     "a\t \t \tb\n",
     "3 Reset Reset 2\t1 Reset 17 2\n",
 );
@@ -131,7 +131,13 @@ fn a_walk_writes_one_folder_per_scenario_named_as_documented_and_one_file_per_si
     assert_eq!(frames, 5 * 4);
     assert_eq!(
         listed(&dir),
-        ["00-home", "01-what-to-do-next", "02-drill-in", "quit-guard", "type-x-x"]
+        [
+            "00-home",
+            "01-what-to-do-next",
+            "02-drill-in",
+            "quit-guard",
+            "type-x-x"
+        ]
     );
     for scenario in listed(&dir) {
         assert_eq!(listed(&dir.join(&scenario)), SIZES, "{scenario}");
@@ -150,7 +156,11 @@ fn every_written_frame_holds_its_head_size_and_two_lines_a_row() {
             let lines: Vec<&str> = file.lines().collect();
             assert_eq!(lines[0], HEAD);
             assert_eq!(lines[1], format!("{width} {height}"));
-            assert_eq!(lines.len(), 2 + 2 * usize::from(height), "{scenario}/{name}");
+            assert_eq!(
+                lines.len(),
+                2 + 2 * usize::from(height),
+                "{scenario}/{name}"
+            );
             for row in lines[2..].chunks(2) {
                 assert_eq!(row[0].split('\t').count(), usize::from(width));
                 let mut cells = 0;
@@ -175,7 +185,8 @@ fn each_scenario_draws_its_own_screen_or_script() {
         .sizes([(60, 16)])
         .script(Script::new("Later", [ctrl_c()]).at(Duration::from_secs(5)));
     capture(&dir, &walk, app("home")).unwrap();
-    let text = |scenario: &str| joined(&fs::read_to_string(dir.join(scenario).join("60x16")).unwrap());
+    let text =
+        |scenario: &str| joined(&fs::read_to_string(dir.join(scenario).join("60x16")).unwrap());
     assert!(text("00-home").contains("home 0"));
     assert!(text("01-what-to-do-next").contains("next 0"));
     assert!(text("02-drill-in").contains("drill 0"));
@@ -204,7 +215,10 @@ fn the_default_walk_takes_every_screen_at_the_four_documented_sizes() {
     assert!(script.settle);
     assert_eq!(script.at, None);
     assert!(!script.clone().loading().settle);
-    assert_eq!(script.at(Duration::from_secs(1)).at, Some(Duration::from_secs(1)));
+    assert_eq!(
+        script.at(Duration::from_secs(1)).at,
+        Some(Duration::from_secs(1))
+    );
 }
 
 #[test]
@@ -233,22 +247,20 @@ fn a_recorder_writes_byte_for_byte_what_a_walk_writes() {
         recorder
             .screen(0, "Home", &make().shot(width, height, &[], true))
             .unwrap();
-        let mut next = make();
-        next.shot(width, height, &[], true);
-        assert!(next.go(1));
-        next.settle();
+        for (index, name) in [(1, "What to do, next"), (2, "Drill In")] {
+            let mut tui = make();
+            tui.shot(width, height, &[], true);
+            assert!(tui.go(index));
+            tui.settle();
+            recorder
+                .screen(index, name, &tui.frame(width, height))
+                .unwrap();
+        }
         recorder
-            .screen(1, "What to do, next", &next.frame(width, height))
-            .unwrap();
-        let mut drill = make();
-        drill.shot(width, height, &[], true);
-        assert!(drill.go(2));
-        drill.settle();
-        recorder
-            .screen(2, "Drill In", &drill.frame(width, height))
-            .unwrap();
-        recorder
-            .record("Quit  guard", &make().shot(width, height, &[ctrl_c()], true))
+            .record(
+                "Quit  guard",
+                &make().shot(width, height, &[ctrl_c()], true),
+            )
             .unwrap();
         recorder
             .record("Type: X/X", &make().shot(width, height, &[x(), x()], true))
@@ -277,13 +289,19 @@ fn a_frame_file_is_written_exactly_as_documented_with_escapes_and_style_runs() {
     let mut recorder = Recorder::new(&dir).unwrap();
     recorder.record("Escapes", &escapes()).unwrap();
     assert_eq!(recorder.frames(), 1);
-    assert_eq!(fs::read_to_string(dir.join("escapes").join("4x2")).unwrap(), ESCAPES);
+    assert_eq!(
+        fs::read_to_string(dir.join("escapes").join("4x2")).unwrap(),
+        ESCAPES
+    );
 }
 
 #[test]
 fn a_frame_file_reads_back_as_written_through_compare() {
     let dir = root("round-trip");
-    Recorder::new(&dir).unwrap().record("Escapes", &escapes()).unwrap();
+    Recorder::new(&dir)
+        .unwrap()
+        .record("Escapes", &escapes())
+        .unwrap();
     let mut same = Recorder::against(&dir).unwrap();
     same.record("Escapes", &escapes()).unwrap();
     assert_eq!(same.frames(), 1);
@@ -329,7 +347,10 @@ fn a_frame_file_reads_back_as_written_through_compare() {
 #[test]
 fn every_escaped_symbol_and_the_first_cell_read_back_whole() {
     let dir = root("escaped");
-    Recorder::new(&dir).unwrap().record("e", &escapes()).unwrap();
+    Recorder::new(&dir)
+        .unwrap()
+        .record("e", &escapes())
+        .unwrap();
     let mut gone = escapes();
     for (x, y) in [(0, 0), (1, 0), (2, 0), (3, 0)] {
         gone[(x, y)].set_symbol("_");
@@ -404,9 +425,8 @@ fn compare_dirs_lists_added_and_changed_frames_in_order_then_the_removed() {
     new.record("a", &blank(40, 12)).unwrap();
 
     let differences = compare_dirs(&before, &after).unwrap();
-    assert_eq!(differences.len(), 6);
     assert_eq!(
-        differences[..4],
+        differences,
         [
             Difference::Added {
                 scenario: "a".into(),
@@ -432,16 +452,6 @@ fn compare_dirs_lists_added_and_changed_frames_in_order_then_the_removed() {
                 before: look(" ", "Reset", "Reset", 0),
                 after: look("2", "Reset", "Reset", 0),
             },
-        ]
-    );
-    let mut removed = differences[4..].to_vec();
-    removed.sort_by_key(|difference| match difference {
-        Difference::Removed { size, .. } => *size,
-        other => panic!("{other}"),
-    });
-    assert_eq!(
-        removed,
-        [
             Difference::Removed {
                 scenario: "gone".into(),
                 size: (40, 12),
@@ -459,8 +469,14 @@ fn compare_dirs_lists_added_and_changed_frames_in_order_then_the_removed() {
 fn compare_dirs_skips_files_that_are_not_frames() {
     let root = root("strays");
     let (before, after) = (root.join("before"), root.join("after"));
-    Recorder::new(&before).unwrap().record("e", &escapes()).unwrap();
-    Recorder::new(&after).unwrap().record("e", &escapes()).unwrap();
+    Recorder::new(&before)
+        .unwrap()
+        .record("e", &escapes())
+        .unwrap();
+    Recorder::new(&after)
+        .unwrap()
+        .record("e", &escapes())
+        .unwrap();
     fs::write(after.join("notes.txt"), "not a frame").unwrap();
     fs::write(after.join("e").join("README"), "not a frame").unwrap();
     fs::write(before.join("e").join("0x0"), "not a frame").unwrap();
@@ -474,9 +490,12 @@ fn a_walk_compares_clean_against_its_own_capture_and_reports_frames_gone_and_new
     capture(&dir, &walk, app("home")).unwrap();
     assert_eq!(compare(&dir, &walk, app("home")).unwrap(), []);
 
-    fs::remove_file(dir.join("type-x-x").join("40x12")).unwrap();
     fs::create_dir_all(dir.join("old")).unwrap();
-    fs::write(dir.join("old").join("40x12"), ESCAPES).unwrap();
+    fs::rename(
+        dir.join("type-x-x").join("40x12"),
+        dir.join("old").join("40x12"),
+    )
+    .unwrap();
     assert_eq!(
         compare(&dir, &walk, app("home")).unwrap(),
         [
@@ -546,7 +565,10 @@ fn a_recorder_against_refuses_a_repeated_name_and_lists_none_for_an_identical_ru
 fn a_missing_folder_is_an_error_everywhere_it_is_read() {
     let root = root("missing");
     let present = root.join("present");
-    Recorder::new(&present).unwrap().record("e", &escapes()).unwrap();
+    Recorder::new(&present)
+        .unwrap()
+        .record("e", &escapes())
+        .unwrap();
     let absent = root.join("absent");
     let walk = scripted().sizes([(40, 12)]);
     assert_eq!(
@@ -572,7 +594,10 @@ fn broken(name: &str, text: &[u8]) -> (PathBuf, PathBuf) {
     let (before, after) = (root.join("before"), root.join("after"));
     fs::create_dir_all(before.join("e")).unwrap();
     fs::write(before.join("e").join("4x2"), text).unwrap();
-    Recorder::new(&after).unwrap().record("e", &escapes()).unwrap();
+    Recorder::new(&after)
+        .unwrap()
+        .record("e", &escapes())
+        .unwrap();
     (before, after)
 }
 
@@ -590,7 +615,10 @@ fn refused(name: &str, text: &[u8]) {
 #[test]
 fn a_frame_with_another_head_is_refused() {
     refused("head", ESCAPES.replace(HEAD, "pito-tui frame 2").as_bytes());
-    refused("no-head", ESCAPES.replacen("pito-tui frame 1\n", "", 1).as_bytes());
+    refused(
+        "no-head",
+        ESCAPES.replacen("pito-tui frame 1\n", "", 1).as_bytes(),
+    );
     refused("empty", b"");
 }
 
@@ -605,7 +633,12 @@ fn a_frame_whose_size_line_does_not_parse_is_refused() {
         ("size-overflow", "70000 2"),
         ("size-tab", "4\t2"),
     ] {
-        refused(name, ESCAPES.replacen("4 2\n", &format!("{size}\n"), 1).as_bytes());
+        refused(
+            name,
+            ESCAPES
+                .replacen("4 2\n", &format!("{size}\n"), 1)
+                .as_bytes(),
+        );
     }
     refused("size-missing", format!("{HEAD}\n").as_bytes());
 }
@@ -620,6 +653,51 @@ fn a_truncated_frame_is_refused() {
 }
 
 #[test]
+fn a_frame_cut_anywhere_short_of_its_last_cell_is_refused() {
+    let whole = ESCAPES.trim_end_matches('\n');
+    for (cut, _) in whole.char_indices().skip(1) {
+        refused(&format!("cut-{cut}"), &whole.as_bytes()[..cut]);
+    }
+}
+
+#[test]
+fn a_row_whose_symbols_or_runs_do_not_fill_the_width_is_refused() {
+    for (name, from, to) in [
+        ("symbols-short", "a\t \t \tb\n", "a\t \tb\n"),
+        ("symbols-long", "a\t \t \tb\n", "a\t \t \tb\tc\n"),
+        (
+            "runs-short",
+            "3 Reset Reset 2\t1 Reset 17 2",
+            "2 Reset Reset 2\t1 Reset 17 2",
+        ),
+        (
+            "runs-long",
+            "3 Reset Reset 2\t1 Reset 17 2",
+            "4 Reset Reset 2\t1 Reset 17 2",
+        ),
+        (
+            "runs-cut",
+            "3 Reset Reset 2\t1 Reset 17 2",
+            "3 Reset Reset 2",
+        ),
+        ("runs-none", "3 Reset Reset 2\t1 Reset 17 2", ""),
+    ] {
+        refused(name, ESCAPES.replacen(from, to, 1).as_bytes());
+    }
+}
+
+#[test]
+fn a_frame_whose_size_line_disagrees_with_its_file_name_is_refused() {
+    let dir = root("misnamed-source");
+    Recorder::new(&dir)
+        .unwrap()
+        .record("e", &blank(5, 2))
+        .unwrap();
+    let text = fs::read(dir.join("e").join("5x2")).unwrap();
+    refused("misnamed", &text);
+}
+
+#[test]
 fn a_style_run_that_does_not_parse_is_refused() {
     for (name, run) in [
         ("run-short", "1 #5B8CFF Reset"),
@@ -628,22 +706,132 @@ fn a_style_run_that_does_not_parse_is_refused() {
         ("run-negative", "-1 #5B8CFF Reset 1"),
         ("run-modifier-overflow", "1 #5B8CFF Reset 70000"),
     ] {
-        refused(name, ESCAPES.replacen("1 #5B8CFF Reset 1", run, 1).as_bytes());
+        refused(
+            name,
+            ESCAPES.replacen("1 #5B8CFF Reset 1", run, 1).as_bytes(),
+        );
     }
 }
 
 #[test]
 fn an_unreadable_frame_is_an_error() {
-    let (before, after) = broken("not-utf8", &[0xff, 0xfe, 0x00, 0x80]);
-    assert!(compare_dirs(&before, &after).is_err());
-    assert!(compare_dirs(&after, &before).is_err());
-    assert!(Recorder::against(&before).unwrap().record("e", &escapes()).is_err());
+    refused("not-utf8", &[0xff, 0xfe, 0x00, 0x80]);
 
     let root = root("a-folder");
     let (before, after) = (root.join("before"), root.join("after"));
     fs::create_dir_all(before.join("e").join("4x2")).unwrap();
-    Recorder::new(&after).unwrap().record("e", &escapes()).unwrap();
+    Recorder::new(&after)
+        .unwrap()
+        .record("e", &escapes())
+        .unwrap();
     assert!(compare_dirs(&before, &after).is_err());
     assert!(compare_dirs(&after, &before).is_err());
-    assert!(Recorder::against(&before).unwrap().record("e", &escapes()).is_err());
+    assert!(
+        Recorder::against(&before)
+            .unwrap()
+            .record("e", &escapes())
+            .is_err()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_frame_without_read_permission_is_refused_as_such() {
+    use std::os::unix::fs::PermissionsExt;
+    let (before, after) = broken("no-permission", ESCAPES.as_bytes());
+    let path = before.join("e").join("4x2");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+    if fs::read(&path).is_ok() {
+        return;
+    }
+    let kind = |result: std::io::Result<Vec<Difference>>| result.unwrap_err().kind();
+    assert_eq!(
+        kind(compare_dirs(&before, &after)),
+        ErrorKind::PermissionDenied
+    );
+    assert_eq!(
+        kind(compare_dirs(&after, &before)),
+        ErrorKind::PermissionDenied
+    );
+    let mut against = Recorder::against(&before).unwrap();
+    let error = against.record("e", &escapes()).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::PermissionDenied);
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_folder_where_a_frame_should_be_is_refused_as_a_folder() {
+    let root = root("a-folder-kind");
+    let (before, after) = (root.join("before"), root.join("after"));
+    fs::create_dir_all(before.join("e").join("4x2")).unwrap();
+    Recorder::new(&after)
+        .unwrap()
+        .record("e", &escapes())
+        .unwrap();
+    let error = compare_dirs(&before, &after).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::IsADirectory);
+}
+
+#[test]
+fn folder_names_drop_symbols_at_either_end_and_keep_letters_of_any_script() {
+    let dir = root("slugs");
+    let mut recorder = Recorder::new(&dir).unwrap();
+    for name in ["  Home!", "Café Crème", "--a--b--", "Ünï 2"] {
+        recorder.record(name, &blank(2, 1)).unwrap();
+    }
+    recorder.screen(3, "?? Help ??", &blank(2, 1)).unwrap();
+    assert_eq!(
+        listed(&dir),
+        ["03-help", "a-b", "café-crème", "home", "ünï-2"]
+    );
+}
+
+#[test]
+fn a_recorder_refuses_a_name_with_no_letters_or_digits_and_writes_nothing() {
+    let dir = root("nameless-recorder");
+    let mut recorder = Recorder::new(&dir).unwrap();
+    for name in ["?", "→", "!!!", "", "   "] {
+        let error = recorder.record(name, &blank(2, 1)).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput, "{name:?}");
+    }
+    assert_eq!(recorder.frames(), 0);
+    assert!(listed(&dir).is_empty());
+
+    let mut against = Recorder::against(&dir).unwrap();
+    let error = against.record("?", &blank(2, 1)).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
+}
+
+#[test]
+fn a_walk_with_a_script_named_only_in_symbols_is_refused_before_writing() {
+    let dir = root("nameless-walk");
+    let walk = Walk::new()
+        .sizes([(40, 12)])
+        .script(Script::new("?", [x()]));
+    let error = capture(&dir, &walk, app("home")).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    assert!(!dir.exists() || listed(&dir).is_empty());
+    let empty = root("nameless-compare");
+    fs::create_dir_all(&empty).unwrap();
+    let error = compare(&empty, &walk, app("home")).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
+}
+
+#[test]
+fn a_walk_whose_scenarios_share_a_folder_is_refused_instead_of_overwriting() {
+    let walk = Walk::new()
+        .sizes([(40, 12)])
+        .script(Script::new("Quit guard", [ctrl_c()]))
+        .script(Script::new("quit-guard", [x()]));
+    let dir = root("collide-scripts");
+    let error = capture(&dir, &walk, app("home")).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::AlreadyExists);
+
+    let walk = Walk::new()
+        .sizes([(40, 12)])
+        .script(Script::new("00 home", [x()]));
+    let dir = root("collide-screen");
+    let error = capture(&dir, &walk, app("home")).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::AlreadyExists);
 }

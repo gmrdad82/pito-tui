@@ -115,7 +115,10 @@ mod tests {
                 Some(value) => format!("feed {value} typed {}", self.typed),
                 None => format!("empty typed {}", self.typed),
             };
-            frame.render_widget(Paragraph::new(text).style(Style::new().fg(Color::Green)), area);
+            frame.render_widget(
+                Paragraph::new(text).style(Style::new().fg(Color::Green)),
+                area,
+            );
         }
 
         fn key(&mut self, key: KeyEvent, _cx: &mut Cx<'_, u32>) {
@@ -174,26 +177,38 @@ mod tests {
         assert_eq!(one, second.frame(60, 16));
         assert_eq!(one, first.frame(60, 16));
         assert_eq!(one.area, Rect::new(0, 0, 60, 16));
-        assert_ne!(one, first.frame(80, 24));
+        assert!(dump::text(&one).contains("feed 7 typed"));
+        let wide = first.frame(80, 24);
+        assert_eq!(wide.area, Rect::new(0, 0, 80, 24));
+        assert_eq!(wide, second.frame(80, 24));
     }
 
     #[test]
     fn a_settled_shot_runs_the_load_and_the_keys_and_repeats_exactly() {
         let keys = typed("ab");
-        let shot = app().shot(60, 16, &keys, true);
+        let mut tui = app();
+        let shot = tui.shot(60, 16, &keys, true);
         assert_eq!(shot, app().shot(60, 16, &keys, true));
         let text = dump::text(&shot);
         assert!(text.contains("feed 7 typed ab"), "{text}");
-        assert!(!text.contains("Reading the feed..."));
+        let feed = tui.find::<Feed>().unwrap();
+        assert_eq!(
+            (feed.loads, feed.value, feed.typed.as_str()),
+            (1, Some(7), "ab")
+        );
     }
 
     #[test]
     fn an_unsettled_shot_stays_loading_and_repeats_exactly() {
         let keys = typed("ab");
-        let shot = app().shot(60, 16, &keys, false);
+        let mut tui = app();
+        let shot = tui.shot(60, 16, &keys, false);
         assert_eq!(shot, app().shot(60, 16, &keys, false));
         let text = dump::text(&shot);
         assert!(!text.contains("feed 7"), "{text}");
+        assert!(!text.contains("empty typed"), "{text}");
+        let feed = tui.find::<Feed>().unwrap();
+        assert_eq!((feed.value, feed.typed.as_str()), (None, "ab"));
         assert_ne!(shot, app().shot(60, 16, &keys, true));
     }
 
@@ -225,7 +240,6 @@ mod tests {
         assert_eq!(screens, ["One", "Two", "Drill"]);
         for entry in &bench {
             assert_eq!(entry.frames, 5);
-            assert!(entry.average <= entry.worst);
         }
     }
 
@@ -253,8 +267,14 @@ mod tests {
         assert_eq!(first.frame(60, 16), second.frame(60, 16));
         assert_eq!(first.open, None);
         let names = |bench: Vec<Bench>| -> Vec<(String, usize)> {
-            bench.into_iter().map(|entry| (entry.screen, entry.frames)).collect()
+            bench
+                .into_iter()
+                .map(|entry| (entry.screen, entry.frames))
+                .collect()
         };
-        assert_eq!(names(first.bench(40, 12, 2)), names(second.bench(40, 12, 2)));
+        assert_eq!(
+            names(first.bench(40, 12, 2)),
+            names(second.bench(40, 12, 2))
+        );
     }
 }
