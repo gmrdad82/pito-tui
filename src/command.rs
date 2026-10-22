@@ -632,4 +632,242 @@ mod tests {
         assert_eq!(lines(Stream::Stderr), [(STEP.to_string(), true)]);
         assert_eq!(heard.last(), Some(&Heard::Exit(Exit::Code(3))));
     }
+
+    #[test]
+    fn a_good_progress_line_reads_every_field() {
+        let progress = read(STEP).unwrap();
+        assert_eq!(progress.state, "progress");
+        assert_eq!(progress.stage.as_deref(), Some("build"));
+        assert_eq!(progress.fraction, Some(0.5));
+        assert_eq!(progress.message, None);
+        assert_eq!(progress.ok, None);
+        let end = read(&format!("  {END}  ")).unwrap();
+        assert_eq!((end.state.as_str(), end.ok), ("end", Some(true)));
+        assert_eq!(end.message.as_deref(), Some("pdispatch 0.9.1 is installed"));
+        let bare = read(r#"{"state":"start"}"#).unwrap();
+        assert_eq!((bare.stage, bare.fraction, bare.message, bare.ok), (None, None, None, None));
+    }
+
+    #[test]
+    fn a_line_that_is_not_progress_reads_as_none() {
+        for line in [
+            "",
+            "plain text",
+            "{",
+            r#"{"state":"start""#,
+            "[1,2]",
+            r#""start""#,
+            "42",
+            "null",
+            r#"{"stage":"build"}"#,
+            r#"{"state":""}"#,
+            r#"{"state":7}"#,
+            r#"{"v":"1","state":"start"}"#,
+            r#"{"v":0,"state":"start"}"#,
+        ] {
+            assert_eq!(read(line), None, "{line}");
+        }
+        assert!(read(r#"{"v":1,"state":"start"}"#).is_some());
+        assert_eq!(read(r#"{"state":"x","fraction":"half"}"#).unwrap().fraction, None);
+        assert_eq!(read(r#"{"state":"x","ok":"yes"}"#).unwrap().ok, None);
+        assert_eq!(read(r#"{"state":"x","msg":""}"#).unwrap().message, None);
+    }
+
+    #[test]
+    fn a_progress_note_reads_stage_state_share_and_message() {
+        assert_eq!(note(&read(STEP).unwrap()), "build  progress  50%");
+        assert_eq!(
+            note(&read(START).unwrap()),
+            "clone  start  cloning pito-dispatch at v0.9.1"
+        );
+        assert_eq!(note(&read(r#"{"state":"x"}"#).unwrap()), "x");
+    }
+
+    #[test]
+    fn a_finished_activity_ignores_later_progress_and_a_halt_stops_it() {
+        let now = Instant::now();
+        let later = now + Duration::from_secs(1);
+        let mut activity = Activity::new(1, "update", now);
+        follow(&mut activity, &read(END).unwrap(), now);
+        follow(&mut activity, &read(STEP).unwrap(), later);
+        assert_eq!(
+            (activity.state, activity.progress, activity.ended),
+            (State::Done, None, Some(now))
+        );
+        let mut running = Activity::new(2, "update", now).progress(0.4);
+        halt(&mut running, later);
+        assert_eq!(
+            (running.state, running.progress, running.ended),
+            (State::Stopped, None, Some(later))
+        );
+        let mut unsure = Activity::new(3, "update", now);
+        follow(&mut unsure, &read(r#"{"state":"end"}"#).unwrap(), now);
+        assert_eq!(unsure.state, State::Failed);
+    }
+
+    #[test]
+    fn an_exit_maps_to_its_state() {
+        assert_eq!(Exit::Code(0).state(), State::Done);
+        assert_eq!(Exit::Code(1).state(), State::Failed);
+        assert_eq!(Exit::Code(-1).state(), State::Failed);
+        assert_eq!(Exit::Signal(9).state(), State::Failed);
+        assert_eq!(Exit::Stopped.state(), State::Stopped);
+        assert_eq!(Exit::Error("gone".into()).state(), State::Failed);
+        assert_eq!(Exit::of(Err(io::Error::other("gone"))), Exit::Error("gone".into()));
+    }
+
+    #[cfg(unix)]
+    fn texts(heard: &[Heard], from: Stream) -> Vec<(String, bool)> {
+        heard
+            .iter()
+            .filter_map(|heard| match heard {
+                Heard::Line {
+                    stream,
+                    text,
+                    progress,
+                } if *stream == from => Some((text.clone(), progress.is_some())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn each_stream_choice_follows_progress_only_on_its_own_streams() {
+        let script = format!("printf '%s\\n' '{STEP}' plain; printf '%s\\n' '{START}' oops >&2");
+        let want = |out: bool, err: bool| {
+            (
+                vec![(STEP.to_string(), out), ("plain".to_string(), false)],
+                vec![(START.to_string(), err), ("oops".to_string(), false)],
+            )
+        };
+        for (stream, out, err) in [
+            (Stream::Stdout, true, false),
+            (Stream::Stderr, false, true),
+            (Stream::Both, true, true),
+        ] {
+            let (_, inbox, _) = started(&script, stream);
+            let (ended, heard) = last(&inbox, |_| false);
+            let (stdout, stderr) = want(out, err);
+            assert_eq!(texts(&heard, Stream::Stdout), stdout, "{stream:?}");
+            assert_eq!(texts(&heard, Stream::Stderr), stderr, "{stream:?}");
+            assert_eq!(heard.last(), Some(&Heard::Exit(Exit::Code(0))));
+            assert_eq!(ended.state, State::Done);
+            let detail: Vec<String> = ended.detail.iter().map(ToString::to_string).collect();
+            assert!(detail.contains(&"plain".to_string()), "{detail:?}");
+            assert!(detail.contains(&"oops".to_string()), "{detail:?}");
+            assert_eq!(detail.contains(&STEP.to_string()), !out, "{detail:?}");
+            assert_eq!(detail.contains(&"build  progress  50%".to_string()), out);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_crlf_line_and_a_last_line_without_a_newline_are_heard_whole() {
+        let (_, inbox, _) = started("printf 'one\\r\\ntwo'", Stream::Stdout);
+        let (_, heard) = last(&inbox, |_| false);
+        assert_eq!(
+            texts(&heard, Stream::Stdout),
+            [("one".to_string(), false), ("two".to_string(), false)]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_silent_command_that_succeeds_exits_with_code_zero() {
+        let (handle, inbox, running) = started("exit 0", Stream::Stdout);
+        let (ended, heard) = last(&inbox, |_| false);
+        assert_eq!(heard, [Heard::Exit(Exit::Code(0))]);
+        assert_eq!(ended.state, State::Done);
+        assert!(ended.ended.is_some());
+        assert!(ended.detail.is_empty());
+        assert!(handle.over());
+        assert_eq!(running.load(Ordering::SeqCst), 0);
+        assert!(handle.stop(Instant::now()).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_command_killed_by_a_signal_exits_with_that_signal_and_fails() {
+        let (_, inbox, _) = started("echo before; kill -KILL $$", Stream::Stdout);
+        let (ended, heard) = last(&inbox, |_| false);
+        assert_eq!(heard.last(), Some(&Heard::Exit(Exit::Signal(9))));
+        assert_eq!(ended.state, State::Failed);
+        assert!(ended.detail.iter().any(|line| line.to_string() == "before"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_progress_end_wins_over_the_exit_code() {
+        let (_, inbox, _) = started(&format!("echo '{END}'; exit 4"), Stream::Stdout);
+        let (ended, heard) = last(&inbox, |_| false);
+        assert_eq!(heard.last(), Some(&Heard::Exit(Exit::Code(4))));
+        assert_eq!(ended.state, State::Done);
+        assert_eq!(ended.status, "pdispatch 0.9.1 is installed");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_command_that_cannot_start_fails_at_once_with_its_error() {
+        let run = Run {
+            screen: 3,
+            activity: Activity::new(8, "ghost", Instant::now()),
+            command: Command::new("/nonexistent/pito-tui-no-such-binary"),
+            progress: Stream::Stdout,
+            keep: true,
+        };
+        let (sender, inbox) = mpsc::channel::<Wake<()>>();
+        let running = Arc::new(AtomicUsize::new(0));
+        assert!(spawn(run, sender, Arc::clone(&running)).is_none());
+        assert_eq!(running.load(Ordering::SeqCst), 0);
+        let Ok(Wake::Command(screen, report)) = inbox.recv_timeout(Duration::from_secs(1)) else {
+            panic!("a failed spawn reports at once");
+        };
+        assert_eq!(screen, 3);
+        assert_eq!(report.activity.state, State::Failed);
+        assert!(!report.activity.status.is_empty());
+        assert!(report.activity.ended.is_some());
+        assert!(matches!(report.heard.as_slice(), [Heard::Exit(Exit::Error(_))]));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_run_that_keeps_nothing_still_hears_every_line() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "echo one; echo two"]);
+        let run = Run {
+            screen: 0,
+            activity: Activity::new(1, "sim", Instant::now()),
+            command,
+            progress: Stream::Stdout,
+            keep: false,
+        };
+        let (sender, inbox) = mpsc::channel();
+        let _handle = spawn(run, sender, Arc::new(AtomicUsize::new(0))).unwrap();
+        let (ended, heard) = last(&inbox, |_| false);
+        assert!(ended.detail.is_empty());
+        assert_eq!(
+            texts(&heard, Stream::Stdout),
+            [("one".to_string(), false), ("two".to_string(), false)]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn end_with_no_commands_returns_at_once() {
+        let asked = Instant::now();
+        assert!(end(&[], asked).is_empty());
+        assert!(asked.elapsed() < GRACE);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn end_skips_a_command_that_already_finished() {
+        let (handle, inbox, _) = started("exit 2", Stream::Stdout);
+        let (_, heard) = last(&inbox, |_| false);
+        assert_eq!(heard.last(), Some(&Heard::Exit(Exit::Code(2))));
+        let asked = Instant::now();
+        assert!(end(std::slice::from_ref(&handle), asked).is_empty());
+        assert!(asked.elapsed() < GRACE);
+    }
 }
