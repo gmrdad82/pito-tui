@@ -4,6 +4,26 @@ Every release of pito-tui, newest first. Versions follow [Semantic
 Versioning](https://semver.org/): from 1.0.0 on, only a change in the first
 number may break an app; the middle number adds, the last one fixes.
 
+## v1.2.0 — 2026-10-22
+
+### Added
+
+- `Folds` makes a column of titled sections collapsible: each one is either expanded (its title rule, then its body) or collapsed to one row with a summary you give on its title rule. A fold eases open and shut (instant with `still(true)` for reduced motion), your keys toggle the section under the cursor or all of them, and `state()`/`restore()` hand you the folds as plain data to save. A steady column allocates nothing per frame.
+- `Screen::fact_spans` and `Screen::hint_list` let a screen lend the footer its facts and hints, the way `Screen::badge` lends the header its pill, so they cost nothing per frame.
+- About 390 new tests: key order, the quit guard, tabs and groups, overlays, the activity band and screen, commands, the log, pick, capture and dump files, and the text, layout, palette, clock and progress helpers. Line coverage is now 90%.
+
+### Changed
+
+- A steady frame allocates nothing: the header title, the left part, the facts and the hints reuse their buffers from frame to frame.
+- `Tui::event`, `Tui::start` and `Tui::settle` return a `Flow`, and the new `Tui::landed` returns the `Flow` of a load's result; calls written as statements keep compiling.
+- The activity screen stays the last screen even when an overlay is added after `Tui::activities`, as the docs promised: such an overlay, and a gate or app added after the board, now sit one index earlier.
+
+### Fixed
+
+- `cx.quit()` from a screen's `event`, `loaded`, `start` or `entered` hook now quits; before, it was ignored until the next key.
+- A progress bar shows 100% only once the work is done.
+- Capture and compare refuse frame files whose size line or rows don't match, scenario names with no letters or digits, and two scenarios that would write one folder, instead of reading wrong frames or overwriting one; `dump::size` takes digits only.
+
 ## v1.1.0 — 2026-10-21
 
 ### Added
