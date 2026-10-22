@@ -134,7 +134,7 @@ mod tests {
         assert_eq!(hard_wrap("a日本\n\nb", 2), ["a", "日", "本", "", "b"]);
     }
 
-    const SAMPLES: [&str; 9] = [
+    const SAMPLES: [&str; 12] = [
         "",
         "plain ascii words here",
         "日本語のテキスト",
@@ -144,6 +144,9 @@ mod tests {
         "averyveryverylongword then short",
         "tab\there",
         "  leading and trailing  ",
+        "family 👨\u{200d}👩\u{200d}👧 here",
+        "flag 🇷🇴🇷🇴 ro",
+        "love ❤\u{fe0f}❤\u{fe0f} you",
     ];
 
     #[test]
@@ -267,6 +270,41 @@ mod tests {
     }
 
     #[test]
+    fn wrap_never_opens_an_indented_paragraph_with_a_blank_line() {
+        for (text, width) in [
+            ("  averylongword", 10),
+            ("  leading", 1),
+            ("  leading", 2),
+            ("   x", 2),
+            ("one\n  averylongword", 10),
+        ] {
+            let lines = wrap(text, width);
+            assert!(
+                lines.iter().all(|line| !line.is_empty()),
+                "{text:?} at {width}: {lines:?}"
+            );
+            assert!(
+                lines.iter().all(|line| cells(line) <= width),
+                "{text:?} at {width}: {lines:?}"
+            );
+            let kept: String = lines.concat().split_whitespace().collect();
+            let given: String = text.split_whitespace().collect();
+            assert_eq!(kept, given, "{text:?} at {width}");
+        }
+    }
+
+    #[test]
+    fn emoji_sequences_stay_whole_and_within_their_width() {
+        for text in ["👨\u{200d}👩\u{200d}👧", "🇷🇴", "❤\u{fe0f}"] {
+            let (head, tail) = split(text, cells(text));
+            assert_eq!((head, tail), (text, ""), "{text:?}");
+            assert_eq!(clip(text, cells(text)), text);
+            assert_eq!(cells(&fit(text, 4)), 4, "{text:?}");
+            assert_eq!(hard_wrap(text, 1), [text]);
+        }
+    }
+
+    #[test]
     fn wrap_lines_fit_unless_one_glyph_is_wider_than_the_width_and_lose_no_words() {
         for text in SAMPLES {
             for width in 1..=12 {
@@ -276,6 +314,12 @@ mod tests {
                     let single = line.graphemes(true).count() == 1;
                     assert!(cells(line) <= width || single, "{line:?} at {width}");
                     assert_eq!(line.trim_end(), line, "{line:?} at {width}");
+                }
+                if !clean(text).trim().is_empty() {
+                    assert!(
+                        lines.iter().all(|line| !line.is_empty()),
+                        "{text:?} at {width}: {lines:?}"
+                    );
                 }
                 let kept: String = lines.concat().split_whitespace().collect();
                 let given: String = clean(text).split_whitespace().collect();
@@ -302,7 +346,11 @@ mod tests {
                     let single = line.graphemes(true).count() == 1;
                     assert!(cells(line) <= width || single, "{line:?} at {width}");
                 }
-                assert_eq!(lines.concat(), clean(text).trim_end(), "{text:?} at {width}");
+                assert_eq!(
+                    lines.concat(),
+                    clean(text).trim_end(),
+                    "{text:?} at {width}"
+                );
             }
         }
     }

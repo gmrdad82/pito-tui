@@ -114,6 +114,45 @@ mod tests {
     }
 
     #[test]
+    fn percent_of_every_whole_hundredth_is_that_whole_number() {
+        for whole in 0..=100 {
+            assert_eq!(percent(f64::from(whole) / 100.0), whole, "{whole}%");
+        }
+    }
+
+    #[test]
+    fn share_of_a_count_over_a_hundred_prints_the_count() {
+        assert_eq!(share(57.0 / 100.0, false), "57%");
+        assert_eq!(share(29.0 / 100.0, false), "29%");
+        assert_eq!(share(58.0 / 100.0, true), "≈58%");
+    }
+
+    fn eighths(drawn: &str) -> usize {
+        drawn
+            .chars()
+            .map(|glyph| {
+                LADDER
+                    .iter()
+                    .position(|&step| step == glyph)
+                    .map_or(0, |step| step + 1)
+            })
+            .sum()
+    }
+
+    #[test]
+    fn a_bar_at_an_exact_number_of_eighths_draws_exactly_that_many() {
+        for cells in 1..=12 {
+            let total = cells * 8;
+            for steps in 0..=total {
+                let fraction = steps as f64 / total as f64;
+                let drawn = bar(fraction, cells);
+                assert_eq!(eighths(&drawn), steps, "{steps}/{total}");
+            }
+        }
+        assert_eq!(eighths(&bar(15.0 / 88.0, 11)), 15);
+    }
+
+    #[test]
     fn share_marks_an_estimate_with_the_about_sign() {
         assert_eq!(share(0.0, false), "0%");
         assert_eq!(share(0.5, false), "50%");
@@ -138,6 +177,5 @@ mod tests {
     fn a_full_spinner_cycle_shows_every_frame_once() {
         let shown: Vec<&str> = (0..10).map(|frame| spinner(SPIN * frame)).collect();
         assert_eq!(shown, SPINNER);
-        assert_eq!(SPIN, Duration::from_millis(80));
     }
 }

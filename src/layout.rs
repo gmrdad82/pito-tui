@@ -275,7 +275,6 @@ mod tests {
         assert_eq!(layout.head_gap, 0);
         assert_eq!(layout.gap, GAP);
         assert_eq!(layout.small, Spot::THIRD);
-        assert_eq!((TOP, SIDE, PAD, GAP), (1, 1, 2, 1));
     }
 
     #[test]

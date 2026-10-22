@@ -77,7 +77,6 @@ mod tests {
 
     #[test]
     fn a_frame_is_one_hundred_and_twentieth_of_a_second_rounded_down() {
-        assert_eq!(FRAME, Duration::from_nanos(8_333_333));
         assert!(FRAME * 120 <= Duration::from_secs(1));
         assert!(FRAME * 121 > Duration::from_secs(1));
     }

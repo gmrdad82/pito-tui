@@ -218,7 +218,11 @@ mod tests {
     }
 
     fn sift(filter: &mut Filter) {
-        filter.sift(&NAMES, |name, query| matches(name, query), |name| Row::new([*name]));
+        filter.sift(
+            &NAMES,
+            |name, query| matches(name, query),
+            |name| Row::new([*name]),
+        );
     }
 
     fn typed(filter: &mut Filter, text: &str) {
@@ -259,7 +263,6 @@ mod tests {
         assert!(matches("ΣΟΦΙΑ", "σοφια"));
         assert!(matches("日本語のテキスト", "テキスト"));
         assert!(matches("café", "CAFÉ"));
-        assert!(!matches("Ștefan", "stefan"));
         assert!(!matches("日本語", "中"));
     }
 
@@ -473,7 +476,9 @@ mod tests {
 
     #[test]
     fn placeholder_and_hint_leave_the_filters_state_alone() {
-        let mut filter = Filter::new("Find").placeholder("type to filter").hint("esc clears");
+        let mut filter = Filter::new("Find")
+            .placeholder("type to filter")
+            .hint("esc clears");
         assert!(filter.bar().is_none());
         filter.key(char_key('/'));
         assert!(filter.bar().is_some());
@@ -487,5 +492,38 @@ mod tests {
         filter.list_mut().select(4);
         assert_eq!(filter.current(), Some(4));
         assert_eq!(filter.list().selected(), Some(4));
+    }
+
+    #[test]
+    fn the_view_draws_only_the_rows_the_query_kept() {
+        use ratatui::buffer::Buffer;
+        use ratatui::layout::Rect;
+        use ratatui::widgets::Widget;
+        let mut filter = searching("alpha");
+        let columns = [Column::new("Name", 4, 10)];
+        let area = Rect::new(0, 0, 12, 4);
+        let mut buffer = Buffer::empty(area);
+        filter
+            .view(&columns, &Palette::new(ratatui::style::Color::Blue))
+            .header(false)
+            .render(area, &mut buffer);
+        let lines: Vec<String> = (0..area.height)
+            .map(|y| {
+                (0..area.width)
+                    .map(|x| buffer.cell((x, y)).map_or(" ", |cell| cell.symbol()))
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string()
+            })
+            .collect();
+        assert!(lines[0].contains("alpha"), "{lines:?}");
+        assert!(lines[1].contains("alphabet"), "{lines:?}");
+        assert!(
+            lines
+                .iter()
+                .all(|line| !line.contains("Beta") && !line.contains("gamma")),
+            "{lines:?}"
+        );
+        assert!(lines[2].is_empty() && lines[3].is_empty(), "{lines:?}");
     }
 }

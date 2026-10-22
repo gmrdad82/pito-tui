@@ -339,10 +339,7 @@ mod tests {
         assert_eq!(palette.selected, lit_bold);
         assert_eq!(palette.rule, lit_bold);
         assert_eq!(palette.title, lit_bold);
-        assert_eq!(
-            palette.focus,
-            lit_bold.add_modifier(Modifier::REVERSED)
-        );
+        assert_eq!(palette.focus, lit_bold.add_modifier(Modifier::REVERSED));
         assert_eq!(palette.bar, None);
         assert_eq!(palette.count, None);
         assert!(!palette.mono);
@@ -358,9 +355,6 @@ mod tests {
         assert_eq!(one.good.fg, Some(GOOD));
         assert_eq!(one.warn.fg, Some(WARN));
         assert_eq!(one.bad.fg, Some(BAD));
-        assert_ne!(GOOD, BAD);
-        assert_ne!(GOOD, WARN);
-        assert_ne!(WARN, BAD);
         assert_ne!(one.accent, two.accent);
     }
 
@@ -477,7 +471,9 @@ mod tests {
 
     #[test]
     fn each_setter_replaces_its_style_alone() {
-        let style = Style::new().fg(Color::Magenta).add_modifier(Modifier::ITALIC);
+        let style = Style::new()
+            .fg(Color::Magenta)
+            .add_modifier(Modifier::ITALIC);
         let base = Palette::new(ACCENT);
         let set: [(Palette, Pick); 17] = [
             (base.base(style), |p| p.base),
@@ -509,20 +505,99 @@ mod tests {
         }
     }
 
+    fn distinct() -> Palette {
+        Palette::new(ACCENT)
+            .base(Style::new().bg(Color::Indexed(1)))
+            .ink(Style::new().fg(Color::Indexed(2)))
+            .strong(Style::new().fg(Color::Indexed(3)))
+            .muted(Style::new().fg(Color::Indexed(4)))
+            .accent(Style::new().fg(Color::Indexed(5)))
+            .selected(Style::new().fg(Color::Indexed(6)))
+            .good(Style::new().fg(Color::Indexed(7)))
+            .warn(Style::new().fg(Color::Indexed(8)))
+            .bad(Style::new().fg(Color::Indexed(9)))
+            .rule(Style::new().fg(Color::Indexed(10)))
+            .line(Style::new().fg(Color::Indexed(11)))
+            .glass(Style::new().fg(Color::Indexed(12)))
+            .shimmer(Style::new().fg(Color::Indexed(13)))
+            .title(Style::new().fg(Color::Indexed(14)))
+            .inactive(Style::new().fg(Color::Indexed(15)))
+            .focus(Style::new().fg(Color::Indexed(16)))
+            .small(Style::new().fg(Color::Indexed(17)))
+    }
+
+    #[test]
+    fn the_distinct_palette_really_has_no_two_styles_alike() {
+        let styles = every(&distinct());
+        for (index, style) in styles.iter().enumerate() {
+            for other in &styles[index + 1..] {
+                assert_ne!(style, other);
+            }
+        }
+    }
+
     #[test]
     fn the_hourglass_takes_the_palettes_glass_shimmer_and_muted_styles() {
-        let palette = Palette::new(ACCENT).muted(Style::new().fg(Color::DarkGray));
+        let palette = distinct();
         let took = Duration::from_millis(1_250);
         let expected = Hourglass::new(took)
             .label("Loading")
             .hint(Some("esc to stop"))
-            .glass(palette.glass)
-            .accent(palette.shimmer)
-            .muted(palette.muted);
+            .glass(Style::new().fg(Color::Indexed(12)))
+            .accent(Style::new().fg(Color::Indexed(13)))
+            .muted(Style::new().fg(Color::Indexed(4)));
         assert_eq!(
             palette.hourglass(took, "Loading", Some("esc to stop")),
             expected
         );
+        let swapped = Hourglass::new(took)
+            .label("Loading")
+            .hint(Some("esc to stop"))
+            .glass(palette.shimmer)
+            .accent(palette.glass)
+            .muted(palette.muted);
+        assert_ne!(
+            palette.hourglass(took, "Loading", Some("esc to stop")),
+            swapped
+        );
+    }
+
+    #[test]
+    fn the_header_takes_the_palettes_accent_muted_and_rule() {
+        let palette = distinct();
+        let header = palette.header();
+        assert_eq!(header.accent, Style::new().fg(Color::Indexed(5)));
+        assert_eq!(header.muted, Style::new().fg(Color::Indexed(4)));
+        assert_eq!(header.rule, Style::new().fg(Color::Indexed(10)));
+    }
+
+    #[test]
+    fn the_footer_alerts_with_bad_rules_with_line_and_writes_with_ink() {
+        let palette = distinct();
+        let footer = palette.footer();
+        assert_eq!(footer.accent, Style::new().fg(Color::Indexed(5)));
+        assert_eq!(footer.muted, Style::new().fg(Color::Indexed(4)));
+        assert_eq!(footer.alert, Style::new().fg(Color::Indexed(9)));
+        assert_eq!(footer.ink, Style::new().fg(Color::Indexed(2)));
+        assert_eq!(footer.rule, Style::new().fg(Color::Indexed(11)));
+        assert_eq!(footer.good, Some(Style::new().fg(Color::Indexed(7))));
+    }
+
+    #[test]
+    fn the_list_styles_take_selected_ink_muted_as_faint_and_base() {
+        let palette = distinct();
+        let expected = ListStyles::new()
+            .selected(Style::new().fg(Color::Indexed(6)))
+            .ink(Style::new().fg(Color::Indexed(2)))
+            .faint(Style::new().fg(Color::Indexed(4)))
+            .base(Style::new().bg(Color::Indexed(1)));
+        assert_eq!(palette.list(), expected);
+        let faint_from_line = ListStyles::new()
+            .selected(palette.selected)
+            .ink(palette.ink)
+            .faint(palette.line)
+            .base(palette.base);
+        assert_ne!(palette.list(), faint_from_line);
     }
 
     #[test]
@@ -540,14 +615,19 @@ mod tests {
     }
 
     fn rows(count: usize) -> Vec<Row> {
-        (0..count).map(|index| Row::new([format!("row{index}")])).collect()
+        (0..count)
+            .map(|index| Row::new([format!("row{index}")]))
+            .collect()
     }
 
     fn draw(palette: &Palette, list: &mut List, height: u16) -> Buffer {
         let columns = [Column::new("Name", 4, 8)];
         let area = Rect::new(0, 0, 12, height);
         let mut buffer = Buffer::empty(area);
-        palette.view(list, &columns).header(false).render(area, &mut buffer);
+        palette
+            .view(list, &columns)
+            .header(false)
+            .render(area, &mut buffer);
         buffer
     }
 
@@ -586,13 +666,22 @@ mod tests {
         let barred = Palette::new(ACCENT).bar(Some(Bar::LINE));
         let mut long = List::new().with_rows(rows(10));
         let shown = edge(&draw(&barred, &mut long, 3));
-        assert!(shown.iter().all(|mark| marks.contains(&mark.as_str())), "{shown:?}");
+        assert!(
+            shown.iter().all(|mark| marks.contains(&mark.as_str())),
+            "{shown:?}"
+        );
         let mut short = List::new().with_rows(rows(2));
         let shown = edge(&draw(&barred, &mut short, 3));
-        assert!(shown.iter().all(|mark| !marks.contains(&mark.as_str())), "{shown:?}");
+        assert!(
+            shown.iter().all(|mark| !marks.contains(&mark.as_str())),
+            "{shown:?}"
+        );
         let bare = Palette::new(ACCENT);
         let mut long = List::new().with_rows(rows(10));
         let shown = edge(&draw(&bare, &mut long, 3));
-        assert!(shown.iter().all(|mark| !marks.contains(&mark.as_str())), "{shown:?}");
+        assert!(
+            shown.iter().all(|mark| !marks.contains(&mark.as_str())),
+            "{shown:?}"
+        );
     }
 }

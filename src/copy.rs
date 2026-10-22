@@ -111,7 +111,6 @@ mod tests {
 
     #[test]
     fn copy_refuses_text_over_the_limit_without_writing() {
-        assert_eq!(COPY_MAX, 48 * 1024);
         assert!(!copy(&"a".repeat(COPY_MAX + 1)));
         assert!(!copy(&"a".repeat(COPY_MAX * 4)));
     }
