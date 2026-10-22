@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use pito_tui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use pito_tui::footer::Key;
+use pito_tui::footer::{Hint, Key};
 use pito_tui::layer::Event;
 use pito_tui::ratatui::{
     Frame,
@@ -100,6 +100,15 @@ fn found(buffer: &Buffer, needle: &str) -> Option<(u16, u16)> {
     })
 }
 
+fn found_on(buffer: &Buffer, y: u16, needle: &str) -> Option<u16> {
+    let area = buffer.area;
+    let line: String = (area.left()..area.right())
+        .map(|x| buffer[(x, y)].symbol().to_string())
+        .collect();
+    let at = line.find(needle)?;
+    u16::try_from(line[..at].chars().count()).ok()
+}
+
 fn palette() -> Palette {
     Palette::new(Color::Blue)
 }
@@ -163,7 +172,7 @@ fn a_takeover_covers_an_open_modal_and_its_toasts_until_it_ends() {
     assert_eq!(heard(&tui), [(2, Event::Closed)]);
     let text = shown(&mut tui);
     assert!(text.contains("Rename") && text.contains("Saved it"), "{text}");
-    assert!(!text.contains("Nameabc"));
+    assert!(!text.contains("abc"), "{text}");
 }
 
 #[test]
@@ -182,8 +191,12 @@ fn a_modal_in_the_shell_takes_paste_keys_and_closes_with_its_event() {
     )]);
     tui.paste("lo");
     assert_eq!(heard(&tui), [(3, Event::Edited { part: 0 })]);
-    let text = shown(&mut tui);
-    assert!(text.contains("lo") && text.contains("Lock") && !text.contains("Home"));
+    let buffer = frame(&mut tui);
+    let text = dump::text(&buffer);
+    assert!(text.contains("Lock") && !text.contains("Home"), "{text}");
+    let row = found(&buffer, "Find").map(|(_, y)| y);
+    assert!(row.is_some(), "{text}");
+    assert!(found_on(&buffer, row.unwrap_or(0), "lo").is_some(), "{text}");
     tui.key(press(KeyCode::Backspace));
     tui.key(press(KeyCode::Backspace));
     let buffer = frame(&mut tui);
@@ -352,7 +365,33 @@ fn more_toasts_than_fit_are_dropped_not_drawn_out_of_bounds() {
     assert!(small.contains("note 00"));
     let mut tui = run(vec![Act::Toast(Toast::new("a".repeat(200)))]);
     let buffer = frame(&mut tui);
-    assert!(dump::text(&buffer).contains(&"a".repeat(20)), "a wide toast is clipped to the area");
+    let Some((x, y)) = found(&buffer, "aaaa") else {
+        panic!("the wide toast is drawn:\n{}", dump::text(&buffer));
+    };
+    let left = (0..x).rev().find(|at| buffer[(*at, y)].symbol() == "│");
+    let right = (x..WIDTH).find(|at| buffer[(*at, y)].symbol() == "│");
+    let (Some(left), Some(right)) = (left, right) else {
+        panic!("the wide toast is boxed:\n{}", dump::text(&buffer));
+    };
+    assert!(right < WIDTH && right - left > WIDTH / 2, "{left}..{right}");
+    assert!(
+        (left + 1..right).all(|at| buffer[(at, y)].symbol() == "a"),
+        "the text fills the box and is cut at its right border"
+    );
+    assert_eq!(buffer[(right, y - 1)].symbol(), "╮", "the top right corner is drawn");
+}
+
+#[test]
+fn a_modals_hints_show_in_the_footer_while_it_is_open_and_leave_with_it() {
+    let mut tui = run(vec![Act::Open(
+        Modal::new(4, "Pick")
+            .list([Choice::new("Lock")])
+            .hints([Hint::new("enter", "zapfirst")]),
+    )]);
+    assert!(shown(&mut tui).contains("zapfirst"));
+    tui.key(press(KeyCode::Esc));
+    assert_eq!(heard(&tui), [(4, Event::Closed)]);
+    assert!(!shown(&mut tui).contains("zapfirst"));
 }
 
 #[test]

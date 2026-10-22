@@ -124,6 +124,7 @@ struct Choices {
     shown: Vec<usize>,
     list: List,
     rows: u16,
+    cut: u16,
 }
 
 impl Choices {
@@ -133,6 +134,7 @@ impl Choices {
             shown: Vec::new(),
             list: List::new().keys(Keys::new()),
             rows,
+            cut: 0,
         };
         choices.sift("");
         choices
@@ -171,6 +173,8 @@ impl Choices {
         u16::try_from(self.shown.len())
             .unwrap_or(u16::MAX)
             .clamp(1, self.rows.max(1))
+            .saturating_sub(self.cut)
+            .max(1)
     }
 }
 
@@ -219,7 +223,7 @@ pub struct Modal {
     pub(crate) close: &'static [Key],
     pub(crate) hints: Vec<Hint<'static>>,
     filter: Option<(usize, usize)>,
-    armed: Option<usize>,
+    armed: Option<(usize, usize)>,
 }
 
 pub(crate) enum Outcome {
@@ -421,8 +425,8 @@ impl Modal {
         let Some(choice) = choices.current() else {
             return Outcome::Stay;
         };
-        if choices.all[choice].confirm.is_some() && self.armed != Some(choice) {
-            self.armed = Some(choice);
+        if choices.all[choice].confirm.is_some() && self.armed != Some((part, choice)) {
+            self.armed = Some((part, choice));
             return Outcome::Stay;
         }
         self.armed = None;
@@ -505,11 +509,11 @@ impl Modal {
     }
 
     fn line(&self) -> Option<(&str, Tone)> {
-        if let Some(choice) = self.armed {
-            let warning = self.parts.iter().find_map(|part| match part {
-                Part::List(choices) => choices.all.get(choice)?.confirm.as_deref(),
+        if let Some((part, choice)) = self.armed {
+            let warning = match self.parts.get(part) {
+                Some(Part::List(choices)) => choices.all.get(choice).and_then(|it| it.confirm.as_deref()),
                 _ => None,
-            });
+            };
             if let Some(warning) = warning {
                 return Some((warning, Tone::Warn));
             }
@@ -521,6 +525,11 @@ impl Modal {
     }
 
     pub(crate) fn draw(&mut self, frame: &mut Frame, area: Rect, palette: &Palette) {
+        for part in &mut self.parts {
+            if let Part::List(choices) = part {
+                choices.cut = 0;
+            }
+        }
         let title = u16::try_from(cells(&self.title)).unwrap_or(u16::MAX);
         let line = self.line().map_or(0, |(text, _)| {
             u16::try_from(cells(text)).unwrap_or(u16::MAX)
@@ -547,7 +556,7 @@ impl Modal {
         for part in self.parts.iter_mut().rev() {
             if let Part::List(choices) = part {
                 let cut = spare.min(choices.height().saturating_sub(1));
-                choices.rows = choices.height() - cut;
+                choices.cut = cut;
                 spare -= cut;
             }
         }
@@ -1222,7 +1231,11 @@ mod tests {
                     }
                 }
             }
-            if let Some(place) = boxed(&buffer) {
+            let found = boxed(&buffer);
+            if width >= 20 {
+                assert!(found.is_some(), "{width}x{height} draws its box");
+            }
+            if let Some(place) = found {
                 assert!(area.contains(place.as_position()));
                 assert!(place.right() <= area.right() && place.bottom() <= area.bottom());
             }
