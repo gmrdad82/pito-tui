@@ -206,15 +206,15 @@ fn label<T: AsRef<str>>(pen: &mut Pen, spans: &[(T, Style)], base: Style, room: 
     pen.put(" ", last);
 }
 
-pub(crate) struct Rule<'a> {
+pub(crate) struct Rule<'a, M> {
     pub(crate) rule: Style,
     pub(crate) base: Style,
-    pub(crate) middle: &'a [Span],
+    pub(crate) middle: &'a [(M, Style)],
     pub(crate) left: &'a [(String, Style)],
     pub(crate) right: &'a [(String, Style)],
 }
 
-impl Rule<'_> {
+impl<M: AsRef<str>> Rule<'_, M> {
     pub(crate) fn draw(&self, buf: &mut Buffer, line: Rect) {
         let Some(mut pen) = Pen::new(buf, line, line.x) else {
             return;
@@ -327,8 +327,8 @@ impl<'a> Item<'a> {
     }
 }
 
-pub(crate) struct Labels<'a> {
-    pub(crate) items: Vec<Item<'a>>,
+pub(crate) struct Labels<'a, I> {
+    pub(crate) items: I,
     pub(crate) kind: Kind,
     pub(crate) on: Style,
     pub(crate) off: Style,
@@ -336,7 +336,7 @@ pub(crate) struct Labels<'a> {
     pub(crate) tail_style: Style,
 }
 
-impl Labels<'_> {
+impl<'a, I: Iterator<Item = Item<'a>> + Clone> Labels<'a, I> {
     fn gap(&self) -> u16 {
         match self.kind {
             Kind::Groups => GROUP_GAP,
@@ -348,7 +348,7 @@ impl Labels<'_> {
         let gap = self.gap();
         let labels = self
             .items
-            .iter()
+            .clone()
             .enumerate()
             .fold(0u16, |total, (index, item)| {
                 let gap = if index > 0 { gap } else { 0 };
@@ -380,7 +380,9 @@ impl Labels<'_> {
             return;
         };
         let gap = self.gap();
-        for (index, item) in self.items.iter().enumerate() {
+        let mut any = false;
+        for (index, item) in self.items.clone().enumerate() {
+            any = true;
             if index > 0 {
                 pen.x = pen.x.saturating_add(gap).min(pen.right);
             }
@@ -390,7 +392,7 @@ impl Labels<'_> {
         if spans_width(self.tail) == 0 {
             return;
         }
-        if !self.items.is_empty() {
+        if any {
             pen.x = pen.x.saturating_add(TAIL_GAP).min(pen.right);
         }
         let room = pen.room();
@@ -403,7 +405,7 @@ impl Labels<'_> {
         }
         let (form, start) = self.fit(line);
         let mut x = start;
-        for (index, item) in self.items.iter().enumerate() {
+        for (index, item) in self.items.clone().enumerate() {
             if index > 0 {
                 x = x.saturating_add(self.gap());
             }
@@ -443,7 +445,7 @@ mod tests {
             ("ail", Style::new()),
         ]);
         let labels = Labels {
-            items: vec![
+            items: [
                 Item {
                     label: &home,
                     number: Some(1),
@@ -454,7 +456,8 @@ mod tests {
                     number: Some(2),
                     on: false,
                 },
-            ],
+            ]
+            .into_iter(),
             kind: Kind::Sections,
             on: Style::new().add_modifier(Modifier::BOLD),
             off: Style::new(),
@@ -466,11 +469,12 @@ mod tests {
         assert_eq!(row(&buf, 0), "   1 Home  2 Next   ‹ all ›   ");
         assert_eq!(labels.hit(Rect::new(0, 0, 30, 1), 10), Some(1));
         let lone = Labels {
-            items: vec![Item {
+            items: [Item {
                 label: &accel,
                 number: None,
                 on: true,
-            }],
+            }]
+            .into_iter(),
             kind: Kind::Sections,
             on: Style::new(),
             off: Style::new(),

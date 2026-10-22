@@ -142,6 +142,10 @@ pub struct Tui<E> {
     pub(crate) top: Rect,
     pub(crate) rows: Vec<(Row, Rect)>,
     pub(crate) right_parts: Vec<(String, Style)>,
+    pub(crate) left_parts: Vec<(String, Style)>,
+    pub(crate) fact_parts: Vec<(String, Style)>,
+    pub(crate) title_line: String,
+    pub(crate) hint_buf: Vec<Hint<'static>>,
     pub(crate) toasts: Vec<(Instant, Toast)>,
     pub(crate) taken: Option<Instant>,
     pub(crate) delay: Duration,
@@ -210,6 +214,10 @@ impl<E: Send + 'static> Tui<E> {
             top: Rect::default(),
             rows: Vec::new(),
             right_parts: Vec::new(),
+            left_parts: Vec::new(),
+            fact_parts: Vec::new(),
+            title_line: String::new(),
+            hint_buf: Vec::new(),
             toasts: Vec::new(),
             taken: None,
             delay: Duration::ZERO,
@@ -1015,17 +1023,16 @@ impl<E: Send + 'static> Tui<E> {
 
     fn click(&mut self, kind: Row, line: Rect, column: u16) {
         let moved = match kind {
-            Row::Groups => self
-                .group_labels()
-                .hit(line, column)
-                .and_then(|group| self.model.groups.get(group).copied())
-                .is_some_and(|heading| self.model.go_heading(heading)),
+            Row::Groups => {
+                let hit = self.group_labels().hit(line, column);
+                hit.and_then(|group| self.model.groups.get(group).copied())
+                    .is_some_and(|heading| self.model.go_heading(heading))
+            }
             Row::Sections if self.open.is_none() && self.model.nav.depth() == 0 => {
                 let group = self.model.nav.place().group;
                 let tail = self.tail();
-                self.section_labels(&tail)
-                    .hit(line, column)
-                    .is_some_and(|section| self.model.nav.go_to(group, section).is_some())
+                let hit = self.section_labels(&tail).hit(line, column);
+                hit.is_some_and(|section| self.model.nav.go_to(group, section).is_some())
             }
             _ => false,
         };
@@ -1035,24 +1042,25 @@ impl<E: Send + 'static> Tui<E> {
         }
     }
 
-    pub fn event(&mut self, screen: usize, event: E) {
+    pub fn event(&mut self, screen: usize, event: E) -> Flow {
         self.call(screen, |target, cx| target.event(event, cx));
-        self.apply();
+        self.apply()
     }
 
     pub fn loaded(&mut self, screen: usize, generation: u64, event: E) -> bool {
-        let Some(slot) = self.screens.get_mut(screen) else {
-            return false;
-        };
+        self.landed(screen, generation, event).is_some()
+    }
+
+    pub fn landed(&mut self, screen: usize, generation: u64, event: E) -> Option<Flow> {
+        let slot = self.screens.get_mut(screen)?;
         if slot.reading == Some(generation) {
             slot.reading = None;
         }
         if generation != slot.generation {
-            return false;
+            return None;
         }
         self.call(screen, |target, cx| target.loaded(event, cx));
-        self.apply();
-        true
+        Some(self.apply())
     }
 
     pub fn handle(&mut self, wake: Wake<E>) -> Flow {
@@ -1060,14 +1068,14 @@ impl<E: Send + 'static> Tui<E> {
             Wake::Input(Event::Key(key)) => return self.key(key),
             Wake::Input(Event::Paste(text)) => self.paste(&text),
             Wake::Input(Event::Mouse(mouse)) => self.mouse(mouse),
-            Wake::Event(screen, event) => self.event(screen, event),
+            Wake::Event(screen, event) => return self.event(screen, event),
             Wake::Stamped(stamp, screen, event) => {
                 if stamp == self.out.stamp() {
-                    self.event(screen, event);
+                    return self.event(screen, event);
                 }
             }
             Wake::Loaded(screen, generation, event) => {
-                self.loaded(screen, generation, event);
+                return self.landed(screen, generation, event).unwrap_or(Flow::Stay);
             }
             Wake::Activity(activity) => {
                 self.out.changes.push(Change::Put(activity));
@@ -1386,31 +1394,39 @@ impl<E: Send + 'static> Tui<E> {
         }
     }
 
-    pub fn settle(&mut self) {
+    pub fn settle(&mut self) -> Flow {
+        let mut flow = Flow::Stay;
         for _ in 0..SETTLE {
             let mut woke = false;
             for (screen, generation, job) in self.reads() {
-                self.loaded(screen, generation, job());
+                if self.landed(screen, generation, job()) == Some(Flow::Quit) {
+                    flow = Flow::Quit;
+                }
                 woke = true;
             }
             for (screen, stamp, job) in std::mem::take(&mut self.out.jobs) {
                 let event = job();
-                if stamp == self.out.stamp() {
-                    self.event(screen, event);
+                if stamp == self.out.stamp() && self.event(screen, event) == Flow::Quit {
+                    flow = Flow::Quit;
                 }
                 woke = true;
             }
             while let Ok(wake) = self.inbox.try_recv() {
-                self.handle(wake);
+                if self.handle(wake) == Flow::Quit {
+                    flow = Flow::Quit;
+                }
                 woke = true;
             }
-            if self.ticks().is_some() {
-                woke = true;
+            match self.ticks() {
+                Some(Flow::Quit) => flow = Flow::Quit,
+                Some(Flow::Stay) => woke = true,
+                None => {}
             }
-            if !woke {
-                return;
+            if !woke || flow == Flow::Quit {
+                return flow;
             }
         }
+        flow
     }
 
     pub fn advance(&mut self, by: Duration) -> Flow {
