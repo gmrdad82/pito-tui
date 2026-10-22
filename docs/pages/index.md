@@ -66,6 +66,7 @@ your own app.
   - [Dumps, benches and frame captures](guides/headless/)
   - [Give the terminal back, always](guides/terminal/)
   - [Move an existing app onto the shell](guides/adopting/)
+  - [Fold sections](guides/folds/)
 - Reference: [the API at a glance](reference/api/),
   [formats](reference/formats/), the [full API docs](api/) and the
   [changelog](changelog/).

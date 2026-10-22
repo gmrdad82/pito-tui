@@ -76,13 +76,17 @@ impl Screen<Msg> for Overview {
   already holds; `Fold::rows` is the body's full height. `scroll(top)` moves
   the column, clamped to `total()` at the next draw, and `top_of(index)` gives
   a title's row in the column, so the app can keep the cursor's section in
-  view.
+  view. The clamp isn't read back, so an app that keeps its own scroll
+  counter clamps it too after each draw, to
+  `total().saturating_sub(area.height)`, or "up" past the end does nothing
+  for many presses.
 - The body closure gets the visible rect of a steady section, at most its
   room on the area: when a body is taller than its room, the app draws its
   own `+N more` row in the last row it gets. While a section folds, or once
   its top is scrolled off, the closure draws the whole body (or the part that
   would fit if it were open) into a scratch buffer `Folds` keeps, and the
-  rows that show are copied from there.
+  rows that show are copied from there, over what the frame already held
+  under them, so the app's background stays.
 - `placed()` lists, for every section drawn, its title row (an empty rect when
   it is off the area), its visible body rows, its full rows and whether it is
   folding.

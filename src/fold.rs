@@ -97,18 +97,27 @@ struct Pen<'a> {
     x: u16,
     y: u16,
     right: u16,
+    full: bool,
 }
 
 impl Pen<'_> {
     fn put(&mut self, text: &str, style: Style) {
+        if self.full || text.is_empty() {
+            return;
+        }
         let room = self.right.saturating_sub(self.x);
-        if room == 0 || text.is_empty() {
+        if room == 0 {
+            self.full = true;
             return;
         }
         let (end, _) = self
             .buf
             .set_stringn(self.x, self.y, text, usize::from(room), style);
-        self.x = end.min(self.right);
+        let end = end.min(self.right);
+        if end - self.x < width(text) {
+            self.full = true;
+        }
+        self.x = end;
     }
 
     fn spans(&mut self, spans: &[Span], base: Style) {
@@ -332,10 +341,7 @@ impl Folds {
     pub fn title_at(&self, column: u16, row: u16) -> Option<usize> {
         self.placed.iter().position(|placed| {
             let title = placed.title;
-            !title.is_empty()
-                && title.y == row
-                && column >= title.x
-                && column < title.right()
+            !title.is_empty() && title.y == row && column >= title.x && column < title.right()
         })
     }
 
@@ -379,7 +385,9 @@ impl Folds {
             self.tops.push(total);
             let open = self.fraction(&self.entries[index], self.now);
             let shown = (f32::from(section.rows) * open).round() as u16;
-            total = total.saturating_add(1).saturating_add(shown.min(section.rows));
+            total = total
+                .saturating_add(1)
+                .saturating_add(shown.min(section.rows));
         }
         self.total = total;
         self.top = self.top.min(total.saturating_sub(area.height));
@@ -453,19 +461,16 @@ impl Folds {
                 held.height.max(rect.height),
             ));
         }
-        for y in rect.top()..rect.bottom() {
-            for x in rect.left()..rect.right() {
-                self.scratch[(x, y)].reset();
+        let rows = visible.height.min(rect.height.saturating_sub(skip));
+        for row in 0..rows {
+            for x in visible.left()..visible.right() {
+                self.scratch[(x, skip + row)] = buf[(x, visible.y + row)].clone();
             }
         }
         body(&mut self.scratch, index, rect);
-        for row in 0..visible.height {
-            let from = skip + row;
-            if from >= rect.height {
-                break;
-            }
+        for row in 0..rows {
             for x in visible.left()..visible.right() {
-                buf[(x, visible.y + row)] = self.scratch[(x, from)].clone();
+                buf[(x, visible.y + row)] = self.scratch[(x, skip + row)].clone();
             }
         }
     }
@@ -483,6 +488,7 @@ impl Folds {
             x: line.x,
             y: line.y,
             right: line.right(),
+            full: false,
         };
         let summary = spans_width(fold.summary);
         let need = width(mark)
@@ -512,7 +518,9 @@ fn progress(entry: &Entry, lasting: Duration, now: Option<Instant>) -> Option<f3
     if span <= 0.0 {
         return Some(1.0);
     }
-    let elapsed = now.map_or(0.0, |now| now.saturating_duration_since(start).as_secs_f32());
+    let elapsed = now.map_or(0.0, |now| {
+        now.saturating_duration_since(start).as_secs_f32()
+    });
     Some((elapsed / span).clamp(0.0, 1.0))
 }
 

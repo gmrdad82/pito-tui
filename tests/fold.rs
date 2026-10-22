@@ -539,10 +539,7 @@ fn a_gap_parts_sections_but_never_trails_the_last() {
 fn the_apps_marks_and_lit_cursor_are_drawn() {
     let column = Column::new(&[("Alpha", "", 1), ("Beta", "", 1)]);
     let palette = Palette::new(Color::Cyan);
-    let mut folds = Folds::new(["a", "b"])
-        .marks("-", "+")
-        .lit(true)
-        .still(true);
+    let mut folds = Folds::new(["a", "b"]).marks("-", "+").lit(true).still(true);
     folds.point(1);
     folds.toggle(1, Instant::now());
     let buf = draw(&mut folds, &column, (120, 40));
@@ -562,11 +559,269 @@ fn an_empty_area_draws_nothing_and_never_panics() {
     let mut terminal = Terminal::new(TestBackend::new(20, 10)).unwrap();
     let palette = Palette::new(Color::Cyan);
     let sections = column.folds();
-    for area in [Rect::new(0, 0, 0, 10), Rect::new(0, 0, 20, 0), Rect::new(30, 30, 5, 5)] {
+    for area in [
+        Rect::new(0, 0, 0, 10),
+        Rect::new(0, 0, 20, 0),
+        Rect::new(30, 30, 5, 5),
+    ] {
         terminal
             .draw(|frame| folds.draw(frame, area, &palette, &sections, lines))
             .unwrap();
         assert!(folds.placed().is_empty());
         assert_eq!(row(terminal.backend().buffer(), 0), "");
     }
+}
+
+fn draw_in(
+    folds: &mut Folds,
+    column: &Column,
+    size: (u16, u16),
+    area: Rect,
+    under: Style,
+    body: impl FnMut(&mut Buffer, usize, Rect),
+) -> Buffer {
+    let mut terminal = Terminal::new(TestBackend::new(size.0, size.1)).unwrap();
+    let palette = Palette::new(Color::Cyan);
+    let sections = column.folds();
+    terminal
+        .draw(|frame| {
+            frame.buffer_mut().set_style(area, under);
+            folds.draw(frame, area, &palette, &sections, body);
+        })
+        .unwrap();
+    terminal.backend().buffer().clone()
+}
+
+#[test]
+fn a_body_keeps_the_apps_background_steady_scrolled_and_folding() {
+    let under = Style::new().bg(Color::Blue);
+    for size in SIZES {
+        let area = Rect::new(0, 0, size.0, size.1);
+        let column = tall();
+
+        let mut steady = Folds::new(["a", "b", "c"]);
+        let buf = draw_in(&mut steady, &column, size, area, under, lines);
+        assert_eq!(row(&buf, 1), "a line 0");
+        assert_eq!(buf[(0, 1)].bg, Color::Blue);
+        assert_eq!(buf[(size.0 - 1, 1)].bg, Color::Blue);
+
+        let mut scrolled = Folds::new(["a", "b", "c"]);
+        scrolled.scroll(5);
+        let buf = draw_in(&mut scrolled, &column, size, area, under, lines);
+        assert_eq!(row(&buf, 0), "a line 4");
+        assert_eq!(buf[(0, 0)].bg, Color::Blue);
+        assert_eq!(buf[(size.0 - 1, 0)].bg, Color::Blue);
+
+        let start = Instant::now();
+        let mut folding = Folds::new(["a", "b", "c"]);
+        folding.toggle(0, start);
+        folding.moment(ms(start, 90));
+        let buf = draw_in(&mut folding, &column, size, area, under, lines);
+        assert!(folding.placed()[0].folding);
+        assert_eq!(row(&buf, 1), "a line 0");
+        assert_eq!(buf[(0, 1)].bg, Color::Blue);
+        assert_eq!(buf[(size.0 - 1, 1)].bg, Color::Blue);
+    }
+}
+
+#[test]
+fn text_after_a_clipped_title_span_never_shows() {
+    let titles = vec![vec![
+        (Cow::Borrowed("日本"), Style::new()),
+        (Cow::Borrowed("ab"), Style::new()),
+    ]];
+    let column = Column {
+        titles,
+        summaries: vec![Vec::new()],
+        rows: vec![2],
+    };
+    let mut folds = Folds::new(["a"]);
+    shut(&mut folds, &["a"]);
+    let first = row(&draw(&mut folds, &column, (5, 3)), 0);
+    assert!(first.starts_with("▸ 日"), "{first}");
+    assert!(!first.contains('本'), "{first}");
+    assert!(!first.contains('a'), "{first}");
+    assert!(!first.contains('b'), "{first}");
+
+    let mut folds = Folds::new(["a"]);
+    shut(&mut folds, &["a"]);
+    let first = row(&draw(&mut folds, &column, (7, 3)), 0);
+    assert_eq!(first, "▸ 日本a");
+}
+
+#[test]
+fn an_area_off_the_origin_places_titles_and_bodies_inside_it() {
+    for size in SIZES {
+        let area = Rect::new(5, 3, size.0 - 10, size.1 - 6);
+        let pad = " ".repeat(5);
+        let column = tall();
+
+        let mut seen = Vec::new();
+        let mut steady = Folds::new(["a", "b", "c"]);
+        let buf = draw_in(
+            &mut steady,
+            &column,
+            size,
+            area,
+            Style::new(),
+            |buf, index, rect| {
+                seen.push((index, rect));
+                lines(buf, index, rect);
+            },
+        );
+        assert_eq!(row(&buf, 2), "");
+        assert!(row(&buf, 3).starts_with(&format!("{pad}▾ Alpha ─")));
+        assert_eq!(cells(&row(&buf, 3)), usize::from(size.0 - 5));
+        assert_eq!(row(&buf, 4), format!("{pad}a line 0"));
+        assert_eq!(steady.placed()[0].title, Rect::new(5, 3, area.width, 1));
+        assert_eq!(seen[0], (0, Rect::new(5, 4, area.width, 30)));
+        assert_eq!(steady.title_at(5, 3), Some(0));
+        assert_eq!(steady.title_at(4, 3), None);
+
+        let mut scrolled = Folds::new(["a", "b", "c"]);
+        scrolled.scroll(5);
+        let buf = draw_in(&mut scrolled, &column, size, area, Style::new(), lines);
+        assert_eq!(row(&buf, 3), format!("{pad}a line 4"));
+        assert_eq!(row(&buf, 28), format!("{pad}a line 29"));
+        assert!(row(&buf, 29).starts_with(&format!("{pad}▾ Beta")));
+        assert_eq!(scrolled.placed()[0].body, Rect::new(5, 3, area.width, 26));
+        assert_eq!(
+            scrolled.placed()[0].title,
+            Rect::new(5, area.bottom(), 0, 0)
+        );
+        assert_eq!(row(&buf, size.1 - 3), "");
+
+        let start = Instant::now();
+        let mut folding = Folds::new(["a", "b", "c"]);
+        folding.toggle(0, start);
+        folding.moment(ms(start, 90));
+        let mut seen = Vec::new();
+        let buf = draw_in(
+            &mut folding,
+            &column,
+            size,
+            area,
+            Style::new(),
+            |buf, index, rect| {
+                seen.push((index, rect.height));
+                lines(buf, index, rect);
+            },
+        );
+        let shown = folding.placed()[0].body.height;
+        assert!(shown > 0 && shown < 30);
+        assert_eq!(folding.placed()[0].body, Rect::new(5, 4, area.width, shown));
+        for k in 0..shown {
+            assert_eq!(row(&buf, 4 + k), format!("{pad}a line {k}"));
+        }
+        assert!(row(&buf, 4 + shown).starts_with(&format!("{pad}▾ Beta")));
+        assert_eq!(seen[0], (0, 30));
+    }
+}
+
+#[test]
+fn a_fold_scrolled_past_its_top_slides_the_lower_rows_of_the_full_body() {
+    for size in SIZES {
+        let column = tall();
+        let start = Instant::now();
+        let mut folds = Folds::new(["a", "b", "c"]);
+        folds.toggle(0, start);
+        folds.moment(ms(start, 90));
+        folds.scroll(5);
+        let mut seen = Vec::new();
+        let buf = draw_with(&mut folds, &column, size, |buf, index, rect| {
+            seen.push((index, rect.height));
+            lines(buf, index, rect);
+        });
+        assert!(folds.animating());
+        let placed = folds.placed()[0];
+        assert!(placed.folding);
+        assert!(placed.title.is_empty());
+        let shown = folds.top_of(1).unwrap() - 1;
+        assert!(shown > 5 && shown < 30, "{shown}");
+        assert_eq!(placed.body, Rect::new(0, 0, size.0, shown + 1 - 5));
+        for k in 0..placed.body.height {
+            assert_eq!(row(&buf, k), format!("a line {}", 4 + k));
+        }
+        assert!(row(&buf, placed.body.height).starts_with("▾ Beta"));
+        assert_eq!(seen[0], (0, 30));
+    }
+}
+
+#[test]
+fn a_fold_running_past_the_bottom_sees_the_room_it_gets_when_steady() {
+    for size in SIZES {
+        let column = Column::new(&[("Alpha", "", 10), ("Tall", "", 100)]);
+        let start = Instant::now();
+        let mut folds = Folds::new(["a", "b"]);
+        shut(&mut folds, &["b"]);
+        folds.toggle(1, start);
+        folds.moment(ms(start, 90));
+        let mut seen = Vec::new();
+        let buf = draw_with(&mut folds, &column, size, |buf, index, rect| {
+            seen.push((index, rect.height));
+            lines(buf, index, rect);
+        });
+        let room = size.1 - 12;
+        assert!(folds.placed()[1].folding);
+        assert_eq!(folds.placed()[1].body, Rect::new(0, 12, size.0, room));
+        assert_eq!(seen, vec![(0, 10), (1, room)]);
+        assert_eq!(row(&buf, size.1 - 1), format!("b line {}", room - 1));
+
+        folds.moment(ms(start, 1000));
+        seen.clear();
+        draw_with(&mut folds, &column, size, |buf, index, rect| {
+            seen.push((index, rect.height));
+            lines(buf, index, rect);
+        });
+        assert_eq!(seen, vec![(0, 10), (1, room)]);
+    }
+}
+
+#[test]
+fn restore_settles_a_fold_that_is_running() {
+    let column = Column::new(&[("Alpha", "", 10), ("Beta", "", 10)]);
+    let start = Instant::now();
+    let mut folds = Folds::new(["a", "b"]);
+    folds.toggle(0, start);
+    folds.moment(ms(start, 60));
+    assert!(folds.animating());
+    folds.restore(&FoldState {
+        sections: vec![("a".to_string(), false)],
+    });
+    assert!(!folds.animating());
+    assert!(!folds.is_shut(0));
+    draw(&mut folds, &column, (120, 40));
+    assert!(!folds.placed()[0].folding);
+    assert_eq!(folds.placed()[0].body.height, 10);
+
+    let mut folds = Folds::new(["a", "b"]);
+    folds.toggle(1, start);
+    folds.moment(ms(start, 60));
+    folds.restore(&FoldState {
+        sections: vec![("b".to_string(), true)],
+    });
+    assert!(!folds.animating());
+    draw(&mut folds, &column, (120, 40));
+    assert!(!folds.placed()[1].folding);
+    assert!(folds.placed()[1].body.is_empty());
+}
+
+#[test]
+fn only_sections_with_both_an_id_and_a_fold_are_drawn() {
+    let column = Column::new(&[("Alpha", "", 2), ("Beta", "", 2), ("Gamma", "", 2)]);
+    let mut fewer_ids = Folds::new(["a", "b"]);
+    let buf = draw(&mut fewer_ids, &column, (120, 40));
+    assert_eq!(fewer_ids.placed().len(), 2);
+    assert_eq!(fewer_ids.total(), 6);
+    assert_eq!(fewer_ids.top_of(2), None);
+    assert_eq!(row(&buf, 6), "");
+    assert!(!row(&buf, 6).contains("Gamma"));
+
+    let two = Column::new(&[("Alpha", "", 2), ("Beta", "", 2)]);
+    let mut more_ids = Folds::new(["a", "b", "c", "d"]);
+    let buf = draw(&mut more_ids, &two, (120, 40));
+    assert_eq!(more_ids.placed().len(), 2);
+    assert_eq!(more_ids.total(), 6);
+    assert_eq!(more_ids.top_of(2), None);
+    assert_eq!(row(&buf, 6), "");
 }
