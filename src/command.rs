@@ -436,7 +436,6 @@ pub(crate) fn spawn<E: Send + 'static>(
 
 #[cfg(test)]
 mod tests {
-    #[cfg(unix)]
     use std::sync::mpsc;
 
     use super::*;
@@ -593,14 +592,10 @@ mod tests {
         let (ended, rest) = last(&inbox, |_| false);
         heard.extend(rest);
         assert!(ended.detail.is_empty());
-        let texts: Vec<&str> = heard
-            .iter()
-            .filter_map(|heard| match heard {
-                Heard::Line { text, .. } => Some(text.as_str()),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(texts, ["one", "two"]);
+        assert_eq!(
+            texts(&heard, Stream::Stdout),
+            [("one".to_string(), false), ("two".to_string(), false)]
+        );
     }
 
     #[cfg(unix)]
@@ -609,27 +604,14 @@ mod tests {
         let script = format!("echo '{STEP}' >&2; printf 'one\\377\\n'; echo two; exit 3");
         let (_, inbox, _) = started(&script, Stream::Stderr);
         let (_, heard) = last(&inbox, |_| false);
-        let lines = |from: Stream| -> Vec<(String, bool)> {
-            heard
-                .iter()
-                .filter_map(|heard| match heard {
-                    Heard::Line {
-                        stream,
-                        text,
-                        progress,
-                    } if *stream == from => Some((text.clone(), progress.is_some())),
-                    _ => None,
-                })
-                .collect()
-        };
         assert_eq!(
-            lines(Stream::Stdout),
+            texts(&heard, Stream::Stdout),
             [
                 ("one\u{FFFD}".to_string(), false),
                 ("two".to_string(), false)
             ]
         );
-        assert_eq!(lines(Stream::Stderr), [(STEP.to_string(), true)]);
+        assert_eq!(texts(&heard, Stream::Stderr), [(STEP.to_string(), true)]);
         assert_eq!(heard.last(), Some(&Heard::Exit(Exit::Code(3))));
     }
 
@@ -806,7 +788,6 @@ mod tests {
         assert_eq!(ended.status, "pdispatch 0.9.1 is installed");
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_command_that_cannot_start_fails_at_once_with_its_error() {
         let run = Run {

@@ -175,7 +175,7 @@ fn find_moves_to_the_next_and_previous_match_and_wraps() {
 }
 
 #[test]
-fn find_starts_from_the_line_in_view_and_previous_first_goes_to_the_last_match() {
+fn find_starts_from_the_line_in_view() {
     let palette = palette();
     let mut log = loaded(long());
     draw(&mut log, &palette, WIDTH, HEIGHT);
@@ -186,14 +186,34 @@ fn find_starts_from_the_line_in_view_and_previous_first_goes_to_the_last_match()
     search(&mut log, "NEEDLE");
     assert_eq!(log.hit(), Some(2));
     assert_eq!(log.top(), 14996);
+}
 
-    let mut fresh = loaded(long());
-    draw(&mut fresh, &palette, WIDTH, HEIGHT);
-    fresh.key(typed('N'));
-    assert_eq!(fresh.hit(), None);
-    search(&mut fresh, "needle 1");
-    fresh.key(press(KeyCode::Enter));
-    assert_eq!(fresh.hits(), 2);
+fn above_the_view() -> Log {
+    let mut log = loaded(long());
+    draw(&mut log, &palette(), WIDTH, HEIGHT);
+    log.key(press(KeyCode::End));
+    search(&mut log, "needle 4999");
+    log.key(press(KeyCode::Enter));
+    assert_eq!(log.hits(), 2);
+    assert_eq!(log.hit(), None);
+    assert_eq!(log.top(), TOTAL - 9);
+    log
+}
+
+#[test]
+fn a_search_below_every_match_holds_the_view_then_previous_takes_the_last_match() {
+    let mut log = above_the_view();
+    assert_eq!(log.key(typed('N')), Turn::Taken);
+    assert_eq!(log.hit(), Some(1));
+    assert_eq!(log.top(), 14996);
+}
+
+#[test]
+fn a_search_below_every_match_holds_the_view_then_next_takes_the_first_match() {
+    let mut log = above_the_view();
+    assert_eq!(log.key(typed('n')), Turn::Taken);
+    assert_eq!(log.hit(), Some(0));
+    assert_eq!(log.top(), 4996);
 }
 
 #[test]
@@ -254,6 +274,15 @@ fn new_lines_keep_the_matches_current() {
     assert_eq!(log.hits(), 1);
     assert_eq!(log.hit(), None);
     assert_eq!(log.top(), 0);
+    let mut back = loaded(long());
+    draw(&mut back, &palette(), WIDTH, HEIGHT);
+    search(&mut back, "needle");
+    back.key(press(KeyCode::Enter));
+    back.set_lines(long());
+    assert_eq!((back.hits(), back.hit()), (4, None));
+    assert_eq!(back.key(typed('N')), Turn::Taken);
+    assert_eq!(back.hit(), Some(3));
+    assert_eq!(back.top(), TOTAL - 9);
 }
 
 #[test]
@@ -378,6 +407,18 @@ fn a_following_log_at_the_bottom_stays_at_the_bottom_as_lines_arrive() {
     assert_eq!(reading.top(), 1);
     reading.set_lines(grow(3));
     assert_eq!(reading.top(), 0);
+}
+
+#[test]
+fn a_log_that_starts_short_stays_at_the_top_as_it_grows_past_a_page() {
+    let mut log = Log::new("Find");
+    draw(&mut log, &palette(), WIDTH, HEIGHT);
+    log.set_lines(lines((0..40).map(|index| format!("row {index}"))));
+    assert_eq!(log.top(), 0);
+    let mut short = loaded(lines((0..3).map(|index| format!("row {index}"))));
+    draw(&mut short, &palette(), WIDTH, HEIGHT);
+    short.set_lines(lines((0..40).map(|index| format!("row {index}"))));
+    assert_eq!(short.top(), 0);
 }
 
 #[test]

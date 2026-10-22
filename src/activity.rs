@@ -635,6 +635,8 @@ impl<E: Send + 'static> Screen<E> for Board {
 
 #[cfg(test)]
 mod tests {
+    use ratatui::{Terminal, backend::TestBackend, buffer::Buffer};
+
     use super::*;
 
     fn kept(board: &Board, id: u64) -> &Activity {
@@ -699,7 +701,6 @@ mod tests {
         assert!(board.list.iter().all(|kept| kept.id != 1));
     }
 
-    use ratatui::{Terminal, backend::TestBackend, buffer::Buffer};
 
     fn palette() -> Palette {
         Palette::new(Color::Blue)
@@ -841,6 +842,17 @@ mod tests {
     }
 
     #[test]
+    fn a_one_row_band_with_more_than_one_shows_only_the_more_row_with_them_all() {
+        let now = Instant::now();
+        let board = posted(3, now);
+        let text = rows(&banded(&board, 60, 1, now + SECOND));
+        assert_eq!(text, ["+3 more"]);
+        let one = posted(1, now);
+        let text = rows(&banded(&one, 60, 1, now + SECOND));
+        assert!(text[0].contains("job00"), "{text:?}");
+    }
+
+    #[test]
     fn exactly_as_many_as_fit_show_without_the_more_row() {
         let now = Instant::now();
         let board = posted(3, now);
@@ -872,14 +884,22 @@ mod tests {
             ),
             now,
         );
-        let buffer = banded(&board, 60, 1, now);
+        let later = now + Duration::from_millis(1);
+        board.change(Change::Put(Activity::new(2, "watch", later)), later);
+        let buffer = banded(&board, 60, 2, later);
         let text = rows(&buffer);
-        assert!(text[0].starts_with("✗ build") && text[0].contains("broke"), "{text:?}");
-        let at = text[0].find("broke").unwrap();
-        let column = u16::try_from(text[0][..at].chars().count()).unwrap();
-        let cell = &buffer[(column, 0)];
+        assert!(text[0].starts_with("⠋ watch"), "{text:?}");
+        assert!(text[1].starts_with("✗ build") && text[1].contains("broke"), "{text:?}");
+        let at = text[1].find("broke").unwrap();
+        let column = u16::try_from(text[1][..at].chars().count()).unwrap();
+        let cell = &buffer[(column, 1)];
         assert_eq!(cell.fg, palette().bad.fg.unwrap());
         assert!(cell.modifier.contains(Modifier::DIM));
+        let finished = &buffer[(2, 1)].modifier;
+        assert!(finished.contains(Modifier::BOLD | Modifier::DIM));
+        let running = &buffer[(2, 0)].modifier;
+        assert!(running.contains(Modifier::BOLD));
+        assert!(!running.contains(Modifier::DIM));
     }
 
     #[test]

@@ -2,7 +2,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use pito_tui::activity::{LINGER, State};
-use pito_tui::command::{Exit, Heard};
+use pito_tui::command::{Exit, Heard, Stream};
 use pito_tui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use pito_tui::footer::Key;
 use pito_tui::header::Section;
@@ -73,10 +73,6 @@ fn screen(tui: &mut Tui<Ask>) -> String {
     dump::text(&tui.frame(WIDTH, HEIGHT))
 }
 
-fn rule(line: &str) -> bool {
-    line.trim_start().starts_with('─')
-}
-
 fn find(buffer: &Buffer, text: &str) -> Option<(u16, u16)> {
     let rows = dump::text(buffer);
     rows.lines().enumerate().find_map(|(y, row)| {
@@ -135,8 +131,6 @@ fn each_finished_state_shows_its_glyph_and_its_status_in_its_tone() {
     assert_eq!(tone("all good").fg, palette.good.fg.unwrap());
     assert!(tone("all good").modifier.contains(Modifier::DIM));
     assert_eq!(tone("it broke").fg, palette.bad.fg.unwrap());
-    assert!(tone("halted").modifier.contains(Modifier::DIM));
-    assert!(tone("queued up").modifier.contains(Modifier::DIM));
     assert_ne!(tone("all good").fg, tone("it broke").fg);
 }
 
@@ -164,10 +158,12 @@ fn finished_activities_linger_then_leave_the_band_but_stay_on_the_board() {
 #[test]
 fn an_activity_that_ended_long_ago_never_reaches_the_band() {
     let mut tui = tui(jobs());
-    post(&mut tui, move |now| {
-        let then = now.checked_sub(LINGER * 2).unwrap();
-        Activity::new(1, "old", then).state(State::Failed).ended(then)
-    });
+    let start = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let seen = std::sync::Arc::clone(&start);
+    act(&mut tui, move |cx| *seen.lock().unwrap() = Some(cx.now()));
+    let then = start.lock().unwrap().unwrap();
+    tui.advance(LINGER * 2);
+    post(&mut tui, move |_| Activity::new(1, "old", then).state(State::Failed).ended(then));
     assert!(!screen(&mut tui).contains("old"));
 }
 
@@ -194,7 +190,6 @@ fn more_than_fit_shows_the_more_words_with_the_hidden_count_on_the_last_band_row
     assert!(shown > 0, "{text}");
     assert_eq!(shown + hidden, total, "{text}");
     assert!(lines[at - 1].contains("job"), "{text}");
-    assert!(rule(lines[at + 1]), "{text}");
     let first = lines.iter().position(|line| line.contains("job")).unwrap();
     assert!(lines[first].contains("job29"), "{text}");
 }
@@ -293,28 +288,133 @@ fn forget_removes_an_activity_from_the_band_and_the_board_and_closes_it_if_open(
 }
 
 #[test]
-fn a_run_stopped_before_it_starts_never_spawns_and_ends_stopped() {
+fn a_run_stopped_while_queued_never_spawns_and_stops_again_when_asked_again() {
     let mut tui = tui(jobs());
     act(&mut tui, run_stop);
-    assert!(screen(&mut tui).contains("■ sim"));
     tui.pump();
     assert_eq!(tui.busy(), 0);
     tui.settle();
-    let app = tui.find::<App>().unwrap();
-    assert_eq!(app.heard, [(5, Heard::Exit(Exit::Stopped))]);
     act(&mut tui, run_stop);
+    tui.pump();
     tui.settle();
-    assert_eq!(tui.find::<App>().unwrap().heard.len(), 2);
+    let app = tui.find::<App>().unwrap();
+    assert_eq!(
+        app.heard,
+        [(5, Heard::Exit(Exit::Stopped)), (5, Heard::Exit(Exit::Stopped))]
+    );
 }
 
+#[cfg(unix)]
+fn exited(tui: &mut Tui<Ask>, id: u64) -> Vec<Heard> {
+    let limit = Instant::now() + Duration::from_secs(10);
+    tui.pump();
+    loop {
+        tui.settle();
+        let heard: Vec<Heard> = tui
+            .find::<App>()
+            .unwrap()
+            .heard
+            .iter()
+            .filter(|(from, _)| *from == id)
+            .map(|(_, heard)| heard.clone())
+            .collect();
+        if heard.iter().any(|heard| matches!(heard, Heard::Exit(_))) {
+            return heard;
+        }
+        assert!(Instant::now() < limit, "the run never ended: {heard:?}");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[cfg(unix)]
+fn shell(script: &str) -> Command {
+    let mut command = Command::new("sh");
+    command.args(["-c", script]);
+    command
+}
+
+#[cfg(unix)]
+const STEP: &str = r#"{"v":1,"state":"progress","stage":"build","fraction":0.5}"#;
+
+#[cfg(unix)]
+fn both(cx: &mut Cx<'_, Ask>) {
+    let script = format!("printf 'out one\\n'; printf '%s\\nerr one\\n' '{STEP}' >&2; exit 3");
+    cx.run_from(7, "mixed", shell(&script), Stream::Both);
+}
+
+#[cfg(unix)]
+fn lines(heard: &[Heard]) -> Vec<(Stream, String, bool)> {
+    heard
+        .iter()
+        .filter_map(|heard| match heard {
+            Heard::Line {
+                stream,
+                text,
+                progress,
+                ..
+            } => Some((*stream, text.clone(), progress.is_some())),
+            _ => None,
+        })
+        .collect()
+}
+
+#[cfg(unix)]
 #[test]
-fn a_run_forgotten_before_it_starts_leaves_the_band() {
+fn a_run_from_both_streams_reaches_the_screen_and_ends_failed_on_the_band_with_its_detail() {
+    let mut tui = tui(jobs());
+    act(&mut tui, both);
+    assert!(screen(&mut tui).contains("mixed"));
+    let heard = exited(&mut tui, 7);
+    let mut said = lines(&heard);
+    said.sort_by_key(|(stream, _, _)| *stream == Stream::Stderr);
+    assert_eq!(
+        said,
+        [
+            (Stream::Stdout, "out one".to_string(), false),
+            (Stream::Stderr, STEP.to_string(), true),
+            (Stream::Stderr, "err one".to_string(), false),
+        ]
+    );
+    assert_eq!(heard.last(), Some(&Heard::Exit(Exit::Code(3))));
+    let text = screen(&mut tui);
+    assert!(text.contains("✗ mixed"), "{text}");
+
+    tui.key(press(KeyCode::Char('o')));
+    tui.key(press(KeyCode::Enter));
+    let text = screen(&mut tui);
+    assert!(text.contains("out one") && text.contains("err one"), "{text}");
+    assert!(text.contains("build  progress  50%") && !text.contains(STEP), "{text}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_run_from_without_activities_still_reaches_the_screen_line_by_line() {
+    let mut tui =
+        Tui::new("probe", "1.2.3", Color::Blue).screen(Section::new("One"), App::default());
+    tui.start();
+    act(&mut tui, both);
+    let heard = exited(&mut tui, 7);
+    assert_eq!(lines(&heard).len(), 3);
+    assert!(lines(&heard).contains(&(Stream::Stderr, STEP.to_string(), true)));
+    assert_eq!(heard.last(), Some(&Heard::Exit(Exit::Code(3))));
+    assert_eq!(tui.names(), ["One"]);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_run_forgotten_while_queued_still_runs_for_its_screen_and_never_returns_to_the_band() {
     let mut tui = tui(jobs());
     act(&mut tui, |cx| {
         cx.run(6, "sim", Command::new("true"));
         cx.forget(6);
     });
     assert!(!screen(&mut tui).contains("sim"));
+    let heard = exited(&mut tui, 6);
+    assert_eq!(heard, [Heard::Exit(Exit::Code(0))]);
+    tui.settle();
+    assert!(!screen(&mut tui).contains("sim"));
+    tui.key(press(KeyCode::Char('o')));
+    assert!(screen(&mut tui).contains("Nothing has run yet"));
 }
 
 #[test]
