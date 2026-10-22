@@ -79,7 +79,10 @@ pub fn wrap(text: &str, width: usize) -> Vec<String> {
                     .map_or(rest.len(), |(index, _)| index),
                 _ => head.len(),
             };
-            lines.push(rest[..cut].trim_end().to_string());
+            let line = rest[..cut].trim_end();
+            if !line.is_empty() {
+                lines.push(line.to_string());
+            }
             rest = rest[cut..].trim_start();
         }
     }

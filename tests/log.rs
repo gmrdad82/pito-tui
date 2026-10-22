@@ -152,7 +152,10 @@ fn find_moves_to_the_next_and_previous_match_and_wraps() {
 
     let buffer = draw(&mut log, &palette, WIDTH, HEIGHT);
     let shown = rows(&buffer);
-    let at = shown.iter().position(|row| row == "needle 4999").unwrap();
+    let at = shown
+        .iter()
+        .position(|row| row.trim_end_matches(['│', '┃', ' ']) == "needle 4999")
+        .unwrap();
     let row = u16::try_from(at).unwrap();
     assert!(buffer[(0, row)].modifier.contains(Modifier::BOLD));
     assert!(!buffer[(0, row - 1)].modifier.contains(Modifier::BOLD));

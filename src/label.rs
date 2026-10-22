@@ -270,8 +270,8 @@ mod tests {
 
     #[test]
     fn a_section_converts_whole_and_is_handed_back_unchanged() {
-        let section = Section::spans(&[("Lib", red()), ("rary", bold())])
-            .short_spans(&[("L", red())]);
+        let section =
+            Section::spans(&[("Lib", red()), ("rary", bold())]).short_spans(&[("L", red())]);
         let label = Label::from(section.clone());
         assert_eq!(label.text(), "Library");
         assert_eq!(label.short_text(), "L");

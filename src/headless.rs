@@ -173,6 +173,8 @@ mod tests {
         let mut second = app();
         first.start();
         second.start();
+        first.settle();
+        second.settle();
         let one = first.frame(60, 16);
         assert_eq!(one, second.frame(60, 16));
         assert_eq!(one, first.frame(60, 16));

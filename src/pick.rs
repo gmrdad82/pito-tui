@@ -171,7 +171,9 @@ mod tests {
     impl Asker {
         fn new(count: usize) -> Self {
             Asker {
-                options: (0..count).map(|index| format!("choice {index:02}")).collect(),
+                options: (0..count)
+                    .map(|index| format!("choice {index:02}"))
+                    .collect(),
                 start: None,
                 picked: Vec::new(),
                 keys: Vec::new(),
@@ -225,7 +227,10 @@ mod tests {
     fn arrows_move_the_choice_and_enter_picks_it() {
         let mut tui = asking(Asker::new(3));
         assert!(dump::text(&tui.frame(60, 16)).contains("Pick one"));
-        keys(&mut tui, &[KeyCode::Down, KeyCode::Down, KeyCode::Up, KeyCode::Enter]);
+        keys(
+            &mut tui,
+            &[KeyCode::Down, KeyCode::Down, KeyCode::Up, KeyCode::Enter],
+        );
         assert_eq!(picked(&tui), [Some(1)]);
         assert!(!dump::text(&tui.frame(60, 16)).contains("Pick one"));
         assert_eq!(tui.find::<Asker>().unwrap().keys, [KeyCode::Char('p')]);
@@ -234,7 +239,15 @@ mod tests {
     #[test]
     fn vim_keys_and_the_ends_move_the_choice() {
         let mut tui = asking(Asker::new(5));
-        keys(&mut tui, &[KeyCode::Char('j'), KeyCode::Char('j'), KeyCode::Char('k'), KeyCode::Enter]);
+        keys(
+            &mut tui,
+            &[
+                KeyCode::Char('j'),
+                KeyCode::Char('j'),
+                KeyCode::Char('k'),
+                KeyCode::Enter,
+            ],
+        );
         tui.key(press(KeyCode::Char('p')));
         keys(&mut tui, &[KeyCode::Char('G'), KeyCode::Enter]);
         tui.key(press(KeyCode::Char('p')));
@@ -285,7 +298,8 @@ mod tests {
                 self.0.push(choice);
             }
         }
-        let mut tui = Tui::new("probe", "1.2.3", Color::Blue).screen(Section::new("One"), Custom(Vec::new()));
+        let mut tui =
+            Tui::new("probe", "1.2.3", Color::Blue).screen(Section::new("One"), Custom(Vec::new()));
         tui.start();
         tui.key(press(KeyCode::Char('p')));
         keys(&mut tui, &[KeyCode::Char('q'), KeyCode::Esc]);
@@ -297,7 +311,10 @@ mod tests {
     #[test]
     fn a_single_choice_is_picked_whatever_the_arrows_do() {
         let mut tui = asking(Asker::new(1));
-        keys(&mut tui, &[KeyCode::Down, KeyCode::Up, KeyCode::Down, KeyCode::Enter]);
+        keys(
+            &mut tui,
+            &[KeyCode::Down, KeyCode::Up, KeyCode::Down, KeyCode::Enter],
+        );
         assert_eq!(picked(&tui), [Some(0)]);
     }
 
@@ -314,10 +331,16 @@ mod tests {
     fn choices_past_the_screen_height_scroll_to_keep_the_choice_in_view() {
         let mut tui = asking(Asker::new(40));
         let text = dump::text(&tui.frame(60, 16));
-        assert!(text.contains("choice 00") && !text.contains("choice 39"), "{text}");
+        assert!(
+            text.contains("choice 00") && !text.contains("choice 39"),
+            "{text}"
+        );
         tui.key(press(KeyCode::End));
         let text = dump::text(&tui.frame(60, 16));
-        assert!(text.contains("choice 39") && !text.contains("choice 00"), "{text}");
+        assert!(
+            text.contains("choice 39") && !text.contains("choice 00"),
+            "{text}"
+        );
         keys(&mut tui, &[KeyCode::Up; 3]);
         let text = dump::text(&tui.frame(60, 16));
         assert!(text.contains("choice 36"), "{text}");
@@ -341,7 +364,10 @@ mod tests {
         let mut pick = Pick::new("Colour", ["red", "green"]);
         let rows = drawn(&mut pick, 60, 20);
         let top = rows.iter().position(|row| row.contains("Colour")).unwrap();
-        assert!(rows[top].contains('╭') && rows[top].contains('╮'), "{rows:?}");
+        assert!(
+            rows[top].contains('╭') && rows[top].contains('╮'),
+            "{rows:?}"
+        );
         assert!(rows[top + 1].contains("red"), "{rows:?}");
         assert!(rows[top + 2].contains("green"), "{rows:?}");
         assert!(rows[top + 3].contains('╰'), "{rows:?}");
@@ -353,7 +379,10 @@ mod tests {
 
     #[test]
     fn a_pick_never_draws_wider_or_taller_than_its_area() {
-        let mut pick = Pick::new("A title far wider than the screen it sits on", (0..50).map(|i| i.to_string()));
+        let mut pick = Pick::new(
+            "A title far wider than the screen it sits on",
+            (0..50).map(|i| i.to_string()),
+        );
         let rows = drawn(&mut pick, 20, 6);
         assert_eq!(rows.len(), 6);
         assert!(rows[0].starts_with('╭'), "{rows:?}");
@@ -367,7 +396,10 @@ mod tests {
         let rows = drawn(&mut pick, 40, 8);
         assert_eq!(rows[0], "Everything");
         assert_eq!(rows[1], "");
-        assert!(rows[2].contains("one") && rows[3].contains("two"), "{rows:?}");
+        assert!(
+            rows[2].contains("one") && rows[3].contains("two"),
+            "{rows:?}"
+        );
         assert!(rows.iter().all(|row| !row.contains('╭')));
     }
 

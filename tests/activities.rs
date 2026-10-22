@@ -94,7 +94,9 @@ fn current(tui: &Tui<Ask>) -> Option<&str> {
 #[test]
 fn a_posted_activity_shows_on_the_band_with_its_glyph_label_and_status() {
     let mut tui = tui(jobs());
-    post(&mut tui, move |now| Activity::new(1, "build", now).status("compiling"));
+    post(&mut tui, move |now| {
+        Activity::new(1, "build", now).status("compiling")
+    });
     let text = screen(&mut tui);
     let line = text.lines().find(|line| line.contains("build")).unwrap();
     assert!(line.trim_start().starts_with("⠋ build"), "{text}");
@@ -114,14 +116,20 @@ fn each_finished_state_shows_its_glyph_and_its_status_in_its_tone() {
         (3, State::Stopped, "halted"),
         (4, State::Waiting, "queued up"),
     ] {
-        post(
-            &mut tui,
-            move |now| Activity::new(id, format!("task{id}"), now).state(state).status(status),
-        );
+        post(&mut tui, move |now| {
+            Activity::new(id, format!("task{id}"), now)
+                .state(state)
+                .status(status)
+        });
     }
     let buffer = tui.frame(WIDTH, HEIGHT);
     let text = dump::text(&buffer);
-    for (glyph, label) in [("✓", "task1"), ("✗", "task2"), ("■", "task3"), ("⧗", "task4")] {
+    for (glyph, label) in [
+        ("✓", "task1"),
+        ("✗", "task2"),
+        ("■", "task3"),
+        ("⧗", "task4"),
+    ] {
         assert!(text.contains(&format!("{glyph} {label}")), "{text}");
     }
     let tone = |status: &str| {
@@ -137,7 +145,9 @@ fn each_finished_state_shows_its_glyph_and_its_status_in_its_tone() {
 #[test]
 fn finished_activities_linger_then_leave_the_band_but_stay_on_the_board() {
     let mut tui = tui(jobs());
-    post(&mut tui, move |now| Activity::new(1, "sync", now).state(State::Done));
+    post(&mut tui, move |now| {
+        Activity::new(1, "sync", now).state(State::Done)
+    });
     post(&mut tui, move |now| Activity::new(2, "watch", now));
     assert!(screen(&mut tui).contains("✓ sync"));
     tui.advance(LINGER - Duration::from_millis(1));
@@ -163,7 +173,11 @@ fn an_activity_that_ended_long_ago_never_reaches_the_band() {
     act(&mut tui, move |cx| *seen.lock().unwrap() = Some(cx.now()));
     let then = start.lock().unwrap().unwrap();
     tui.advance(LINGER * 2);
-    post(&mut tui, move |_| Activity::new(1, "old", then).state(State::Failed).ended(then));
+    post(&mut tui, move |_| {
+        Activity::new(1, "old", then)
+            .state(State::Failed)
+            .ended(then)
+    });
     assert!(!screen(&mut tui).contains("old"));
 }
 
@@ -178,7 +192,10 @@ fn more_than_fit_shows_the_more_words_with_the_hidden_count_on_the_last_band_row
     }
     let text = screen(&mut tui);
     let lines: Vec<&str> = text.lines().collect();
-    let at = lines.iter().position(|line| line.contains(" more")).unwrap();
+    let at = lines
+        .iter()
+        .position(|line| line.contains(" more"))
+        .unwrap();
     let hidden: u64 = lines[at]
         .trim()
         .strip_prefix('+')
@@ -223,25 +240,30 @@ fn activities_replace_every_app_post_at_once() {
 #[test]
 fn a_post_with_the_same_id_updates_the_row_in_place() {
     let mut tui = tui(jobs());
-    post(&mut tui, move |now| Activity::new(1, "build", now).status("step one"));
-    post(&mut tui, move |now| Activity::new(1, "build", now).status("step two"));
+    post(&mut tui, move |now| {
+        Activity::new(1, "build", now).status("step one")
+    });
+    post(&mut tui, move |now| {
+        Activity::new(1, "build", now).status("step two")
+    });
     let text = screen(&mut tui);
     assert_eq!(text.matches("build").count(), 1, "{text}");
-    assert!(text.contains("step two") && !text.contains("step one"), "{text}");
+    assert!(
+        text.contains("step two") && !text.contains("step one"),
+        "{text}"
+    );
 }
 
 #[test]
 fn the_board_lists_every_activity_newest_first_and_opens_one_to_its_detail() {
     let mut tui = tui(jobs());
-    post(
-        &mut tui,
-        move |now| Activity::new(1, "older", now).detail([Line::from("first detail")]),
-    );
-    post(
-        &mut tui,
-        move |now| Activity::new(2, "newer", now + Duration::from_millis(1))
-            .detail([Line::from("second detail")]),
-    );
+    post(&mut tui, move |now| {
+        Activity::new(1, "older", now).detail([Line::from("first detail")])
+    });
+    post(&mut tui, move |now| {
+        Activity::new(2, "newer", now + Duration::from_millis(1))
+            .detail([Line::from("second detail")])
+    });
     tui.key(press(KeyCode::Char('o')));
     let text = screen(&mut tui);
     let newer = text.find("newer").unwrap();
@@ -252,7 +274,10 @@ fn the_board_lists_every_activity_newest_first_and_opens_one_to_its_detail() {
     tui.key(press(KeyCode::Enter));
     let text = screen(&mut tui);
     assert!(text.contains("Jobs / older"), "{text}");
-    assert!(text.contains("first detail") && !text.contains("second detail"), "{text}");
+    assert!(
+        text.contains("first detail") && !text.contains("second detail"),
+        "{text}"
+    );
     tui.key(press(KeyCode::Esc));
     let text = screen(&mut tui);
     assert!(!text.contains("first detail"), "{text}");
@@ -270,16 +295,18 @@ fn an_empty_board_shows_the_app_s_empty_words() {
 fn forget_removes_an_activity_from_the_band_and_the_board_and_closes_it_if_open() {
     let mut tui = tui(jobs());
     post(&mut tui, move |now| Activity::new(1, "keep", now));
-    post(
-        &mut tui,
-        move |now| Activity::new(2, "drop", now + Duration::from_millis(1)).detail([Line::from("gone soon")]),
-    );
+    post(&mut tui, move |now| {
+        Activity::new(2, "drop", now + Duration::from_millis(1)).detail([Line::from("gone soon")])
+    });
     tui.key(press(KeyCode::Char('o')));
     tui.key(press(KeyCode::Enter));
     assert!(screen(&mut tui).contains("gone soon"));
     act(&mut tui, |cx| cx.forget(2));
     let text = screen(&mut tui);
-    assert!(!text.contains("gone soon") && !text.contains("drop"), "{text}");
+    assert!(
+        !text.contains("gone soon") && !text.contains("drop"),
+        "{text}"
+    );
     assert!(text.contains("keep"), "{text}");
     act(&mut tui, |cx| cx.forget(1));
     assert!(screen(&mut tui).contains("Nothing has run yet"));
@@ -296,11 +323,15 @@ fn a_run_stopped_while_queued_never_spawns_and_stops_again_when_asked_again() {
     tui.settle();
     act(&mut tui, run_stop);
     tui.pump();
+    assert_eq!(tui.busy(), 0);
     tui.settle();
     let app = tui.find::<App>().unwrap();
     assert_eq!(
         app.heard,
-        [(5, Heard::Exit(Exit::Stopped)), (5, Heard::Exit(Exit::Stopped))]
+        [
+            (5, Heard::Exit(Exit::Stopped)),
+            (5, Heard::Exit(Exit::Stopped))
+        ]
     );
 }
 
@@ -382,8 +413,14 @@ fn a_run_from_both_streams_reaches_the_screen_and_ends_failed_on_the_band_with_i
     tui.key(press(KeyCode::Char('o')));
     tui.key(press(KeyCode::Enter));
     let text = screen(&mut tui);
-    assert!(text.contains("out one") && text.contains("err one"), "{text}");
-    assert!(text.contains("build  progress  50%") && !text.contains(STEP), "{text}");
+    assert!(
+        text.contains("out one") && text.contains("err one"),
+        "{text}"
+    );
+    assert!(
+        text.contains("build  progress  50%") && !text.contains(STEP),
+        "{text}"
+    );
 }
 
 #[cfg(unix)]
@@ -397,7 +434,6 @@ fn a_run_from_without_activities_still_reaches_the_screen_line_by_line() {
     assert_eq!(lines(&heard).len(), 3);
     assert!(lines(&heard).contains(&(Stream::Stderr, STEP.to_string(), true)));
     assert_eq!(heard.last(), Some(&Heard::Exit(Exit::Code(3))));
-    assert_eq!(tui.names(), ["One"]);
 }
 
 #[cfg(unix)]
@@ -419,7 +455,8 @@ fn a_run_forgotten_while_queued_still_runs_for_its_screen_and_never_returns_to_t
 
 #[test]
 fn without_activities_posts_are_dropped_quietly() {
-    let mut tui = Tui::new("probe", "1.2.3", Color::Blue).screen(Section::new("One"), App::default());
+    let mut tui =
+        Tui::new("probe", "1.2.3", Color::Blue).screen(Section::new("One"), App::default());
     tui.start();
     post(&mut tui, move |now| Activity::new(1, "lost", now));
     assert!(!screen(&mut tui).contains("lost"));

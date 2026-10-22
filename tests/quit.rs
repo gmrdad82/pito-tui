@@ -2,7 +2,9 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use pito_tui::command::Heard;
-use pito_tui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use pito_tui::crossterm::event::{
+    Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind,
+};
 use pito_tui::ratatui::{Frame, layout::Rect, style::Color};
 use pito_tui::{Cx, Flow, Job, Palette, Screen, Tui, Wake};
 
@@ -13,6 +15,10 @@ enum When {
     Event,
     Loaded,
     Heard,
+    Paste,
+    Mouse,
+    Entered,
+    GoThenQuit,
     Never,
 }
 
@@ -53,6 +59,13 @@ impl Screen<u32> for Quitter {
         match key.code {
             KeyCode::Char('r') => cx.run(5, "sim", Command::new("true")),
             KeyCode::Char('s') => cx.stop(5),
+            KeyCode::Char('g') => {
+                self.seen.push("go");
+                cx.go(1);
+                if self.when == When::GoThenQuit {
+                    cx.quit();
+                }
+            }
             _ => self.hit("key", When::Key, cx),
         }
     }
@@ -84,6 +97,55 @@ impl Screen<u32> for Quitter {
     fn heard(&mut self, _id: u64, _heard: Heard, cx: &mut Cx<'_, u32>) {
         self.hit("heard", When::Heard, cx);
     }
+
+    fn entered(&mut self, cx: &mut Cx<'_, u32>) {
+        self.hit("entered", When::Entered, cx);
+    }
+
+    fn paste(&mut self, _text: &str, cx: &mut Cx<'_, u32>) {
+        self.hit("paste", When::Paste, cx);
+    }
+
+    fn mouse(&mut self, _mouse: MouseEvent, _area: Rect, cx: &mut Cx<'_, u32>) {
+        self.hit("mouse", When::Mouse, cx);
+    }
+}
+
+fn moved() -> MouseEvent {
+    MouseEvent {
+        kind: MouseEventKind::Moved,
+        column: 1,
+        row: 10,
+        modifiers: KeyModifiers::NONE,
+    }
+}
+
+struct Door {
+    quits: bool,
+    entered: usize,
+}
+
+impl Screen<u32> for Door {
+    fn draw(&mut self, _frame: &mut Frame, _area: Rect, _palette: &Palette) {}
+
+    fn entered(&mut self, cx: &mut Cx<'_, u32>) {
+        self.entered += 1;
+        if self.quits {
+            cx.quit();
+        }
+    }
+}
+
+fn pair(first: Quitter, quits: bool) -> Tui<u32> {
+    let mut tui = Tui::<u32>::new("quit", "1.0.0", Color::Blue)
+        .screen("One", first)
+        .screen("Two", Door { quits, entered: 0 });
+    tui.start();
+    tui
+}
+
+fn entered(tui: &Tui<u32>) -> Option<usize> {
+    tui.find::<Door>().map(|door| door.entered)
 }
 
 fn press(code: KeyCode) -> KeyEvent {
@@ -251,4 +313,60 @@ fn a_settle_that_quits_still_lands_every_read_it_took() {
     assert_eq!(tui.settle(), Flow::Quit);
     assert_eq!(seen(&tui), ["loaded"]);
     assert_eq!(tui.find::<Reader>().map(|reader| reader.landed), Some(1));
+}
+
+#[test]
+fn a_screen_that_quits_on_a_paste_quits_called_or_woken() {
+    let mut called = tui(Quitter::new(When::Paste));
+    assert_eq!(called.paste("hello"), Flow::Quit);
+    assert_eq!(seen(&called), ["paste"]);
+
+    let mut woken = tui(Quitter::new(When::Paste));
+    assert_eq!(
+        woken.handle(Wake::Input(Event::Paste("hello".into()))),
+        Flow::Quit
+    );
+    assert_eq!(seen(&woken), ["paste"]);
+}
+
+#[test]
+fn a_screen_that_quits_on_the_mouse_quits_called_or_woken() {
+    let mut called = tui(Quitter::new(When::Mouse));
+    assert_eq!(called.mouse(moved()), Flow::Quit);
+    assert_eq!(seen(&called), ["mouse"]);
+
+    let mut woken = tui(Quitter::new(When::Mouse));
+    assert_eq!(woken.handle(Wake::Input(Event::Mouse(moved()))), Flow::Quit);
+    assert_eq!(seen(&woken), ["mouse"]);
+}
+
+#[test]
+fn a_paste_or_a_mouse_move_that_does_not_quit_stays() {
+    let mut tui = tui(Quitter::new(When::Never));
+    assert_eq!(tui.paste("hello"), Flow::Stay);
+    assert_eq!(tui.mouse(moved()), Flow::Stay);
+    assert_eq!(seen(&tui), ["paste", "mouse"]);
+}
+
+#[test]
+fn a_handler_that_goes_and_quits_in_one_call_quits() {
+    let mut tui = pair(Quitter::new(When::GoThenQuit), false);
+    assert_eq!(tui.key(press(KeyCode::Char('g'))), Flow::Quit);
+    assert_eq!(seen(&tui), ["go"]);
+    assert_eq!(entered(&tui), Some(1));
+}
+
+#[test]
+fn a_handler_that_only_goes_stays() {
+    let mut tui = pair(Quitter::new(When::Never), false);
+    assert_eq!(tui.key(press(KeyCode::Char('g'))), Flow::Stay);
+    assert_eq!(entered(&tui), Some(1));
+    assert_eq!(tui.current(), Some(1));
+}
+
+#[test]
+fn a_screen_that_quits_as_it_is_entered_quits_the_key_that_led_there() {
+    let mut tui = pair(Quitter::new(When::Never), true);
+    assert_eq!(tui.key(press(KeyCode::Char('g'))), Flow::Quit);
+    assert_eq!(entered(&tui), Some(1));
 }

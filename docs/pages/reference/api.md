@@ -24,9 +24,10 @@ Tui::new(name, version, accent: Color) -> Tui<E>          // E: the app's worker
   .header_look(fn(Header) -> Header) .footer_look(fn(Footer, width: u16) -> Footer)
   .on_key(FnMut(KeyEvent, &mut Cx<E>) -> bool) .after_draw(FnMut(Duration))
   run() -> io::Result<()>, run_in(&mut Term)
-  key(KeyEvent) -> Flow, paste(&str), mouse(MouseEvent), event(screen, E), handle(Wake<E>) -> Flow
-  loaded(screen, generation, E) -> bool, changed(source), go(screen) -> bool, start()
-  pump(), settle(), advance(Duration) -> Flow, draw(&mut Frame), busy(), current(), names()
+  key(KeyEvent) -> Flow, paste(&str) -> Flow, mouse(MouseEvent) -> Flow, event(screen, E) -> Flow, handle(Wake<E>) -> Flow
+  loaded(screen, generation, E) -> bool, landed(screen, generation, E) -> Option<Flow>  // None: a late or unknown load
+  changed(source), go(screen) -> bool, start()
+  pump(), settle() -> Flow, advance(Duration) -> Flow, draw(&mut Frame), busy(), current(), names()
   find::<T>(), find_mut::<T>(), sender(), waker(screen), set_palette(..), set_words(..), set_layout(..)
   frame(w, h) -> Buffer, shot(w, h, &[KeyEvent], settle) -> Buffer, bench(w, h, frames) -> Vec<Bench>
 pub enum Flow { Stay, Quit }

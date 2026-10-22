@@ -6,6 +6,7 @@ pub const ABOUT: &str = "≈";
 
 const LADDER: [char; 8] = ['⡀', '⡄', '⡆', '⡇', '⣇', '⣧', '⣷', '⣿'];
 const TRACK: char = '⣀';
+const NUDGE: f64 = 1e-9;
 
 fn clean(fraction: f64) -> f64 {
     if fraction.is_nan() {
@@ -17,7 +18,7 @@ fn clean(fraction: f64) -> f64 {
 
 pub fn bar(fraction: f64, cells: usize) -> String {
     let total = cells * 8;
-    let steps = ((clean(fraction) * total as f64).floor() as usize).min(total);
+    let steps = ((clean(fraction) * total as f64 + NUDGE).floor() as usize).min(total);
     let (full, part) = (steps / 8, steps % 8);
     let mut text: String = std::iter::repeat_n(LADDER[7], full).collect();
     if part > 0 {
@@ -29,7 +30,7 @@ pub fn bar(fraction: f64, cells: usize) -> String {
 }
 
 pub fn percent(fraction: f64) -> u32 {
-    (clean(fraction) * 100.0).floor() as u32
+    (clean(fraction) * 100.0 + NUDGE).floor() as u32
 }
 
 pub fn share(fraction: f64, estimate: bool) -> String {

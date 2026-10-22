@@ -7,6 +7,10 @@ use unicode_width::UnicodeWidthStr;
 
 pub fn size(text: &str) -> Option<(u16, u16)> {
     let (width, height) = text.split_once(['x', 'X'])?;
+    let digits = |part: &str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
+    if !digits(width) || !digits(height) {
+        return None;
+    }
     let size = (width.parse().ok()?, height.parse().ok()?);
     (size.0 > 0 && size.1 > 0).then_some(size)
 }

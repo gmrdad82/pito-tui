@@ -215,7 +215,10 @@ mod tests {
         }
         let area = Rect::new(10, 10, 20, 10);
         assert_eq!(Spot::MIDDLE.place(area, 0, 0), Rect::new(20, 15, 0, 0));
-        assert_eq!(Spot::BOTTOM_RIGHT.place(area, 0, 0), Rect::new(30, 20, 0, 0));
+        assert_eq!(
+            Spot::BOTTOM_RIGHT.place(area, 0, 0),
+            Rect::new(30, 20, 0, 0)
+        );
         let flat = Rect::new(0, 0, 8, 0);
         assert_eq!(Spot::MIDDLE.place(flat, 2, 2), Rect::new(3, 0, 2, 0));
         assert_eq!(Spot::MIDDLE.place(Rect::ZERO, 1, 1), Rect::ZERO);
@@ -259,7 +262,10 @@ mod tests {
         for size in [0, 1, 10, 60] {
             let at = |edge: Edge| Spot::new(edge, edge).place(area, size, size);
             let starts: Vec<u16> = EDGES.iter().map(|&edge| at(edge).x).collect();
-            assert!(starts.windows(2).all(|pair| pair[0] <= pair[1]), "{starts:?}");
+            assert!(
+                starts.windows(2).all(|pair| pair[0] <= pair[1]),
+                "{starts:?}"
+            );
             assert_eq!(at(Edge::End).right(), area.right());
         }
     }
@@ -284,7 +290,13 @@ mod tests {
         assert_eq!(base.bottom(2), Layout { bottom: 2, ..base });
         assert_eq!(base.side(0), Layout { side: 0, ..base });
         assert_eq!(base.pad(6), Layout { pad: 6, ..base });
-        assert_eq!(base.head_gap(3), Layout { head_gap: 3, ..base });
+        assert_eq!(
+            base.head_gap(3),
+            Layout {
+                head_gap: 3,
+                ..base
+            }
+        );
         assert_eq!(base.gap(0), Layout { gap: 0, ..base });
         assert_eq!(
             base.small(Spot::BOTTOM_RIGHT),
@@ -295,7 +307,14 @@ mod tests {
         );
         let chained = base.top(0).bottom(1).side(2).pad(3).head_gap(4).gap(5);
         assert_eq!(
-            (chained.top, chained.bottom, chained.side, chained.pad, chained.head_gap, chained.gap),
+            (
+                chained.top,
+                chained.bottom,
+                chained.side,
+                chained.pad,
+                chained.head_gap,
+                chained.gap
+            ),
             (0, 1, 2, 3, 4, 5)
         );
     }

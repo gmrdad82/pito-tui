@@ -321,7 +321,20 @@ impl<E: Send + 'static> Tui<E> {
         screen: impl Screen<E>,
     ) -> Self {
         let role = Role::Overlay(lone(section), keys);
-        self.screens.push(Slot::new(Box::new(screen), role));
+        let at = self
+            .screens
+            .iter()
+            .position(|slot| matches!(slot.role, Role::Gate | Role::App))
+            .into_iter()
+            .chain(self.board)
+            .min()
+            .unwrap_or(self.screens.len());
+        self.screens.insert(at, Slot::new(Box::new(screen), role));
+        if let Some(board) = self.board.as_mut()
+            && *board >= at
+        {
+            *board += 1;
+        }
         self
     }
 
@@ -960,34 +973,35 @@ impl<E: Send + 'static> Tui<E> {
         self.apply()
     }
 
-    pub fn paste(&mut self, text: &str) {
+    pub fn paste(&mut self, text: &str) -> Flow {
         if self.out.takeover.is_some()
             || self.out.asking.is_some()
             || self.out.picking.is_some()
             || self.quit.asking().is_some()
         {
-            return;
+            return Flow::Stay;
         }
         if let Some(top) = self.out.modals.last_mut() {
             let (owner, id) = (top.screen, top.modal.id);
             if let Outcome::Heard(event) = top.modal.paste(text) {
                 self.call(owner, |screen, cx| screen.layer(id, event, cx));
-                self.apply();
+                return self.apply();
             }
-            return;
+            return Flow::Stay;
         }
         if let Some(index) = self.current() {
             self.call(index, |screen, cx| screen.paste(text, cx));
-            self.apply();
+            return self.apply();
         }
+        Flow::Stay
     }
 
-    pub fn mouse(&mut self, mouse: MouseEvent) {
+    pub fn mouse(&mut self, mouse: MouseEvent) -> Flow {
         if self.out.takeover.is_some() || !self.out.modals.is_empty() {
-            return;
+            return Flow::Stay;
         }
         let Some(index) = self.current() else {
-            return;
+            return Flow::Stay;
         };
         let (column, row) = (mouse.column, mouse.row);
         let down = mouse.kind == MouseEventKind::Down(MouseButton::Left);
@@ -999,14 +1013,13 @@ impl<E: Send + 'static> Tui<E> {
                 .copied();
             if let Some((kind, line)) = hit {
                 self.click(kind, line, column);
-                return;
+                return self.apply();
             }
         }
         if down && !self.gated && self.head.is_none() && self.top.contains((column, row).into()) {
-            let facts = self.screens[index].screen.facts();
             let title = self.title_text();
             let place = self
-                .header(&title, &facts, &[], &[])
+                .header(&title, &[], &[], &[])
                 .hit(self.top, column, row);
             if let Some(place) = place
                 && self.model.nav.go_to(place.group, place.section).is_some()
@@ -1014,11 +1027,11 @@ impl<E: Send + 'static> Tui<E> {
                 self.open = None;
                 self.enter();
             }
-            return;
+            return self.apply();
         }
         let area = self.content;
         self.call(index, |screen, cx| screen.mouse(mouse, area, cx));
-        self.apply();
+        self.apply()
     }
 
     fn click(&mut self, kind: Row, line: Rect, column: u16) {
@@ -1066,8 +1079,8 @@ impl<E: Send + 'static> Tui<E> {
     pub fn handle(&mut self, wake: Wake<E>) -> Flow {
         match wake {
             Wake::Input(Event::Key(key)) => return self.key(key),
-            Wake::Input(Event::Paste(text)) => self.paste(&text),
-            Wake::Input(Event::Mouse(mouse)) => self.mouse(mouse),
+            Wake::Input(Event::Paste(text)) => return self.paste(&text),
+            Wake::Input(Event::Mouse(mouse)) => return self.mouse(mouse),
             Wake::Event(screen, event) => return self.event(screen, event),
             Wake::Stamped(stamp, screen, event) => {
                 if stamp == self.out.stamp() {
@@ -1138,7 +1151,7 @@ impl<E: Send + 'static> Tui<E> {
         if let Some(index) = self.current() {
             self.begin(index);
             self.call(index, |screen, cx| screen.entered(cx));
-            self.apply();
+            self.absorb();
         }
     }
 
@@ -1148,7 +1161,7 @@ impl<E: Send + 'static> Tui<E> {
         }
         self.screens[index].started = true;
         self.call(index, |screen, cx| screen.start(cx));
-        self.apply();
+        self.absorb();
     }
 
     pub(crate) fn follow(&mut self) {
@@ -1212,6 +1225,14 @@ impl<E: Send + 'static> Tui<E> {
     }
 
     fn apply(&mut self) -> Flow {
+        self.absorb();
+        if std::mem::take(&mut self.out.quit) {
+            return Flow::Quit;
+        }
+        Flow::Stay
+    }
+
+    fn absorb(&mut self) {
         if let Some(palette) = self.out.palette.take() {
             self.palette = palette;
             self.repaint();
@@ -1297,10 +1318,6 @@ impl<E: Send + 'static> Tui<E> {
         if let Some(screen) = self.out.go.take() {
             self.go(screen);
         }
-        if std::mem::take(&mut self.out.quit) {
-            return Flow::Quit;
-        }
-        Flow::Stay
     }
 
     fn stop(&mut self, id: u64) -> Vec<Activity> {

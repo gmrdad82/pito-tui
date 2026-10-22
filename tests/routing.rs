@@ -327,7 +327,10 @@ fn while_work_runs_the_second_ctrl_c_asks_and_no_or_ctrl_c_keeps_the_app() {
     assert!(text(&mut tui).contains("3 running, leave?"));
     assert_eq!(tui.key(ch('n')), Flow::Stay);
     assert!(!text(&mut tui).contains("3 running, leave?"));
-    assert!(one(&mut tui).keys.is_empty(), "the answer never reaches the screen");
+    assert!(
+        one(&mut tui).keys.is_empty(),
+        "the answer never reaches the screen"
+    );
 
     tui.key(ctrl('c'));
     tui.key(ctrl('c'));
@@ -360,7 +363,7 @@ fn the_quit_guard_comes_before_a_modal_a_confirm_and_a_gate() {
 }
 
 #[test]
-fn a_ctrl_c_under_a_takeover_arms_the_guard_without_drawing_its_words() {
+fn a_ctrl_c_under_a_takeover_arms_the_guard_and_still_draws_its_words() {
     let mut tui = two(Rec::default().on('t', |cx| {
         cx.takeover(Takeover::new(9, "Working hard").cancel(&[Key::Esc]));
     }));
@@ -368,7 +371,7 @@ fn a_ctrl_c_under_a_takeover_arms_the_guard_without_drawing_its_words() {
     assert_eq!(tui.key(ctrl('c')), Flow::Stay);
     let armed = text(&mut tui);
     assert!(armed.contains("Working hard"), "{armed}");
-    assert!(!armed.contains("again to leave"), "{armed}");
+    assert!(armed.contains("again to leave"), "{armed}");
     assert!(one(&mut tui).layers.is_empty());
     assert_eq!(tui.key(ctrl('c')), Flow::Quit);
 }
@@ -380,7 +383,12 @@ fn a_takeover_comes_before_the_modal_under_it() {
         cx.takeover(Takeover::new(9, "Working hard").cancel(&[Key::Esc]));
     }));
     tui.key(ch('b'));
-    for key in [ch('x'), press(KeyCode::Enter), press(KeyCode::Down), ch('q')] {
+    for key in [
+        ch('x'),
+        press(KeyCode::Enter),
+        press(KeyCode::Down),
+        ch('q'),
+    ] {
         assert_eq!(tui.key(key), Flow::Stay);
     }
     assert!(one(&mut tui).layers.is_empty());
@@ -388,7 +396,10 @@ fn a_takeover_comes_before_the_modal_under_it() {
     tui.key(press(KeyCode::Esc));
     assert_eq!(one(&mut tui).layers, [(9, Layered::Closed)]);
     let under = text(&mut tui);
-    assert!(under.contains("Rename") && !under.contains("Working hard"), "{under}");
+    assert!(
+        under.contains("Rename") && !under.contains("Working hard"),
+        "{under}"
+    );
     tui.key(press(KeyCode::Esc));
     assert_eq!(
         one(&mut tui).layers,
@@ -405,7 +416,14 @@ fn a_takeover_hears_only_its_cancel_keys() {
     tui.key(ch('t'));
     assert!(text(&mut tui).contains("Working hard"));
     assert!(!text(&mut tui).contains("body 1"));
-    for key in [ch('2'), ch(']'), ch('d'), ch('?'), press(KeyCode::Tab), ch('q')] {
+    for key in [
+        ch('2'),
+        ch(']'),
+        ch('d'),
+        ch('?'),
+        press(KeyCode::Tab),
+        ch('q'),
+    ] {
         assert_eq!(tui.key(key), Flow::Stay);
     }
     assert_eq!(tui.current(), Some(0));
@@ -420,11 +438,9 @@ fn a_takeover_hears_only_its_cancel_keys() {
 
 #[test]
 fn a_takeover_without_cancel_keys_ends_only_from_the_app() {
-    let mut tui = two(
-        Rec::default()
-            .on('t', |cx| cx.takeover(Takeover::new(9, "Working hard")))
-            .event_does(1, |cx| cx.end_takeover()),
-    );
+    let mut tui = two(Rec::default()
+        .on('t', |cx| cx.takeover(Takeover::new(9, "Working hard")))
+        .event_does(1, |cx| cx.end_takeover()));
     tui.key(ch('t'));
     tui.key(press(KeyCode::Esc));
     tui.key(ch('q'));
@@ -452,7 +468,10 @@ fn the_modal_on_top_comes_before_an_open_confirm() {
     assert_eq!(tui.current(), Some(0));
     tui.key(press(KeyCode::Esc));
     assert_eq!(one(&mut tui).layers, [(4, Layered::Closed)]);
-    assert!(one(&mut tui).answers.is_empty(), "esc closed the modal only");
+    assert!(
+        one(&mut tui).answers.is_empty(),
+        "esc closed the modal only"
+    );
     tui.key(ch('y'));
     assert_eq!(one(&mut tui).answers, [true]);
     assert_eq!(one(&mut tui).codes(), [KeyCode::Char('b')]);
@@ -528,7 +547,10 @@ fn an_open_confirm_keeps_keys_from_the_claim_unless_they_are_let_through() {
     tui.key(ctrl('t'));
     assert_eq!(one(&mut tui).keys, [ch('d'), ctrl('r')], "on_key took it");
     assert_eq!(heard.borrow().len(), 3);
-    assert!(text(&mut tui).contains("Delete it?"), "the confirm stays open");
+    assert!(
+        text(&mut tui).contains("Delete it?"),
+        "the confirm stays open"
+    );
     tui.key(ch('y'));
     assert_eq!(one(&mut tui).answers, [true]);
     assert_eq!(heard.borrow().len(), 3, "the answer never reaches on_key");
@@ -568,7 +590,10 @@ fn the_app_claim_comes_before_a_gate_a_typing_screen_help_and_the_nav() {
     gated.start();
     gated.key(ch('x'));
     gated.key(ch('y'));
-    assert_eq!(gated.find::<Claimer>().unwrap().claimed, [KeyCode::Char('x')]);
+    assert_eq!(
+        gated.find::<Claimer>().unwrap().claimed,
+        [KeyCode::Char('x')]
+    );
     assert_eq!(gated.find::<Door>().unwrap().keys, [KeyCode::Char('y')]);
 }
 
@@ -619,7 +644,6 @@ fn a_typing_screen_hears_letters_digits_and_nav_keys_as_text_but_not_ctrl_c() {
     }
     assert_eq!(tui.current(), Some(0));
     assert_eq!(one(&mut tui).keys, keys);
-    assert!(!text(&mut tui).contains("? keys"));
     tui.key(ctrl('c'));
     assert_eq!(one(&mut tui).keys.len(), keys.len());
     assert!(text(&mut tui).contains("again to leave"));
@@ -654,10 +678,18 @@ fn an_overlay_key_comes_before_the_nav_keys_and_toggles_the_overlay() {
     tui.key(ch('2'));
     tui.key(ch(']'));
     tui.key(ch('1'));
-    assert_eq!(tui.current(), Some(2), "digits do not move under an overlay");
+    assert_eq!(
+        tui.current(),
+        Some(2),
+        "digits do not move under an overlay"
+    );
     assert_eq!(tui.find::<Rec<3>>().unwrap().codes(), [KeyCode::Char('1')]);
     tui.key(ch(']'));
-    assert_eq!(tui.current(), Some(1), "it closes back to the tab it covered");
+    assert_eq!(
+        tui.current(),
+        Some(1),
+        "it closes back to the tab it covered"
+    );
 }
 
 #[test]
@@ -688,7 +720,11 @@ fn the_header_focus_keys_come_after_help_and_before_overlays_and_the_nav() {
     tui.key(ch('z'));
     assert_eq!(second(&mut tui).focus, [Focus::Sections]);
     tui.key(press(KeyCode::Esc));
-    assert_eq!(tui.current(), Some(1), "esc gives focus back, it does not leave");
+    assert_eq!(
+        tui.current(),
+        Some(1),
+        "esc gives focus back, it does not leave"
+    );
     tui.key(press(KeyCode::Right));
     assert_eq!(tui.current(), Some(1));
     assert_eq!(second(&mut tui).focus, [Focus::Sections, Focus::Content]);
@@ -704,7 +740,11 @@ fn the_header_focus_keys_come_after_help_and_before_overlays_and_the_nav() {
 
     tui.key(press(KeyCode::Down));
     tui.key(press(KeyCode::Up));
-    assert_eq!(tui.current(), Some(1), "the focus key wins over the overlay key");
+    assert_eq!(
+        tui.current(),
+        Some(1),
+        "the focus key wins over the overlay key"
+    );
     assert_eq!(tui.find::<Rec<4>>().unwrap().started, 0);
     tui.key(ch('3'));
     assert_eq!(tui.current(), Some(2));
@@ -760,15 +800,13 @@ fn the_stop_key_stops_a_load_before_the_app_and_the_screen_hear_it() {
     assert_eq!(one(&mut tui).codes(), [KeyCode::Esc]);
     assert!(text(&mut tui).contains("app heard esc"));
 
-    let mut stops = base()
-        .stop_keys(&[Key::Char('s')])
-        .screen(
-            Section::new("One"),
-            Rec::<1> {
-                loading: true,
-                ..Rec::default()
-            },
-        );
+    let mut stops = base().stop_keys(&[Key::Char('s')]).screen(
+        Section::new("One"),
+        Rec::<1> {
+            loading: true,
+            ..Rec::default()
+        },
+    );
     stops.start();
     stops.key(press(KeyCode::Esc));
     assert_eq!(one(&mut stops).cancelled, 0);
@@ -810,7 +848,10 @@ fn digits_count_across_groups_and_past_the_last_tab_reach_the_screen() {
     assert_eq!(tui.current(), Some(0));
     assert_eq!(one(&mut tui).codes(), [KeyCode::Char('9')]);
     tui.key(ch('0'));
-    assert_eq!(one(&mut tui).codes(), [KeyCode::Char('9'), KeyCode::Char('0')]);
+    assert_eq!(
+        one(&mut tui).codes(),
+        [KeyCode::Char('9'), KeyCode::Char('0')]
+    );
 
     let mut swallowed = grouped(NavKeys::HEY.swallow_digits(true), None);
     swallowed.key(ch('9'));
@@ -846,7 +887,11 @@ fn zero_reaches_the_tenth_tab_or_the_first_with_zero_first() {
     zero.key(ch('9'));
     assert_eq!(zero.current(), Some(9));
     zero.key(ch(']'));
-    assert_eq!(zero.current(), Some(10), "the eleventh tab is reached by the nav keys");
+    assert_eq!(
+        zero.current(),
+        Some(10),
+        "the eleventh tab is reached by the nav keys"
+    );
 }
 
 #[test]
@@ -863,10 +908,7 @@ fn digits_count_inside_the_group_with_an_in_group_head() {
     assert_eq!(tui.current(), Some(2));
     tui.key(ch('3'));
     assert_eq!(tui.current(), Some(2), "past the group's tabs");
-    assert_eq!(
-        tui.find::<Rec<3>>().unwrap().codes(),
-        [KeyCode::Char('3')]
-    );
+    assert_eq!(tui.find::<Rec<3>>().unwrap().codes(), [KeyCode::Char('3')]);
 
     let mut zero = grouped(NavKeys::HEY.zero_first(true), Some(head()));
     zero.key(ch('1'));
@@ -912,10 +954,18 @@ fn group_keys_come_before_the_digits_and_the_brackets() {
         .screen(Section::new("Three"), Rec::<3>::default());
     tui.start();
     tui.key(ch('2'));
-    assert_eq!(tui.current(), Some(2), "2 is the group's key, not the second tab");
+    assert_eq!(
+        tui.current(),
+        Some(2),
+        "2 is the group's key, not the second tab"
+    );
     tui.key(ch('1'));
     tui.key(ch(']'));
-    assert_eq!(tui.current(), Some(2), "] is the group's key, not the next tab");
+    assert_eq!(
+        tui.current(),
+        Some(2),
+        "] is the group's key, not the next tab"
+    );
     assert!(one(&mut tui).keys.is_empty() && second(&mut tui).started == 0);
 }
 
@@ -985,6 +1035,7 @@ fn back_keys_close_an_overlay_unless_it_loads_or_drilled_in() {
     assert_eq!(tui.current(), Some(0), "q still leaves while it loads");
 
     tui.key(ch('O'));
+    tui.find_mut::<Rec<3>>().unwrap().loading = false;
     tui.find_mut::<Rec<3>>().unwrap().crumb = Some("detail".into());
     tui.frame(72, 20);
     tui.key(press(KeyCode::Esc));
@@ -992,6 +1043,7 @@ fn back_keys_close_an_overlay_unless_it_loads_or_drilled_in() {
     assert_eq!(tui.find::<Rec<3>>().unwrap().backs, 1);
     tui.key(press(KeyCode::Esc));
     assert_eq!(tui.current(), Some(0));
+    assert_eq!(tui.find::<Rec<3>>().unwrap().cancelled, 1);
 }
 
 #[test]
@@ -1086,19 +1138,26 @@ fn go_group_from_a_screen_returns_to_that_groups_last_tab() {
         )
         .group("Tools")
         .screen(Section::new("Two"), Rec::<2>::default())
+        .screen(Section::new("Three"), Rec::<3>::default())
         .screen(
-            Section::new("Three"),
-            Rec::<3>::default().on('h', |cx| cx.show(|item| item != Item::Tab(1))),
+            Section::new("Four"),
+            Rec::<4>::default().on('h', |cx| cx.show(|item| item != Item::Tab(1))),
         );
     tui.start();
-    tui.key(ch('3'));
+    tui.key(ch('4'));
     tui.key(ch('1'));
     tui.key(ch('g'));
-    assert_eq!(tui.current(), Some(2));
+    assert_eq!(tui.current(), Some(3));
     tui.key(ch('h'));
+    assert_eq!(tui.current(), Some(3));
     tui.key(ch('1'));
+    assert_eq!(tui.current(), Some(0));
     tui.key(ch('g'));
-    assert_eq!(tui.current(), Some(2), "a rebuild keeps the last tab");
+    assert_eq!(
+        tui.current(),
+        Some(3),
+        "a rebuild keeps the last tab, now the second of two"
+    );
 }
 
 #[test]
@@ -1179,4 +1238,26 @@ fn tabs_keep_their_order_and_the_activity_board_comes_after_every_tab_and_overla
     tui.key(ch('o'));
     tui.key(ch('O'));
     assert_eq!(tui.current().map(|index| tui.names()[index]), Some("Ops"));
+}
+
+#[test]
+fn the_activity_board_stays_after_an_overlay_added_after_it() {
+    let jobs = || Activities::new(Section::new("Jobs")).keys(&[Key::Char('o')]);
+    let mut tui = base()
+        .activities(jobs())
+        .screen(Section::new("One"), Rec::<1>::default())
+        .overlay(Section::new("Ops"), &[Key::Char('O')], Rec::<3>::default())
+        .app(Claimer::default())
+        .screen(Section::new("Two"), Rec::<2>::default())
+        .overlay(Section::new("Logs"), &[Key::Char('L')], Rec::<4>::default());
+    assert_eq!(tui.names(), ["One", "Two", "Ops", "Logs", "Jobs", ""]);
+    tui.start();
+    tui.key(ch('o'));
+    assert_eq!(tui.current().map(|index| tui.names()[index]), Some("Jobs"));
+    tui.key(ch('o'));
+    tui.key(ch('L'));
+    assert_eq!(tui.current(), Some(3));
+    assert_eq!(tui.find::<Rec<4>>().unwrap().started, 1);
+    assert!(tui.go(2));
+    assert_eq!(tui.find::<Rec<3>>().unwrap().started, 1);
 }

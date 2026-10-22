@@ -63,7 +63,6 @@ pub struct Folds {
     now: Option<Instant>,
     top: u16,
     total: u16,
-    area: Rect,
     tops: Vec<u16>,
     placed: Vec<Placed>,
     scratch: Buffer,
@@ -159,7 +158,6 @@ impl Folds {
             now: None,
             top: 0,
             total: 0,
-            area: Rect::ZERO,
             tops: Vec::new(),
             placed: Vec::new(),
             scratch: Buffer::empty(Rect::ZERO),
@@ -376,7 +374,6 @@ impl Folds {
         let count = self.entries.len().min(sections.len());
         self.placed.clear();
         self.tops.clear();
-        self.area = area;
         let mut total = 0u16;
         for (index, section) in sections.iter().enumerate().take(count) {
             if index > 0 {

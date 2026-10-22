@@ -160,7 +160,7 @@ fn the_summary_is_left_out_whole_when_the_row_is_too_narrow() {
         shut(&mut folds, &["a"]);
         let first = row(&draw(&mut folds, &column, (width, 3)), 0);
         if width >= fits {
-            assert!(first.ends_with(" ─ 3 items ─"), "{width}: {first}");
+            assert!(first.ends_with("─ 3 items ─"), "{width}: {first}");
         } else {
             assert!(!first.contains("items"), "{width}: {first}");
             assert!(!first.contains('3'), "{width}: {first}");

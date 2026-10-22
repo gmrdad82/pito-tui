@@ -39,7 +39,8 @@ activity ends on the `end` line, or with the command's exit status.
 - the names `enter`, `esc`, `up`, `down`, `left`, `right`, `pgup`, `pgdn`,
   `home`, `end`, `backspace`, `delete`, `space`, `tab` and `backtab`, in any
   case;
-- `ctrl+` or `alt+` followed by one character, such as `ctrl+k`;
+- `ctrl+` or `alt+`, in lowercase, followed by one character, such as
+  `ctrl+k`;
 - any other word types its characters one by one, so `foo` is `f`, `o`,
   `o`.
 
@@ -48,8 +49,8 @@ returned as that word.
 
 ## Sizes
 
-`dump::size("120x34")` reads `WIDTHxHEIGHT` (an `X` works too), both above
-zero.
+`dump::size("120x34")` reads `WIDTHxHEIGHT` (an `X` works too), both plain
+digits above zero; a sign, a space or anything else is refused.
 
 ## Text dumps
 
@@ -78,7 +79,9 @@ tmp/before/
 
 A screen's folder is its index among the app's screens, two digits, then its
 name; a script's is its name. Names are lowercased, with each run of other
-characters turned into one `-`.
+characters turned into one `-`. A name with no letters or digits is refused
+(`InvalidInput`), and so is a walk whose scenarios land in the same folder
+(`AlreadyExists`), before anything is written.
 
 Each file is one frame, as text:
 
@@ -102,6 +105,11 @@ pito-tui frame 1
   bold) or `78 Reset Reset 2` (78 dim cells). Colours are ratatui's names
   (`Reset`, `Red`, ...), `#RRGGBB` or an index.
 
+A frame whose head or size line doesn't parse, that ends early, whose row
+holds more or fewer symbols than its width, whose runs don't add up to
+exactly its width, or whose size line disagrees with its file name is
+refused (`InvalidData`).
+
 ## Differences
 
 `capture::compare` and `Recorder::finish` return `capture::Difference`s,
@@ -117,5 +125,9 @@ gone 80x24: -
   (its symbol, foreground, background and modifiers).
 - `+`: a frame only the new walk draws (`Added`).
 - `-`: a frame only the capture holds (`Removed`).
+
+The added and changed frames come in the walk's order (for `compare_dirs`,
+by scenario, then by size), and the removed ones after them, by scenario,
+then by size.
 
 The demo's `--compare` exits 1 when any frame differs.

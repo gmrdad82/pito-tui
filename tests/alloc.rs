@@ -196,6 +196,12 @@ impl Band for Strip {
 }
 
 fn typical<S: Screen<()>>(make: impl Fn() -> S, stack: bool) -> Tui<()> {
+    let mut tui = built(make, stack);
+    tui.start();
+    tui
+}
+
+fn built<S: Screen<()>>(make: impl Fn() -> S, stack: bool) -> Tui<()> {
     let tui = Tui::<()>::new("steady", "1.0.0", Color::Cyan)
         .title_spans([
             ("Stea", Style::new().add_modifier(Modifier::BOLD)),
@@ -209,7 +215,7 @@ fn typical<S: Screen<()>>(make: impl Fn() -> S, stack: bool) -> Tui<()> {
         .group("Files")
         .screen("Docs", make())
         .band(Strip);
-    let mut tui = if stack {
+    if stack {
         tui.head(Head::new([
             Row::Title,
             Row::Caption,
@@ -220,9 +226,7 @@ fn typical<S: Screen<()>>(make: impl Fn() -> S, stack: bool) -> Tui<()> {
         ]))
     } else {
         tui.keep_facts(true)
-    };
-    tui.start();
-    tui
+    }
 }
 
 fn steady(tui: &mut Tui<()>, width: u16, height: u16) -> (usize, Buffer) {
@@ -269,6 +273,18 @@ fn a_steady_frame_of_a_screen_on_the_defaults_allocates_nothing() {
     for stack in [true, false] {
         for (width, height) in SIZES {
             let mut tui = typical(|| Plain, stack);
+            let (count, _) = steady(&mut tui, width, height);
+            assert_eq!(count, 0, "{width}x{height} stack {stack}");
+        }
+    }
+}
+
+#[test]
+fn a_steady_gated_frame_allocates_nothing() {
+    for stack in [true, false] {
+        for (width, height) in SIZES {
+            let mut tui = built(Borrowed::new, stack).gate(Plain, true);
+            tui.start();
             let (count, _) = steady(&mut tui, width, height);
             assert_eq!(count, 0, "{width}x{height} stack {stack}");
         }

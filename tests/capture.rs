@@ -619,7 +619,7 @@ fn a_frame_with_another_head_is_refused() {
         "no-head",
         ESCAPES.replacen("pito-tui frame 1\n", "", 1).as_bytes(),
     );
-    refused("empty", b"");
+    refused("empty-file", b"");
 }
 
 #[test]

@@ -627,7 +627,10 @@ mod tests {
         assert_eq!((end.state.as_str(), end.ok), ("end", Some(true)));
         assert_eq!(end.message.as_deref(), Some("pdispatch 0.9.1 is installed"));
         let bare = read(r#"{"state":"start"}"#).unwrap();
-        assert_eq!((bare.stage, bare.fraction, bare.message, bare.ok), (None, None, None, None));
+        assert_eq!(
+            (bare.stage, bare.fraction, bare.message, bare.ok),
+            (None, None, None, None)
+        );
     }
 
     #[test]
@@ -650,7 +653,10 @@ mod tests {
             assert_eq!(read(line), None, "{line}");
         }
         assert!(read(r#"{"v":1,"state":"start"}"#).is_some());
-        assert_eq!(read(r#"{"state":"x","fraction":"half"}"#).unwrap().fraction, None);
+        assert_eq!(
+            read(r#"{"state":"x","fraction":"half"}"#).unwrap().fraction,
+            None
+        );
         assert_eq!(read(r#"{"state":"x","ok":"yes"}"#).unwrap().ok, None);
         assert_eq!(read(r#"{"state":"x","msg":""}"#).unwrap().message, None);
     }
@@ -695,7 +701,10 @@ mod tests {
         assert_eq!(Exit::Signal(9).state(), State::Failed);
         assert_eq!(Exit::Stopped.state(), State::Stopped);
         assert_eq!(Exit::Error("gone".into()).state(), State::Failed);
-        assert_eq!(Exit::of(Err(io::Error::other("gone"))), Exit::Error("gone".into()));
+        assert_eq!(
+            Exit::of(Err(io::Error::other("gone"))),
+            Exit::Error("gone".into())
+        );
     }
 
     #[cfg(unix)]
@@ -808,7 +817,10 @@ mod tests {
         assert_eq!(report.activity.state, State::Failed);
         assert!(!report.activity.status.is_empty());
         assert!(report.activity.ended.is_some());
-        assert!(matches!(report.heard.as_slice(), [Heard::Exit(Exit::Error(_))]));
+        assert!(matches!(
+            report.heard.as_slice(),
+            [Heard::Exit(Exit::Error(_))]
+        ));
     }
 
     #[cfg(unix)]

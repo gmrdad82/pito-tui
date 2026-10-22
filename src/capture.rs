@@ -161,6 +161,17 @@ fn slug(name: &str) -> String {
     out.trim_end_matches('-').to_string()
 }
 
+fn named(name: &str) -> io::Result<String> {
+    let slug = slug(name);
+    if slug.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            name.to_string(),
+        ));
+    }
+    Ok(slug)
+}
+
 fn screen(index: usize, name: &str) -> String {
     format!("{index:02}-{}", slug(name))
 }
@@ -169,8 +180,11 @@ fn file((width, height): (u16, u16)) -> String {
     format!("{width}x{height}")
 }
 
-fn runs<E: Send + 'static>(walk: &Walk, app: &dyn Fn() -> Tui<E>) -> Vec<(String, Run)> {
-    let mut runs = Vec::new();
+fn runs<E: Send + 'static>(
+    walk: &Walk,
+    app: &dyn Fn() -> Tui<E>,
+) -> io::Result<Vec<(String, Run)>> {
+    let mut runs: Vec<(String, Run)> = Vec::new();
     if walk.screens {
         let tui = app();
         for (index, name) in tui.names().into_iter().enumerate() {
@@ -180,9 +194,18 @@ fn runs<E: Send + 'static>(walk: &Walk, app: &dyn Fn() -> Tui<E>) -> Vec<(String
         }
     }
     for (index, script) in walk.scripts.iter().enumerate() {
-        runs.push((slug(&script.name), Run::Script(index)));
+        runs.push((named(&script.name)?, Run::Script(index)));
     }
-    runs
+    let mut seen = HashSet::new();
+    for (scenario, _) in &runs {
+        if !seen.insert(scenario.as_str()) {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                scenario.clone(),
+            ));
+        }
+    }
+    Ok(runs)
 }
 
 fn render<E: Send + 'static>(
@@ -301,18 +324,26 @@ fn decode(text: &str) -> io::Result<Frame> {
         .split_once(' ')
         .and_then(|(width, height)| Some((width.parse().ok()?, height.parse().ok()?)))
         .ok_or_else(|| broken(size))?;
-    let mut cells = Vec::with_capacity(usize::from(width) * usize::from(height));
+    let width_cells = usize::from(width);
+    let mut cells = Vec::with_capacity(width_cells * usize::from(height));
     for _ in 0..height {
         let symbols = lines.next().ok_or_else(|| broken(size))?;
         let runs = lines.next().ok_or_else(|| broken(size))?;
-        let mut row: Vec<Look> = symbols
-            .split('\t')
-            .map(|symbol| Look {
-                symbol: unescape(symbol),
-                ..Look::default()
-            })
-            .collect();
-        let mut x = 0;
+        let mut row: Vec<Look> = if symbols.is_empty() && width == 0 {
+            Vec::new()
+        } else {
+            symbols
+                .split('\t')
+                .map(|symbol| Look {
+                    symbol: unescape(symbol),
+                    ..Look::default()
+                })
+                .collect()
+        };
+        if row.len() != width_cells {
+            return Err(broken(symbols));
+        }
+        let mut x: usize = 0;
         for run in runs.split('\t').filter(|run| !run.is_empty()) {
             let mut parts = run.split(' ');
             let (Some(count), Some(fg), Some(bg), Some(modifier)) =
@@ -327,9 +358,11 @@ fn decode(text: &str) -> io::Result<Frame> {
                 look.bg = bg.to_string();
                 look.modifier = modifier;
             }
-            x += count;
+            x = x.checked_add(count).ok_or_else(|| broken(run))?;
         }
-        row.resize(usize::from(width), Look::default());
+        if x != width_cells {
+            return Err(broken(runs));
+        }
         cells.extend(row);
     }
     Ok(Frame {
@@ -337,6 +370,14 @@ fn decode(text: &str) -> io::Result<Frame> {
         height,
         cells,
     })
+}
+
+fn load(path: &Path, size: (u16, u16)) -> io::Result<Frame> {
+    let frame = decode(&fs::read_to_string(path)?)?;
+    if (frame.width, frame.height) != size {
+        return Err(broken(&path.display().to_string()));
+    }
+    Ok(frame)
 }
 
 fn cells(scenario: &str, size: (u16, u16), before: &Frame, after: &Frame) -> Vec<Difference> {
@@ -425,9 +466,8 @@ impl Against {
 
     fn frame(&mut self, scenario: &str, size: (u16, u16), after: &Frame) -> io::Result<()> {
         let path = self.path(scenario, size);
-        match fs::read_to_string(&path) {
-            Ok(text) => {
-                let before = decode(&text)?;
+        match load(&path, size) {
+            Ok(before) => {
                 self.differences
                     .extend(cells(scenario, size, &before, after));
             }
@@ -447,8 +487,7 @@ impl Against {
             .filter(|saved| !self.seen.contains(&saved.path))
             .map(|Saved { scenario, size, .. }| Difference::Removed { scenario, size })
             .collect();
-        removed.sort_by_key(ToString::to_string);
-        self.differences.extend(removed);
+        self.differences.append(&mut removed);
         Ok(self.differences)
     }
 }
@@ -495,7 +534,7 @@ impl Recorder {
     }
 
     pub fn record(&mut self, name: &str, buffer: &Buffer) -> io::Result<()> {
-        self.write(&slug(name), buffer)
+        self.write(&named(name)?, buffer)
     }
 
     pub fn frames(&self) -> usize {
@@ -536,8 +575,9 @@ pub fn capture<E: Send + 'static>(
     app: impl Fn() -> Tui<E>,
 ) -> io::Result<usize> {
     fresh(dir)?;
+    let runs = runs(walk, &app)?;
     let mut frames = 0;
-    for (scenario, run) in runs(walk, &app) {
+    for (scenario, run) in runs {
         let folder = dir.join(&scenario);
         fs::create_dir_all(&folder)?;
         for &size in &walk.sizes {
@@ -555,7 +595,7 @@ pub fn compare<E: Send + 'static>(
     app: impl Fn() -> Tui<E>,
 ) -> io::Result<Vec<Difference>> {
     let mut against = Against::new(dir);
-    for (scenario, run) in runs(walk, &app) {
+    for (scenario, run) in runs(walk, &app)? {
         for &size in &walk.sizes {
             let after = decode(&encode(&render(&app, walk, &run, size)))?;
             against.frame(&scenario, size, &after)?;
@@ -568,7 +608,7 @@ pub fn compare_dirs(before: &Path, after: &Path) -> io::Result<Vec<Difference>> 
     fs::read_dir(before)?;
     let mut against = Against::new(before);
     for saved in frames(after)? {
-        let frame = decode(&fs::read_to_string(&saved.path)?)?;
+        let frame = load(&saved.path, saved.size)?;
         against.frame(&saved.scenario, saved.size, &frame)?;
     }
     against.finish()

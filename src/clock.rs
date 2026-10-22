@@ -312,7 +312,9 @@ mod tests {
         let since = Instant::now();
         let units = plain();
         let just_before = Duration::from_millis(1);
-        for gone in [0, 1, 59, 60, 61, 3_599, 3_600, 3_601, 86_399, 172_799, 172_800, 300_000] {
+        for gone in [
+            0, 1, 59, 60, 61, 3_599, 3_600, 3_601, 86_399, 172_799, 172_800, 300_000,
+        ] {
             let now = since + secs(gone);
             let shown = age(secs(gone), &units);
             let next = next_age(since, now) - since;

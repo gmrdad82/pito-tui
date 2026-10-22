@@ -138,7 +138,12 @@ mod tests {
         let mut pace = Pace::default();
         pace.drew(now);
         let past = start + Duration::from_secs(2);
-        let woke = wait_until(now, false, &pace, &[Some(now + Duration::from_secs(5)), Some(past)]);
+        let woke = wait_until(
+            now,
+            false,
+            &pace,
+            &[Some(now + Duration::from_secs(5)), Some(past)],
+        );
         assert_eq!(woke, Some(past));
         assert!(woke.is_some_and(|at| at <= now));
         assert_eq!(wait_until(now, false, &pace, &[Some(now)]), Some(now));

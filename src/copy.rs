@@ -96,7 +96,11 @@ mod tests {
             let bytes = &all[..len];
             let encoded = base64(bytes);
             assert_eq!(encoded.len(), len.div_ceil(3) * 4, "{len} bytes");
-            assert_eq!(encoded.trim_end_matches('=').len(), (len * 4).div_ceil(3), "{len} bytes");
+            assert_eq!(
+                encoded.trim_end_matches('=').len(),
+                (len * 4).div_ceil(3),
+                "{len} bytes"
+            );
             assert!(
                 encoded
                     .bytes()

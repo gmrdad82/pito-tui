@@ -62,7 +62,8 @@ footer, in place of the activity band.
 `Cx::takeover(Takeover)` covers the app for an app-wide transition: its text
 on the title rule, the hourglass under it, the tabs and footer hidden, and
 every key ignored but its cancel keys and the quit guard, until
-`Cx::end_takeover()`.
+`Cx::end_takeover()`. A first `ctrl+c` still draws the guard's words on the
+bottom row.
 
 ```rust
 let takeover = Takeover::new(SWITCHING, "demo · workspace two")
@@ -120,7 +121,10 @@ $ demo --dump 80x12 --keys "ctrl+k l o c k enter"
 
 - `Tui::overlay(section, keys, screen)` opens an app's own screen over any
   screen by its keys, the way the activity screen opens: the tabs unlit, only
-  the back keys, its own breadcrumb row.
+  the back keys, its own breadcrumb row. Overlays come after every tab, in
+  the order added, and before the activity screen, the gate and the app, so
+  their indices for `go`, `waker` and `event` don't move with the builder
+  chain.
 - `Tui::layout(Layout::new()...)` (or `Cx::layout`) sets the margins, the
   content's padding and the gaps under the header and above the footer. A
   `Spot` places a box by an `Edge` on each axis (`Start`, `Third`, `Middle`,

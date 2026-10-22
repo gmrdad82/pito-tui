@@ -474,8 +474,10 @@ chart.
   the activity screen opens: by its keys over any screen, the tabs unlit,
   only the back keys, its own breadcrumb row (the section's name, then the
   screen's crumb: "Operations / update pfx"), and its confirms and picks
-  answered to it. Overlays come after every tab, in the order added; a
-  screen that wants a digit to switch tabs from it calls `Cx::go`.
+  answered to it. Overlays come after every tab, in the order added, and
+  before the activity screen, the gate and the app, wherever they sit in
+  the builder chain; a screen that wants a digit to switch tabs from it
+  calls `Cx::go`.
 - **Commands on the band.** `Cx::run(id, label, Command)` runs a child
   command and follows the `--progress json` lines the PITO MD command-line
   tools print (version 1: one object a line with `state` start, progress,
@@ -627,7 +629,7 @@ Tui::new(name, version, accent: Color) -> Tui<E>          // E: the app's worker
   .header_look(fn(Header) -> Header) .footer_look(fn(Footer, width: u16) -> Footer)
   .on_key(FnMut(KeyEvent, &mut Cx<E>) -> bool) .after_draw(FnMut(Duration))
   run() -> io::Result<()>, run_in(&mut Term)
-  key(KeyEvent) -> Flow, paste(&str), mouse(MouseEvent), event(screen, E) -> Flow, handle(Wake<E>) -> Flow
+  key(KeyEvent) -> Flow, paste(&str) -> Flow, mouse(MouseEvent) -> Flow, event(screen, E) -> Flow, handle(Wake<E>) -> Flow
   loaded(screen, generation, E) -> bool, landed(screen, generation, E) -> Option<Flow>  // None: a late or unknown load
   changed(source), go(screen) -> bool, start()
   pump(), settle() -> Flow, advance(Duration) -> Flow, draw(&mut Frame), busy(), current(), names()
