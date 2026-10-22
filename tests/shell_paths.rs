@@ -16,7 +16,8 @@ use pito_tui::ratatui::{
     style::{Color, Style},
     widgets::Paragraph,
 };
-use pito_tui::{Cx, Flow, Item, Palette, Screen, Tui, Wake, Words, dump};
+use pito_tui::footer::{Input, InputBar};
+use pito_tui::{Activities, Activity, Cx, Flow, Item, Palette, Screen, Tui, Wake, Words, dump};
 
 type Log = Rc<RefCell<Vec<String>>>;
 type Act = fn(&mut Cx<'_, u32>);
@@ -25,6 +26,7 @@ struct Probe {
     name: &'static str,
     log: Log,
     on: Vec<(char, Act)>,
+    field: Option<Input>,
 }
 
 impl Probe {
@@ -33,7 +35,13 @@ impl Probe {
             name,
             log: Rc::clone(log),
             on: Vec::new(),
+            field: None,
         }
+    }
+
+    fn typing(mut self) -> Self {
+        self.field = Some(Input::new());
+        self
     }
 
     fn on(mut self, key: char, act: Act) -> Self {
@@ -79,6 +87,12 @@ impl Screen<u32> for Probe {
     fn event(&mut self, event: u32, _cx: &mut Cx<'_, u32>) {
         self.note(format!("event {event}"));
     }
+
+    fn input(&self) -> Option<InputBar<'_>> {
+        self.field
+            .as_ref()
+            .map(|field| InputBar::new("Find", field))
+    }
 }
 
 fn log() -> Log {
@@ -105,6 +119,8 @@ fn click(column: u16, row: u16) -> MouseEvent {
         modifiers: KeyModifiers::NONE,
     }
 }
+
+const ACCENT: Color = Color::Rgb(4, 5, 6);
 
 fn base() -> Tui<u32> {
     Tui::new("probe", "1.0.0", Color::Blue)
@@ -159,7 +175,7 @@ fn a_window_under_the_minimum_shows_only_the_too_small_words() {
 }
 
 #[test]
-fn a_lost_terminal_a_resize_and_focus_changes_stay_and_reach_no_screen() {
+fn handle_leaves_a_lost_terminal_to_the_loop_and_a_resize_and_focus_changes_reach_no_screen() {
     let log = log();
     let mut tui = base().screen(Section::new("Main"), Probe::new("main", &log));
     tui.start();
@@ -209,27 +225,99 @@ fn a_waker_for_a_screen_past_the_last_is_heard_by_nobody() {
     assert_eq!(lines(&log), ["main start", "main event 4"]);
 }
 
-#[test]
-fn a_tab_brought_up_under_an_overlay_starts_once_the_overlay_closes() {
-    let log = log();
+fn drilled(log: &Log) -> Tui<u32> {
     let mut tui = base()
-        .screen(Section::new("One"), Probe::new("one", &log))
-        .screen(Section::new("Two"), Probe::new("two", &log))
+        .screen(Section::new("One"), Probe::new("one", log))
+        .screen(Section::new("Two"), Probe::new("two", log))
         .overlay(
             Section::new("Drill"),
             &[Key::Char('D')],
-            Probe::new("drill", &log).on('h', |cx| cx.show(|item| item != Item::Tab(0))),
+            Probe::new("drill", log).on('h', |cx| cx.show(|item| item != Item::Tab(0))),
         );
     tui.start();
+    tui
+}
+
+fn heard_by(log: &Log, name: &str) -> Vec<String> {
+    lines(log)
+        .into_iter()
+        .filter(|line| line.starts_with(&format!("{name} ")))
+        .collect()
+}
+
+#[test]
+fn a_tab_brought_up_under_an_overlay_starts_and_enters_once_the_overlay_key_closes_it() {
+    let log = log();
+    let mut tui = drilled(&log);
     tui.key(ch('D'));
     tui.key(ch('h'));
     assert_eq!(tui.current(), Some(2));
-    assert!(!lines(&log).iter().any(|line| line.starts_with("two")));
+    assert!(heard_by(&log, "two").is_empty());
     tui.key(ch('D'));
     assert_eq!(tui.current(), Some(1));
-    assert!(lines(&log).contains(&"two start".to_string()));
+    assert_eq!(heard_by(&log, "two"), ["two start", "two entered"]);
     let text = dump::text(&tui.frame(60, 16));
     assert!(text.contains("two body"), "{text}");
+    tui.key(ch('D'));
+    tui.key(ch('D'));
+    assert_eq!(
+        heard_by(&log, "two"),
+        ["two start", "two entered"],
+        "an overlay opened and closed over an unmoved tab enters nothing"
+    );
+}
+
+#[test]
+fn a_started_tab_swapped_in_under_an_overlay_hears_entered_again_when_back_leaves_it() {
+    let log = log();
+    let mut tui = drilled(&log);
+    assert!(tui.go(1));
+    assert!(tui.go(0));
+    assert_eq!(heard_by(&log, "two"), ["two start", "two entered"]);
+    tui.key(ch('D'));
+    tui.key(ch('h'));
+    assert_eq!(tui.current(), Some(2));
+    tui.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert_eq!(tui.current(), Some(1));
+    assert_eq!(
+        heard_by(&log, "two"),
+        ["two start", "two entered", "two entered"]
+    );
+    assert_eq!(heard_by(&log, "one"), ["one start", "one entered"]);
+}
+
+#[test]
+fn an_event_before_start_starts_no_screen_and_start_keeps_the_app_first() {
+    let log = log();
+    let mut tui = base()
+        .screen(Section::new("Main"), Probe::new("main", &log))
+        .app(Probe::new("app", &log));
+    assert_eq!(tui.event(0, 4), Flow::Stay);
+    assert_eq!(tui.handle(Wake::Event(0, 5)), Flow::Stay);
+    assert_eq!(lines(&log), ["main event 4", "main event 5"]);
+    tui.start();
+    assert_eq!(
+        lines(&log)[2..],
+        ["app start", "main start"]
+    );
+}
+
+#[test]
+fn an_activity_wake_draws_its_row_on_the_opened_board() {
+    let log = log();
+    let mut tui = base()
+        .screen(Section::new("Main"), Probe::new("main", &log))
+        .activities(Activities::new(Section::new("Jobs")).keys(&[Key::Char('o')]));
+    tui.start();
+    let now = std::time::Instant::now();
+    assert_eq!(
+        tui.handle(Wake::Activity(Activity::new(4, "indexing the feed", now))),
+        Flow::Stay
+    );
+    tui.key(ch('o'));
+    let text = dump::text(&tui.frame(80, 20));
+    assert!(text.contains("indexing the feed"), "{text}");
+    assert_eq!(lines(&log), ["main start"]);
 }
 
 #[test]
@@ -314,7 +402,7 @@ fn a_role_named_twice_paints_in_its_last_style() {
 fn lit_again_relights_an_open_confirm_only_while_the_guard_is_armed() {
     let log = log();
     let build = |lit: bool| {
-        let mut tui = base()
+        let mut tui = Tui::<u32>::new("probe", "1.0.0", ACCENT)
             .words(Words::new().again("again to leave").yes("Yes").no("No"))
             .quit_window(Duration::from_secs(1))
             .lit_again(lit)
@@ -330,7 +418,7 @@ fn lit_again_relights_an_open_confirm_only_while_the_guard_is_armed() {
     let mut lit = build(true);
     let mut dark = build(false);
     let (shone, plain) = (lit.frame(60, 16), dark.frame(60, 16));
-    assert_ne!(shone, plain);
+    assert!(painted(&shone, ACCENT) > painted(&plain, ACCENT));
     assert!(dump::text(&plain).contains("again to leave"));
     assert!(dump::text(&plain).contains("Delete it?"));
     lit.advance(Duration::from_secs(1));
@@ -339,4 +427,41 @@ fn lit_again_relights_an_open_confirm_only_while_the_guard_is_armed() {
     assert_eq!(shone, plain);
     assert!(!dump::text(&plain).contains("again to leave"));
     assert!(dump::text(&plain).contains("Delete it?"));
+}
+
+#[test]
+fn lit_again_relights_an_input_bar_and_leaves_a_screen_without_one_dark() {
+    let log = log();
+    let build = |lit: bool, typing: bool| {
+        let probe = Probe::new("main", &log);
+        let probe = if typing { probe.typing() } else { probe };
+        let mut tui = Tui::<u32>::new("probe", "1.0.0", ACCENT)
+            .words(Words::new().again("again to leave"))
+            .quit_window(Duration::from_secs(1))
+            .lit_again(lit)
+            .screen(Section::new("Main"), probe);
+        tui.start();
+        tui.key(ctrl_c());
+        tui.frame(60, 16)
+    };
+    let (shone, plain) = (build(true, true), build(false, true));
+    assert!(dump::text(&shone).contains("again to leave"));
+    assert!(painted(&shone, ACCENT) > painted(&plain, ACCENT));
+    assert_eq!(build(true, false), build(false, false));
+}
+
+#[test]
+fn a_title_a_screen_sends_replaces_the_one_the_builder_set() {
+    let log = log();
+    let mut tui = base().title("Inbox").screen(
+        Section::new("Main"),
+        Probe::new("main", &log).on('t', |cx| cx.title("Weekly report")),
+    );
+    tui.start();
+    let text = dump::text(&tui.frame(60, 16));
+    assert!(text.contains("Inbox"), "{text}");
+    tui.key(ch('t'));
+    let text = dump::text(&tui.frame(60, 16));
+    assert!(text.contains("Weekly report"), "{text}");
+    assert!(!text.contains("Inbox"), "{text}");
 }

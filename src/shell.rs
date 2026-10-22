@@ -110,6 +110,7 @@ pub struct Tui<E> {
     focus_keys: (&'static [Key], &'static [Key]),
     pub(crate) screens: Vec<Slot<E>>,
     pub(crate) open: Option<usize>,
+    moved: bool,
     pub(crate) board: Option<usize>,
     pub(crate) band: Option<Box<dyn Band>>,
     pub(crate) top_band: Option<Box<dyn Band>>,
@@ -202,6 +203,7 @@ impl<E: Send + 'static> Tui<E> {
             eager: false,
             keep_facts: false,
             lit_again: true,
+            moved: false,
             out: Outbox::new(sender),
             inbox,
             moment: Instant::now(),
@@ -769,7 +771,7 @@ impl<E: Send + 'static> Tui<E> {
         }
         if let Some(overlay) = self.overlay_for(pressed) {
             if self.open == Some(overlay) {
-                self.open = None;
+                self.close();
             } else {
                 self.go(overlay);
             }
@@ -1145,11 +1147,22 @@ impl<E: Send + 'static> Tui<E> {
         if nav.back().is_some() {
             self.call(index, |screen, cx| screen.back(cx));
         } else {
-            self.open = None;
+            self.close();
+        }
+    }
+
+    fn close(&mut self) {
+        self.open = None;
+        if std::mem::take(&mut self.moved) {
+            self.focus = Focus::Content;
+            self.enter();
         }
     }
 
     fn enter(&mut self) {
+        if self.open.is_none() {
+            self.moved = false;
+        }
         if let Some(index) = self.current() {
             self.begin(index);
             self.call(index, |screen, cx| screen.entered(cx));
@@ -1294,10 +1307,13 @@ impl<E: Send + 'static> Tui<E> {
         }
         if let Some(shown) = self.out.show.take()
             && self.model.show(&*shown)
-            && self.open.is_none()
         {
-            self.focus = Focus::Content;
-            self.enter();
+            if self.open.is_some() {
+                self.moved = true;
+            } else {
+                self.focus = Focus::Content;
+                self.enter();
+            }
         }
         if let Some(heading) = self.out.group.take()
             && self.model.go_heading(heading)
@@ -1316,9 +1332,6 @@ impl<E: Send + 'static> Tui<E> {
         }
         if let Some(screen) = self.out.go.take() {
             self.go(screen);
-        }
-        if let Some(index) = self.current() {
-            self.begin(index);
         }
     }
 
@@ -1642,6 +1655,7 @@ mod tests {
         loading: bool,
         seen: Vec<String>,
         on: Vec<(char, Act)>,
+        sources: &'static [&'static str],
     }
 
     impl Probe {
@@ -1666,6 +1680,11 @@ mod tests {
             self.loading = true;
             self
         }
+
+        fn reading(mut self, sources: &'static [&'static str]) -> Self {
+            self.sources = sources;
+            self
+        }
     }
 
     impl Screen<u32> for Probe {
@@ -1683,6 +1702,10 @@ mod tests {
 
         fn deadline(&self) -> Option<Instant> {
             self.due
+        }
+
+        fn sources(&self) -> &[&str] {
+            self.sources
         }
 
         fn start(&mut self, _cx: &mut Cx<'_, u32>) {
@@ -1705,6 +1728,7 @@ mod tests {
         fn event(&mut self, event: u32, cx: &mut Cx<'_, u32>) {
             match event {
                 0 => self.loading = false,
+                8 => cx.takeover(Takeover::new(2, "Still busy")),
                 9 => cx.end_takeover(),
                 _ => {}
             }
@@ -1866,7 +1890,11 @@ mod tests {
         tui.frame(60, 16);
         assert_eq!(tui.deadlines()[4], Some(t0 + ms(300)));
         assert!(!tui.animating());
-        tui.advance(ms(300));
+        tui.advance(ms(299));
+        tui.frame(60, 16);
+        assert_eq!(tui.screens[0].glass, None);
+        assert_eq!(tui.deadlines()[4], Some(t0 + ms(300)));
+        tui.advance(ms(1));
         tui.frame(60, 16);
         assert_eq!(tui.screens[0].glass, Some(t0 + ms(300)));
         assert!(tui.animating());
@@ -1920,6 +1948,10 @@ mod tests {
         tui.advance(ms(800));
         tui.key(ch('o'));
         assert_eq!(tui.taken, Some(t0));
+        assert_eq!(seen(&tui, "main"), ["start", "o true"]);
+        tui.event(0, 8);
+        assert_eq!(tui.out.takeover.as_ref().map(|(_, taken)| taken.id), Some(2));
+        assert_eq!(tui.taken, Some(t0));
         tui.event(0, 9);
         assert_eq!(tui.taken, None);
         assert!(!tui.animating());
@@ -1953,6 +1985,31 @@ mod tests {
         assert_eq!(tui.apply(), Flow::Stay);
         assert!(tui.screens[0].stale);
         assert!(!tui.screens[1].stale);
+    }
+
+    #[test]
+    fn a_changed_source_marks_only_the_screens_that_list_it() {
+        let mut tui = base()
+            .screen(
+                "Main",
+                Probe::new("main").reading(&["feed"]).on('f', |cx| {
+                    cx.changed("feed");
+                    true
+                }),
+            )
+            .screen("Other", Probe::new("other").reading(&["mail"]))
+            .screen("Both", Probe::new("both").reading(&["mail", "feed"]));
+        tui.start();
+        for slot in &mut tui.screens {
+            slot.stale = false;
+        }
+        assert_eq!(tui.key(ch('f')), Flow::Stay);
+        let stale: Vec<bool> = tui.screens.iter().map(|slot| slot.stale).collect();
+        assert_eq!(stale, [true, false, true]);
+        let read: Vec<usize> = tui.reads().iter().map(|(index, ..)| *index).collect();
+        assert_eq!(read, Vec::<usize>::new());
+        assert!(!tui.screens[0].stale);
+        assert!(tui.screens[2].stale, "a screen never started waits for its read");
     }
 
     #[test]
