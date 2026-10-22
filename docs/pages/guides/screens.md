@@ -65,7 +65,10 @@ impl Screen<Msg> for Journal {
   `Hint<'static>` list in its own state, changes them only when they change,
   and returns a slice. When either slice holds anything it is drawn in place
   of the owned hook's answer; an empty one falls back to it. With these and
-  the defaults a steady frame allocates nothing.
+  the defaults a steady frame allocates nothing. The owned hooks `status`,
+  `status_parts`, `lead`, `left`, `after_tabs` and `caption` still build their
+  answer on every frame they are drawn; `badge()` is the borrowed way to show a
+  status.
 - `status` or `status_parts(room)` sit on the right of the title rule, and
   `lead(room)` on its left beside the help word; each is told the room it
   has, so it can drop a part rather than see it cut.

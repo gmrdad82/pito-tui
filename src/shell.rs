@@ -1395,37 +1395,38 @@ impl<E: Send + 'static> Tui<E> {
     }
 
     pub fn settle(&mut self) -> Flow {
+        let mut flow = Flow::Stay;
         for _ in 0..SETTLE {
             let mut woke = false;
             for (screen, generation, job) in self.reads() {
                 if self.landed(screen, generation, job()) == Some(Flow::Quit) {
-                    return Flow::Quit;
+                    flow = Flow::Quit;
                 }
                 woke = true;
             }
             for (screen, stamp, job) in std::mem::take(&mut self.out.jobs) {
                 let event = job();
                 if stamp == self.out.stamp() && self.event(screen, event) == Flow::Quit {
-                    return Flow::Quit;
+                    flow = Flow::Quit;
                 }
                 woke = true;
             }
             while let Ok(wake) = self.inbox.try_recv() {
                 if self.handle(wake) == Flow::Quit {
-                    return Flow::Quit;
+                    flow = Flow::Quit;
                 }
                 woke = true;
             }
             match self.ticks() {
-                Some(Flow::Quit) => return Flow::Quit,
+                Some(Flow::Quit) => flow = Flow::Quit,
                 Some(Flow::Stay) => woke = true,
                 None => {}
             }
-            if !woke {
-                return Flow::Stay;
+            if !woke || flow == Flow::Quit {
+                return flow;
             }
         }
-        Flow::Stay
+        flow
     }
 
     pub fn advance(&mut self, by: Duration) -> Flow {

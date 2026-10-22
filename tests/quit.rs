@@ -195,13 +195,60 @@ fn a_screen_that_never_quits_keeps_running_through_every_path() {
     assert_eq!(tui.event(0, 1), Flow::Stay);
     assert_eq!(tui.handle(Wake::Event(0, 1)), Flow::Stay);
     assert_eq!(tui.handle(Wake::Loaded(0, 1, 1)), Flow::Stay);
+    assert_eq!(
+        seen(&tui).iter().filter(|what| **what == "loaded").count(),
+        2,
+        "the woken load of the current generation reached the screen"
+    );
     assert_eq!(tui.key(press(KeyCode::Char('r'))), Flow::Stay);
     assert_eq!(tui.key(press(KeyCode::Char('s'))), Flow::Stay);
     assert_eq!(tui.settle(), Flow::Stay);
     let seen = seen(&tui);
     for what in ["key", "tick", "event", "loaded", "heard"] {
-        assert!(seen.contains(&what), "{what} never reached the screen: {seen:?}");
+        assert!(
+            seen.contains(&what),
+            "{what} never reached the screen: {seen:?}"
+        );
     }
     assert!(tui.current().is_some());
     assert_eq!(tui.key(press(KeyCode::Char('x'))), Flow::Stay);
+}
+
+struct Reader {
+    reads: bool,
+    landed: usize,
+}
+
+impl Screen<u32> for Reader {
+    fn draw(&mut self, _frame: &mut Frame, _area: Rect, _palette: &Palette) {}
+
+    fn load(&mut self) -> Option<Job<u32>> {
+        if !self.reads {
+            return None;
+        }
+        self.reads = false;
+        Some(Box::new(|| 8))
+    }
+
+    fn loaded(&mut self, _event: u32, _cx: &mut Cx<'_, u32>) {
+        self.landed += 1;
+    }
+}
+
+#[test]
+fn a_settle_that_quits_still_lands_every_read_it_took() {
+    let mut tui = Tui::<u32>::new("quit", "1.0.0", Color::Blue)
+        .eager(true)
+        .screen("One", Quitter::new(When::Loaded).reading())
+        .screen(
+            "Two",
+            Reader {
+                reads: true,
+                landed: 0,
+            },
+        );
+    tui.start();
+    assert_eq!(tui.settle(), Flow::Quit);
+    assert_eq!(seen(&tui), ["loaded"]);
+    assert_eq!(tui.find::<Reader>().map(|reader| reader.landed), Some(1));
 }

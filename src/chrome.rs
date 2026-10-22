@@ -356,15 +356,15 @@ impl<E: Send + 'static> Tui<E> {
         let offset = place.number.saturating_sub(place.section + 1);
         let zero_first = self.model.keys.zero_first;
         let items = tabs.enumerate().map(move |(at, tab)| Item {
-                label: &model.tabs[*tab].label,
-                number: match numbers {
-                    _ if lone => None,
-                    Numbers::Across => head::shown(offset + at + 1, zero_first),
-                    Numbers::InGroup => head::shown(at + 1, zero_first),
-                    Numbers::Off => None,
-                },
-                on: at == place.section,
-            });
+            label: &model.tabs[*tab].label,
+            number: match numbers {
+                _ if lone => None,
+                Numbers::Across => head::shown(offset + at + 1, zero_first),
+                Numbers::InGroup => head::shown(at + 1, zero_first),
+                Numbers::Off => None,
+            },
+            on: at == place.section,
+        });
         let lit = self.open.is_none();
         let on = match (lit, self.focus) {
             (false, _) => palette.inactive,

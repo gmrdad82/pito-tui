@@ -2,7 +2,7 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::time::Instant;
 
-use pito_tui::footer::Hint;
+use pito_tui::footer::{Help, Hint};
 use pito_tui::ratatui::{
     Frame, Terminal,
     backend::TestBackend,
@@ -10,7 +10,7 @@ use pito_tui::ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
 };
-use pito_tui::{Band, Head, Palette, Screen, Span, Tui, dump};
+use pito_tui::{Band, Head, Palette, Row, Screen, Span, Tui, Words, dump};
 
 struct Counting;
 
@@ -201,6 +201,7 @@ fn typical<S: Screen<()>>(make: impl Fn() -> S, stack: bool) -> Tui<()> {
             ("Stea", Style::new().add_modifier(Modifier::BOLD)),
             ("dy", Style::new()),
         ])
+        .words(Words::new().help("? keys"))
         .hints([Hint::new("ctrl+c", "twice quit").pinned()])
         .group("Mail")
         .screen("Inbox", make())
@@ -209,7 +210,14 @@ fn typical<S: Screen<()>>(make: impl Fn() -> S, stack: bool) -> Tui<()> {
         .screen("Docs", make())
         .band(Strip);
     let mut tui = if stack {
-        tui.head(Head::default())
+        tui.head(Head::new([
+            Row::Title,
+            Row::Caption,
+            Row::Groups,
+            Row::Sections,
+            Row::Facts,
+            Row::Crumbs,
+        ]))
     } else {
         tui.keep_facts(true)
     };
@@ -295,10 +303,14 @@ fn the_steady_frame_shows_every_part_of_the_chrome() {
                 "band row",
                 "steady body",
             ] {
-                assert!(text.contains(part), "{part} at {width}x{height} stack {stack}:\n{text}");
+                assert!(
+                    text.contains(part),
+                    "{part} at {width}x{height} stack {stack}:\n{text}"
+                );
             }
             if stack {
                 assert!(text.contains("Mail") && text.contains("Files"), "{text}");
+                assert!(caption_row(&text, "Mail"), "{width}x{height}:\n{text}");
             }
         }
     }
@@ -373,4 +385,105 @@ fn facts_that_shrink_draw_only_the_parts_still_there() {
     assert!(text.contains("scroll"), "{text}");
     assert!(!text.contains("open"), "{text}");
     assert!(text.contains("twice quit"), "{text}");
+}
+
+fn caption_row(text: &str, group: &str) -> bool {
+    text.lines()
+        .any(|line| line.contains(group) && !line.contains("Files") && line.contains('─'))
+}
+
+struct Captioned {
+    caption: Option<Vec<(String, Style)>>,
+}
+
+impl Screen<()> for Captioned {
+    fn draw(&mut self, _frame: &mut Frame, _area: Rect, _palette: &Palette) {}
+
+    fn caption(&self) -> Option<Vec<(String, Style)>> {
+        self.caption.clone()
+    }
+}
+
+#[test]
+fn the_caption_row_falls_back_to_the_group_name() {
+    let mut tui = typical(|| Captioned { caption: None }, true);
+    let text = dump::text(&tui.frame(120, 40));
+    assert!(caption_row(&text, "Mail"), "{text}");
+}
+
+#[test]
+fn a_screen_caption_beats_the_group_name() {
+    let mut tui = typical(
+        || Captioned {
+            caption: Some(vec![("Captioned".to_string(), Style::new())]),
+        },
+        true,
+    );
+    let text = dump::text(&tui.frame(120, 40));
+    assert!(text.contains("Captioned"), "{text}");
+    assert!(!caption_row(&text, "Mail"), "{text}");
+}
+
+#[test]
+fn an_empty_screen_caption_still_beats_the_group_name() {
+    let mut tui = typical(
+        || Captioned {
+            caption: Some(Vec::new()),
+        },
+        true,
+    );
+    let text = dump::text(&tui.frame(120, 40));
+    assert!(text.contains("Mail") && text.contains("Files"), "{text}");
+    assert!(!caption_row(&text, "Mail"), "{text}");
+}
+
+struct Leading;
+
+impl Screen<()> for Leading {
+    fn draw(&mut self, _frame: &mut Frame, _area: Rect, _palette: &Palette) {}
+
+    fn lead(&self, _room: u16) -> Vec<(String, Style)> {
+        vec![("led here".to_string(), Style::new())]
+    }
+}
+
+#[test]
+fn the_help_word_and_a_lead_are_joined_by_the_lead_mark() {
+    for stack in [true, false] {
+        let mut tui = closed(typical(|| Leading, stack));
+        let text = dump::text(&tui.frame(120, 40));
+        assert!(text.contains("? keys · led here"), "stack {stack}:\n{text}");
+    }
+}
+
+fn closed(tui: Tui<()>) -> Tui<()> {
+    tui.help(Some(Help::new(false)))
+}
+
+#[test]
+fn a_steady_frame_with_the_help_word_on_the_left_allocates_nothing() {
+    for stack in [true, false] {
+        for (width, height) in SIZES {
+            let mut tui = closed(typical(Borrowed::new, stack));
+            let (count, buffer) = steady(&mut tui, width, height);
+            assert_eq!(count, 0, "{width}x{height} stack {stack}");
+            let text = dump::text(&buffer);
+            for part in ["? keys", "Steady", "12 unread", "● live", "twice quit"] {
+                assert!(
+                    text.contains(part),
+                    "{part} at {width}x{height} stack {stack}:\n{text}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn an_open_help_draws_no_help_word_on_the_left() {
+    for stack in [true, false] {
+        let mut tui = typical(Borrowed::new, stack);
+        let text = dump::text(&tui.frame(120, 40));
+        assert!(!text.contains("? keys"), "stack {stack}:\n{text}");
+        assert!(text.contains("scroll"), "stack {stack}:\n{text}");
+    }
 }
