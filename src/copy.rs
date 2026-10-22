@@ -43,4 +43,84 @@ mod tests {
         assert_eq!(base64(b"foo"), "Zm9v");
         assert_eq!(base64("panic: ü".as_bytes()), "cGFuaWM6IMO8");
     }
+
+    fn decode(text: &str) -> Vec<u8> {
+        const ABC: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = Vec::new();
+        for quad in text.as_bytes().chunks(4) {
+            let mut n = 0u32;
+            let mut pad = 0;
+            for &c in quad {
+                n <<= 6;
+                match ABC.iter().position(|&a| a == c) {
+                    Some(at) => n |= at as u32,
+                    None => pad += 1,
+                }
+            }
+            let bytes = [(n >> 16) as u8, (n >> 8) as u8, n as u8];
+            out.extend_from_slice(&bytes[..3 - pad]);
+        }
+        out
+    }
+
+    #[test]
+    fn base64_matches_the_rfc_4648_test_vectors() {
+        let vectors: [(&[u8], &str); 7] = [
+            (b"", ""),
+            (b"f", "Zg=="),
+            (b"fo", "Zm8="),
+            (b"foo", "Zm9v"),
+            (b"foob", "Zm9vYg=="),
+            (b"fooba", "Zm9vYmE="),
+            (b"foobar", "Zm9vYmFy"),
+        ];
+        for (bytes, encoded) in vectors {
+            assert_eq!(base64(bytes), encoded);
+        }
+    }
+
+    #[test]
+    fn base64_uses_plus_and_slash_for_the_top_of_the_alphabet() {
+        assert_eq!(base64(&[0, 0, 0]), "AAAA");
+        assert_eq!(base64(&[0xff, 0xff, 0xff]), "////");
+        assert_eq!(base64(&[0xfb, 0xff]), "+/8=");
+        assert_eq!(base64(&[0xfb, 0xef, 0xbe]), "++++");
+        assert_eq!(base64(&[0]), "AA==");
+        assert_eq!(base64("日本".as_bytes()), "5pel5pys");
+    }
+
+    #[test]
+    fn base64_pads_to_whole_quads_and_round_trips_every_byte() {
+        let all: Vec<u8> = (0..=255).collect();
+        for len in 0..=all.len() {
+            let bytes = &all[..len];
+            let encoded = base64(bytes);
+            assert_eq!(encoded.len(), len.div_ceil(3) * 4, "{len} bytes");
+            assert_eq!(encoded.trim_end_matches('=').len(), (len * 4).div_ceil(3), "{len} bytes");
+            assert!(
+                encoded
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || c == b'+' || c == b'/' || c == b'='),
+                "{len} bytes"
+            );
+            assert_eq!(decode(&encoded), bytes, "{len} bytes");
+        }
+        let reversed: Vec<u8> = (0..=255).rev().collect();
+        assert_eq!(decode(&base64(&reversed)), reversed);
+    }
+
+    #[test]
+    fn copy_refuses_text_over_the_limit_without_writing() {
+        assert_eq!(COPY_MAX, 48 * 1024);
+        assert!(!copy(&"a".repeat(COPY_MAX + 1)));
+        assert!(!copy(&"a".repeat(COPY_MAX * 4)));
+    }
+
+    #[test]
+    fn the_copy_limit_counts_bytes_not_characters() {
+        let wide = "é".repeat(COPY_MAX / 2 + 1);
+        assert!(wide.chars().count() < COPY_MAX);
+        assert!(wide.len() > COPY_MAX);
+        assert!(!copy(&wide));
+    }
 }
