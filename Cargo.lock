@@ -486,7 +486,7 @@ dependencies = [
 
 [[package]]
 name = "pito-tui"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "crossterm",
  "pito-footer",

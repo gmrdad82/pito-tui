@@ -4,6 +4,12 @@ Every release of pito-tui, newest first. Versions follow [Semantic
 Versioning](https://semver.org/): from 1.0.0 on, only a change in the first
 number may break an app; the middle number adds, the last one fixes.
 
+## v1.2.3 — 2026-10-23
+
+### Fixed
+
+- Hourglass labels and hints with halfwidth katakana sound marks (ﾞ ﾟ) now draw in full and centre correctly (pito-hourglass v1.0.2).
+
 ## v1.2.2 — 2026-10-23
 
 ### Fixed
