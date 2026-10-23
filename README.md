@@ -48,7 +48,7 @@ or by hand in `Cargo.toml`:
 pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v1.2.3" }
 ```
 
-That one line brings ratatui 0.30, crossterm 0.29, pito-header v1.1.0,
+That one line brings ratatui 0.30, crossterm 0.29, pito-header v1.1.2,
 pito-footer v1.0.1, pito-hourglass v1.0.2 and pito-list v1.0.2, reachable as
 `pito_tui::ratatui`, `pito_tui::crossterm`, `pito_tui::header`,
 `pito_tui::footer`, `pito_tui::hourglass` and `pito_tui::list`.
