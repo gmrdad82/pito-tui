@@ -39,13 +39,13 @@ With Rust installed, the same lines work on Linux, macOS and Windows:
 ```sh
 cargo new hello
 cd hello
-cargo add pito-tui --git https://github.com/gmrdad82/pito-tui --tag v1.2.4
+cargo add pito-tui --git https://github.com/gmrdad82/pito-tui --tag v1.3.0
 ```
 
 or by hand in `Cargo.toml`:
 
 ```toml
-pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v1.2.4" }
+pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v1.3.0" }
 ```
 
 That one line brings ratatui 0.30, crossterm 0.29, pito-header v1.1.2,
