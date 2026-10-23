@@ -466,12 +466,11 @@ dependencies = [
 
 [[package]]
 name = "pito-hourglass"
-version = "1.0.1"
-source = "git+https://github.com/gmrdad82/pito-hourglass?tag=v1.0.1#468ea3c908845d0302e1e2617bdc8f1f420a0d1e"
+version = "1.0.2"
+source = "git+https://github.com/gmrdad82/pito-hourglass?tag=v1.0.2#85b766f2cd873e7a62b9288b423685768b71f28c"
 dependencies = [
  "ratatui",
  "unicode-segmentation",
- "unicode-width",
 ]
 
 [[package]]
