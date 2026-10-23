@@ -4,6 +4,16 @@ Every release of pito-tui, newest first. Versions follow [Semantic
 Versioning](https://semver.org/): from 1.0.0 on, only a change in the first
 number may break an app; the middle number adds, the last one fixes.
 
+## v1.2.4 — 2026-10-23
+
+### Changed
+
+- pito-tui now needs ratatui 0.30.2 or newer (and so Rust 1.88 or newer), as pito-header v1.1.2 does.
+
+### Fixed
+
+- Header names with halfwidth sound marks (ﾞ ﾟ) take the cell on screen that is measured for them, so they draw and take clicks where they show (pito-header v1.1.2).
+
 ## v1.2.3 — 2026-10-23
 
 ### Fixed
