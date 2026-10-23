@@ -4,6 +4,16 @@ Every release of pito-tui, newest first. Versions follow [Semantic
 Versioning](https://semver.org/): from 1.0.0 on, only a change in the first
 number may break an app; the middle number adds, the last one fixes.
 
+## v1.3.0 — 2026-10-23
+
+### Added
+
+- `pito_tui::list` is pito-list v1.1.1: `Key::Mod(Mods, Named)` brings Ctrl and Shift held with a named key (the arrows, Page Up/Down, Home, End, Enter, Esc, Backspace, Delete, and Ctrl on Tab) to your app, with `Mods` and `Named` as new public types.
+
+### Changed
+
+- Shift or Ctrl held with Up, Down, Page Up/Down, Home or End no longer moves a list, and with Enter no longer opens its row, under the built-in key maps: the key goes on to your app. Bind its `Key::Mod` form in your own key map to bring it back.
+
 ## v1.2.4 — 2026-10-23
 
 ### Changed
