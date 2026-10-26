@@ -2,10 +2,9 @@ use ratatui::{buffer::Buffer, layout::Rect, style::Style};
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::label::{Label, Span};
-use crate::text::cells;
+use crate::text::{self, ELLIPSIS, cells};
 
 pub(crate) const RULE: &str = "─";
-const ELLIPSIS: &str = "…";
 const SIDE_MIN: u16 = 6;
 const GROUP_GAP: u16 = 2;
 const SECTION_GAP: u16 = 0;
@@ -90,6 +89,20 @@ fn spans_width<T: AsRef<str>>(spans: &[(T, Style)]) -> u16 {
     spans.iter().fold(0u16, |total, (text, _)| {
         total.saturating_add(width(text.as_ref()))
     })
+}
+
+fn drawn_width<T: AsRef<str>>(spans: &[(T, Style)], room: u16) -> u16 {
+    let total = spans_width(spans);
+    if total <= room || room == 0 {
+        return total.min(room);
+    }
+    let runs = spans.iter().map(|(text, _)| text.as_ref());
+    let keep = text::keep(runs, usize::from(room)).unwrap_or_default();
+    let mut used = 0u16;
+    text::kept(spans, keep, |text, _| {
+        used = used.saturating_add(width(text))
+    });
+    used.saturating_add(1)
 }
 
 fn digits(number: usize, buf: &mut [u8; 20]) -> &str {
@@ -180,18 +193,12 @@ impl<'a> Pen<'a> {
         if room == 0 {
             return;
         }
-        let stop = self.x + room - 1;
-        let mut last = base;
-        for (text, style) in spans {
-            let style = base.patch(*style);
-            if self.x >= stop {
-                break;
-            }
-            last = style;
-            self.putn(text.as_ref(), style, stop - self.x);
-        }
-        self.x = self.x.min(stop);
-        self.put(ELLIPSIS, last);
+        let runs = spans.iter().map(|(text, _)| text.as_ref());
+        let keep = text::keep(runs, usize::from(room)).unwrap_or_default();
+        let last = text::kept(spans, keep, |text, style| {
+            self.put(text, base.patch(style));
+        });
+        self.put(ELLIPSIS, base.patch(last));
     }
 }
 
@@ -219,7 +226,9 @@ impl<M: AsRef<str>> Rule<'_, M> {
         let Some(mut pen) = Pen::new(buf, line, line.x) else {
             return;
         };
-        let wide = spans_width(self.middle).saturating_add(2).min(line.width);
+        let wide = drawn_width(self.middle, line.width.saturating_sub(2))
+            .saturating_add(2)
+            .min(line.width);
         let start = line.x.saturating_add((line.width - wide) / 2);
         let side = start.saturating_sub(line.x).saturating_sub(2);
         let sides = side >= SIDE_MIN;
@@ -233,7 +242,7 @@ impl<M: AsRef<str>> Rule<'_, M> {
             label(&mut pen, self.middle, self.base, wide.saturating_sub(2));
         }
         if sides && present(self.right) {
-            let wide = spans_width(self.right).min(side - 2).saturating_add(2);
+            let wide = drawn_width(self.right, side - 2).saturating_add(2);
             pen.fill_to(line.right().saturating_sub(1 + wide), RULE, self.rule);
             label(&mut pen, self.right, Style::new(), wide - 2);
         }
@@ -486,5 +495,79 @@ mod tests {
         assert_eq!(row(&buf, 0), "   Mail   ");
         assert!(buf[(3, 0)].modifier.contains(Modifier::UNDERLINED));
         assert!(!buf[(4, 0)].modifier.contains(Modifier::UNDERLINED));
+    }
+
+    fn rule(buf: &mut Buffer, left: &[(String, Style)], middle: &str, right: &[(String, Style)]) {
+        let middle = [(middle, Style::new())];
+        Rule {
+            rule: Style::new(),
+            base: Style::new(),
+            middle: &middle,
+            left,
+            right,
+        }
+        .draw(buf, buf.area);
+    }
+
+    fn parts(text: &str) -> Vec<(String, Style)> {
+        vec![(text.to_string(), Style::new())]
+    }
+
+    #[test]
+    fn a_status_label_that_fits_is_drawn_whole() {
+        let mut buf = Buffer::empty(Rect::new(0, 0, 40, 1));
+        rule(&mut buf, &parts("build · deploy"), "T", &parts("ok"));
+        assert_eq!(
+            row(&buf, 0),
+            format!("─ build · deploy ─ T {} ok ─", "─".repeat(14))
+        );
+    }
+
+    #[test]
+    fn a_status_label_drops_whole_parts_and_ends_in_an_ellipsis() {
+        let mut buf = Buffer::empty(Rect::new(0, 0, 40, 1));
+        rule(&mut buf, &parts("build · deploy api · tests"), "T", &[]);
+        assert_eq!(
+            row(&buf, 0),
+            format!("─ build… {} T {}", "─".repeat(9), "─".repeat(19))
+        );
+    }
+
+    #[test]
+    fn a_right_label_cuts_at_a_word_and_stays_against_the_edge() {
+        let mut buf = Buffer::empty(Rect::new(0, 0, 40, 1));
+        rule(&mut buf, &[], "T", &parts("deploy api tests"));
+        assert_eq!(
+            row(&buf, 0),
+            format!("{} T {} deploy api… ─", "─".repeat(18), "─".repeat(5))
+        );
+    }
+
+    #[test]
+    fn a_title_cut_at_a_word_stays_centred() {
+        let mut buf = Buffer::empty(Rect::new(0, 0, 12, 1));
+        rule(&mut buf, &[], "a long title here", &[]);
+        assert_eq!(row(&buf, 0), "─ a long… ──");
+        let mut buf = Buffer::empty(Rect::new(0, 0, 4, 1));
+        rule(&mut buf, &[], "deployment", &[]);
+        assert_eq!(row(&buf, 0), " … ─");
+    }
+
+    #[test]
+    fn spans_cut_across_runs_end_in_the_style_of_the_run_they_cut() {
+        let bold = Style::new().add_modifier(Modifier::BOLD);
+        let dim = Style::new().add_modifier(Modifier::DIM);
+        let spans = [("deploy", bold), (" the api", dim)];
+        let mut buf = Buffer::empty(Rect::new(0, 0, 12, 1));
+        let mut pen = Pen::new(&mut buf, Rect::new(0, 0, 12, 1), 0).unwrap();
+        pen.spans(&spans, Style::new(), 9);
+        assert_eq!(pen.x, 7);
+        assert_eq!(row(&buf, 0), "deploy…     ");
+        assert!(buf[(5, 0)].modifier.contains(Modifier::BOLD));
+        assert!(buf[(6, 0)].modifier.contains(Modifier::DIM));
+        assert_eq!(drawn_width(&spans, 9), 7);
+        assert_eq!(drawn_width(&spans, 14), 14);
+        assert_eq!(drawn_width(&spans, 0), 0);
+        assert_eq!(drawn_width(&spans, 5), 1);
     }
 }

@@ -572,8 +572,10 @@ chart.
 - **The rest of the glue:** a too-small guard with the app's message, OSC 52
   copy (`Cx::copy`, up to 48 KiB), a y/n confirm whose answer comes back to
   the screen that asked, an optional callback after every draw with the time
-  it took, and width-aware text helpers (`text::clip`, `fit`, `wrap` at
-  spaces, `hard_wrap` at the width).
+  it took, and width-aware text helpers (`text::cut` and `clip` after a whole
+  word, a `/`, `-` or `_` with "…", never after a bare number, dropping whole
+  " · " parts; `fit`, `wrap` at spaces, `hard_wrap` at the width). The status
+  line, tab tail, fold titles and toasts cut the same way.
 - **Headless.** `Tui::shot` draws the app at any size after a list of keys,
   `Tui::advance` moves the run's clock (the hourglass as if it had run that
   long, deadlines ticking), `dump::text` and `dump::ansi` print the result,
@@ -769,7 +771,7 @@ FoldState { sections: Vec<(id, collapsed)> };  Placed { title: Rect, body: Rect,
 
 dump::size("120x34"), dump::keys("tab / foo enter ctrl+c") -> Result<Vec<KeyEvent>, word>,
 dump::text(&Buffer), dump::ansi(&Buffer);  Bench { screen, frames, average, worst }
-text::clean, cells, split, clip, fit, wrap, hard_wrap;  message(frame, area, text);  message_at(.., Spot)
+text::clean, cells, split, cut, clip, fit, wrap, hard_wrap;  message(frame, area, text);  message_at(.., Spot)
 copy(text), base64(bytes)
 TOP, SIDE, PAD, GAP                                        // Layout::new()'s spacing, in cells
 ```
