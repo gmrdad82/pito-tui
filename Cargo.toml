@@ -13,7 +13,7 @@ name = "pito_tui"
 
 [dependencies]
 crossterm = "0.29"
-pito-footer = { git = "https://github.com/gmrdad82/pito-footer", tag = "v1.0.1", features = ["crossterm"] }
+pito-footer = { git = "https://github.com/gmrdad82/pito-footer", tag = "v1.1.0", features = ["crossterm"] }
 pito-header = { git = "https://github.com/gmrdad82/pito-header", tag = "v1.1.2", features = ["crossterm"] }
 pito-hourglass = { git = "https://github.com/gmrdad82/pito-hourglass", tag = "v1.0.2" }
 pito-list = { git = "https://github.com/gmrdad82/pito-list", tag = "v1.2.0", features = ["crossterm"] }
