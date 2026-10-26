@@ -9,10 +9,12 @@ number may break an app; the middle number adds, the last one fixes.
 ### Added
 
 - `pito_tui::list::cut` cuts an app's own text the way lists cut theirs (pito-list v1.2.0).
+- `pito_tui::text::cut` gives apps the same word cut for any text.
 
 ### Changed
 
 - Text that doesn't fit in a list is cut after a whole word (or after `/`, `-` or `_` in a name) and ends with "…", never in the middle of a word or right after a number (pito-list v1.2.0).
+- The status line, the title, tab tails, fold titles, toasts and activity rows cut the same way, and the footer and legend do too (pito-footer v1.1.0). Text that fits is unchanged.
 
 ## v1.3.0 — 2026-10-23
 
