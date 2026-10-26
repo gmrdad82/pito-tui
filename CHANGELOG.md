@@ -4,6 +4,16 @@ Every release of pito-tui, newest first. Versions follow [Semantic
 Versioning](https://semver.org/): from 1.0.0 on, only a change in the first
 number may break an app; the middle number adds, the last one fixes.
 
+## v1.4.0 — 2026-10-26
+
+### Added
+
+- `pito_tui::list::cut` cuts an app's own text the way lists cut theirs (pito-list v1.2.0).
+
+### Changed
+
+- Text that doesn't fit in a list is cut after a whole word (or after `/`, `-` or `_` in a name) and ends with "…", never in the middle of a word or right after a number (pito-list v1.2.0).
+
 ## v1.3.0 — 2026-10-23
 
 ### Added
