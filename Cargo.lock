@@ -444,8 +444,8 @@ dependencies = [
 
 [[package]]
 name = "pito-footer"
-version = "1.0.1"
-source = "git+https://github.com/gmrdad82/pito-footer?tag=v1.0.1#94bfe1a0a2508181b5d420ea85c18bfc6779404b"
+version = "1.1.0"
+source = "git+https://github.com/gmrdad82/pito-footer?tag=v1.1.0#e7cb3731ed7f7440085e84382f6b6242c9f03673"
 dependencies = [
  "crossterm",
  "ratatui",

@@ -1,8 +1,236 @@
+use std::iter;
+
+use ratatui::style::Style;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-const ELLIPSIS: &str = "…";
+pub(crate) const ELLIPSIS: &str = "…";
 const TAB: &str = "    ";
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Space,
+    Joint,
+    Wide,
+    Word,
+}
+
+fn kind(grapheme: &str, cells: usize) -> Kind {
+    if grapheme.chars().all(char::is_whitespace) {
+        Kind::Space
+    } else if matches!(grapheme, "/" | "-" | "_") {
+        Kind::Joint
+    } else if cells > 1 {
+        Kind::Wide
+    } else {
+        Kind::Word
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+struct Piece {
+    seen: bool,
+    letters: bool,
+    digits: bool,
+    other: bool,
+    wide: bool,
+}
+
+impl Piece {
+    fn add(&mut self, grapheme: &str, cells: usize) {
+        self.seen = true;
+        self.wide |= cells > 1;
+        for c in grapheme.chars() {
+            self.letters |= c.is_alphanumeric();
+            self.digits |= c.is_numeric();
+            self.other |= !(c.is_numeric() || matches!(c, '.' | ',' | '+' | '-' | '_'));
+        }
+    }
+
+    fn number(self) -> bool {
+        self.digits && !self.other
+    }
+
+    fn word(self) -> bool {
+        (self.letters || self.wide) && !self.number()
+    }
+
+    fn separator(self) -> bool {
+        self.seen && !self.letters && !self.wide
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+struct Spot {
+    count: usize,
+    cells: usize,
+}
+
+struct Scan {
+    limit: usize,
+    count: usize,
+    used: usize,
+    prev: Option<Kind>,
+    token: Piece,
+    piece: Piece,
+    joint: bool,
+    last: Option<Spot>,
+    after: bool,
+    ended: bool,
+    parted: bool,
+    word: Option<Spot>,
+    part: Option<Spot>,
+}
+
+impl Scan {
+    fn new(limit: usize) -> Self {
+        Scan {
+            limit,
+            count: 0,
+            used: 0,
+            prev: None,
+            token: Piece::default(),
+            piece: Piece::default(),
+            joint: false,
+            last: None,
+            after: false,
+            ended: false,
+            parted: false,
+            word: None,
+            part: None,
+        }
+    }
+
+    fn mark(&mut self, spot: Spot) {
+        if !self.parted && spot.cells <= self.limit {
+            self.word = Some(spot);
+        }
+    }
+
+    fn end(&mut self, spot: Spot) {
+        if self.token.separator() {
+            if let Some(last) = self
+                .last
+                .filter(|last| self.after && last.cells <= self.limit)
+            {
+                self.part = Some(last);
+            }
+            self.parted |= self.ended;
+            self.after = false;
+        } else if self.token.word() {
+            self.mark(spot);
+            self.last = Some(spot);
+            self.after = true;
+        } else {
+            self.last = None;
+            self.after = false;
+        }
+        self.ended = true;
+    }
+
+    fn open(&self) -> bool {
+        self.after
+            && !self.token.letters
+            && !self.token.wide
+            && self.last.is_some_and(|last| last.cells <= self.limit)
+    }
+
+    fn feed(&mut self, grapheme: &str, cells: usize) {
+        let kind = kind(grapheme, cells);
+        let here = Spot {
+            count: self.count,
+            cells: self.used,
+        };
+        match (self.prev, kind) {
+            (Some(prev), Kind::Space) if prev != Kind::Space => self.end(here),
+            (Some(Kind::Joint), _) if self.joint => self.mark(here),
+            (Some(Kind::Wide), next) if next != Kind::Space => self.mark(here),
+            (Some(Kind::Word), Kind::Wide) if self.piece.word() => self.mark(here),
+            _ => {}
+        }
+        match kind {
+            Kind::Space => {
+                self.token = Piece::default();
+                self.piece = Piece::default();
+                self.joint = false;
+            }
+            Kind::Joint => {
+                self.joint = self.prev.is_some_and(|prev| prev != Kind::Space) && self.piece.word();
+                self.token.add(grapheme, cells);
+                self.piece = Piece::default();
+            }
+            Kind::Wide | Kind::Word => {
+                self.joint = false;
+                self.token.add(grapheme, cells);
+                self.piece.add(grapheme, cells);
+            }
+        }
+        self.prev = Some(kind);
+        self.count += 1;
+        self.used = self.used.saturating_add(cells);
+    }
+
+    fn done(&self, room: usize) -> bool {
+        self.used > room && !self.open()
+    }
+
+    fn keep(&self, room: usize) -> Option<usize> {
+        if self.used <= room {
+            return None;
+        }
+        Some(self.part.or(self.word).unwrap_or_default().count)
+    }
+}
+
+pub(crate) fn keep<'t>(runs: impl Iterator<Item = &'t str>, room: usize) -> Option<usize> {
+    let mut scan = Scan::new(room.saturating_sub(1));
+    'runs: for text in runs {
+        for grapheme in text.graphemes(true) {
+            scan.feed(grapheme, grapheme.width());
+            if scan.done(room) {
+                break 'runs;
+            }
+        }
+    }
+    scan.keep(room)
+}
+
+pub(crate) fn kept<'t, S: AsRef<str>>(
+    spans: &'t [(S, Style)],
+    keep: usize,
+    mut put: impl FnMut(&'t str, Style),
+) -> Style {
+    let mut left = keep;
+    let mut last = spans.first().map_or_else(Style::new, |(_, style)| *style);
+    for (text, style) in spans {
+        let text = text.as_ref();
+        last = *style;
+        let count = text.graphemes(true).count();
+        if left < count {
+            let end = text
+                .grapheme_indices(true)
+                .nth(left)
+                .map_or(text.len(), |(at, _)| at);
+            put(&text[..end], *style);
+            return *style;
+        }
+        put(text, *style);
+        left -= count;
+    }
+    last
+}
+
+pub fn cut(text: &str, width: usize) -> Option<&str> {
+    if cells(text) <= width {
+        return None;
+    }
+    let keep = keep(iter::once(text), width).unwrap_or_default();
+    let end = text
+        .grapheme_indices(true)
+        .nth(keep)
+        .map_or(text.len(), |(at, _)| at);
+    Some(&text[..end])
+}
 
 pub fn clean(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
@@ -36,14 +264,11 @@ pub fn split(text: &str, width: usize) -> (&str, &str) {
 }
 
 pub fn clip(text: &str, width: usize) -> String {
-    if cells(text) <= width {
-        return text.to_string();
+    match cut(text, width) {
+        None => text.to_string(),
+        Some(_) if width == 0 => String::new(),
+        Some(kept) => format!("{kept}{ELLIPSIS}"),
     }
-    if width == 0 {
-        return String::new();
-    }
-    let (kept, _) = split(text, width - 1);
-    format!("{kept}{ELLIPSIS}")
 }
 
 pub fn fit(text: &str, width: usize) -> String {
@@ -122,6 +347,7 @@ pub fn hard_wrap(text: &str, width: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::style::Modifier;
 
     #[test]
     fn widths_are_counted_in_cells_and_wide_glyphs_are_never_cut() {
@@ -204,14 +430,16 @@ mod tests {
         assert_eq!(clip("", 0), "");
         assert_eq!(clip("", 3), "");
         assert_eq!(clip("abc", 3), "abc");
-        assert_eq!(clip("abcd", 3), "ab…");
+        assert_eq!(clip("abcd", 3), "…");
         assert_eq!(clip("a", 0), "");
         assert_eq!(clip("ab", 1), "…");
         assert_eq!(clip("日本語", 4), "日…");
         assert_eq!(clip("日本語", 6), "日本語");
         assert_eq!(clip("a日本", 3), "a…");
         assert_eq!(clip("😀😀", 3), "😀…");
-        assert_eq!(clip("cafe\u{301}s", 4), "caf…");
+        assert_eq!(clip("cafe\u{301}s", 4), "…");
+        assert_eq!(clip("deploy the api", 12), "deploy the…");
+        assert_eq!(clip("deploy the api", 0), "");
         assert_eq!(clip("cafe\u{301}", 4), "cafe\u{301}");
     }
 
@@ -238,7 +466,8 @@ mod tests {
         assert_eq!(fit("", 0), "");
         assert_eq!(fit("abc", 0), "");
         assert_eq!(fit("abc", 3), "abc");
-        assert_eq!(fit("abcd", 3), "ab…");
+        assert_eq!(fit("abcd", 3), "…  ");
+        assert_eq!(fit("deploy the api", 9), "deploy…  ");
         assert_eq!(fit("日本", 3), "日…");
         assert_eq!(fit("a日本", 3), "a… ");
         assert_eq!(fit("日", 5), "日   ");
@@ -356,5 +585,118 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn cut_leaves_text_that_fits_whole() {
+        assert_eq!(cut("", 0), None);
+        assert_eq!(cut("deploy api", 10), None);
+        assert_eq!(cut("日本", 4), None);
+        assert_eq!(cut("cafe\u{301}", 4), None);
+    }
+
+    #[test]
+    fn cut_keeps_whole_words_and_drops_the_spaces_before_the_ellipsis() {
+        assert_eq!(cut("deploy the api", 12), Some("deploy the"));
+        assert_eq!(cut("deploy the api", 11), Some("deploy the"));
+        assert_eq!(cut("deploy the api", 10), Some("deploy"));
+        assert_eq!(cut("deploy   api", 9), Some("deploy"));
+        assert_eq!(cut("exit 1: the build", 8), Some("exit 1:"));
+    }
+
+    #[test]
+    fn cut_keeps_nothing_when_no_whole_word_fits() {
+        assert_eq!(cut("deployment", 5), Some(""));
+        assert_eq!(cut("ab", 1), Some(""));
+        assert_eq!(cut("abc", 0), Some(""));
+        assert_eq!(cut("1234567", 6), Some(""));
+    }
+
+    #[test]
+    fn cut_breaks_names_after_a_slash_a_dash_or_an_underscore() {
+        assert_eq!(cut("src/view.rs", 8), Some("src/"));
+        assert_eq!(cut("billing-team-lead", 14), Some("billing-team-"));
+        assert_eq!(cut("billing-team-lead", 13), Some("billing-"));
+        assert_eq!(cut("snake_case_name", 12), Some("snake_case_"));
+        assert_eq!(cut("/usr/local/bin", 9), Some("/usr/"));
+        assert_eq!(cut("-flag", 3), Some(""));
+    }
+
+    #[test]
+    fn cut_never_lands_right_after_a_bare_number() {
+        assert_eq!(cut("uploaded 12 files", 15), Some("uploaded"));
+        assert_eq!(cut("12 files", 5), Some(""));
+        assert_eq!(cut("2026-10-26 release", 15), Some(""));
+        assert_eq!(cut("12.5 kB left", 10), Some("12.5 kB"));
+        assert_eq!(cut("v1.2 build", 8), Some("v1.2"));
+        assert_eq!(cut("12日本", 4), Some(""));
+    }
+
+    #[test]
+    fn cut_goes_between_wide_glyphs_and_keeps_graphemes_whole() {
+        assert_eq!(cut("日本語のテキスト", 5), Some("日本"));
+        assert_eq!(cut("日本語", 1), Some(""));
+        assert_eq!(cut("a日本", 3), Some("a"));
+        assert_eq!(cut("deploy 日本語", 10), Some("deploy 日"));
+        assert_eq!(cut("😀😀 smile", 3), Some("😀"));
+        assert_eq!(cut("cafe\u{301} au lait", 8), Some("cafe\u{301} au"));
+    }
+
+    #[test]
+    fn cut_drops_whole_parts_between_spaced_separators() {
+        let parts = "build · deploy api · tests";
+        assert_eq!(cut(parts, 24), Some("build · deploy api"));
+        assert_eq!(cut(parts, 18), Some("build"));
+        assert_eq!(cut(parts, 5), Some(""));
+        assert_eq!(cut("a · b", 2), Some("a"));
+        assert_eq!(cut("build 12 · deploy api · x", 20), Some("build"));
+        assert_eq!(
+            cut("build 12 · deploy api · x", 23),
+            Some("build 12 · deploy api")
+        );
+        assert_eq!(cut("• item one two", 12), Some("• item one"));
+        assert_eq!(cut("v1 → v2 → v3", 9), Some("v1 → v2"));
+    }
+
+    #[test]
+    fn cut_is_a_prefix_that_fits_with_its_ellipsis_and_grows_with_the_room() {
+        for text in SAMPLES {
+            let mut kept = 0;
+            for width in 0..=40 {
+                let now = match cut(text, width) {
+                    None => {
+                        assert!(cells(text) <= width, "{text:?} at {width}");
+                        text.len()
+                    }
+                    Some(head) => {
+                        assert!(text.starts_with(head), "{text:?} at {width}");
+                        assert!(cells(head) < width.max(1), "{text:?} at {width}");
+                        assert_eq!(head.trim_end(), head, "{text:?} at {width}");
+                        head.len()
+                    }
+                };
+                assert!(now >= kept, "{text:?} at {width}");
+                kept = now;
+            }
+        }
+    }
+
+    #[test]
+    fn kept_hands_out_whole_runs_then_the_cut_one_and_its_style() {
+        let bold = Style::new().add_modifier(Modifier::BOLD);
+        let dim = Style::new().add_modifier(Modifier::DIM);
+        let spans = [("deploy", bold), (" the api", dim)];
+        let mut out = Vec::new();
+        let last = kept(&spans, 6, |text, style| out.push((text, style)));
+        assert_eq!(out, [("deploy", bold), ("", dim)]);
+        assert_eq!(last, dim);
+        let runs = spans.iter().map(|(text, _)| *text);
+        assert_eq!(keep(runs.clone(), 9), Some(6));
+        assert_eq!(keep(runs, 14), None);
+        let mut out = Vec::new();
+        assert_eq!(kept(&spans, 3, |text, style| out.push((text, style))), bold);
+        assert_eq!(out, [("dep", bold)]);
+        let none: [(&str, Style); 0] = [];
+        assert_eq!(kept(&none, 0, |_, _| {}), Style::new());
     }
 }

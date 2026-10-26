@@ -8,7 +8,7 @@ use ratatui::{Frame, buffer::Buffer, layout::Rect, style::Style};
 use crate::head::RULE;
 use crate::label::Span;
 use crate::palette::Palette;
-use crate::text::cells;
+use crate::text::{self, ELLIPSIS, cells};
 
 const LASTING: Duration = Duration::from_millis(180);
 const OPEN: &str = "▾";
@@ -120,9 +120,20 @@ impl Pen<'_> {
     }
 
     fn spans(&mut self, spans: &[Span], base: Style) {
-        for (text, style) in spans {
-            self.put(text, base.patch(*style));
+        let room = self.right.saturating_sub(self.x);
+        if self.full || room == 0 || spans_width(spans) <= room {
+            for (text, style) in spans {
+                self.put(text, base.patch(*style));
+            }
+            return;
         }
+        let runs = spans.iter().map(|(text, _)| text.as_ref());
+        let keep = text::keep(runs, usize::from(room)).unwrap_or_default();
+        let last = text::kept(spans, keep, |text, style| {
+            self.put(text, base.patch(style));
+        });
+        self.put(ELLIPSIS, base.patch(last));
+        self.full = true;
     }
 
     fn rule_to(&mut self, to: u16, style: Style) {

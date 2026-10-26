@@ -16,7 +16,7 @@ use crate::label::Span;
 use crate::layout::{Edge, PAD, Spot};
 use crate::screen::{Phase, Screen};
 use crate::shell::{Role, Tui};
-use crate::text::cells;
+use crate::text::{cells, clip};
 use crate::words::Words;
 
 const SIDES: u16 = 6;
@@ -621,7 +621,8 @@ impl<E: Send + 'static> Tui<E> {
                 .style(self.drawn.base);
             let inner = block.inner(place);
             frame.render_widget(block, place);
-            let text = Line::styled(toast.text.to_string(), style).alignment(Alignment::Center);
+            let text = clip(&toast.text, usize::from(inner.width));
+            let text = Line::styled(text, style).alignment(Alignment::Center);
             frame.render_widget(Paragraph::new(text), inner);
         }
     }

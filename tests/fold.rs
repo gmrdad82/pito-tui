@@ -170,9 +170,9 @@ fn the_summary_is_left_out_whole_when_the_row_is_too_narrow() {
 }
 
 #[test]
-fn the_title_clips_by_cells_and_never_splits_a_wide_glyph() {
+fn the_title_cuts_between_glyphs_with_an_ellipsis_and_never_splits_a_wide_glyph() {
     let column = Column::new(&[("日本語", "much", 5)]);
-    for width in 1..=6u16 {
+    for width in 1..=8u16 {
         let mut folds = Folds::new(["a"]);
         shut(&mut folds, &["a"]);
         let buf = draw(&mut folds, &column, (width, 2));
@@ -180,8 +180,14 @@ fn the_title_clips_by_cells_and_never_splits_a_wide_glyph() {
         assert!(cells(&first) <= usize::from(width), "{width}: {first}");
         assert!(first.starts_with('▸'));
         assert!(!first.contains("much"));
-        assert_eq!(first.contains('日'), width >= 4, "{width}: {first}");
-        assert_eq!(first.contains('本'), width >= 6, "{width}: {first}");
+        assert_eq!(first.contains('日'), width >= 5, "{width}: {first}");
+        assert_eq!(first.contains('本'), width >= 7, "{width}: {first}");
+        assert_eq!(first.contains('語'), width >= 8, "{width}: {first}");
+        assert_eq!(
+            first.contains('…'),
+            (3..8).contains(&width),
+            "{width}: {first}"
+        );
     }
 }
 
@@ -646,7 +652,7 @@ fn text_after_a_clipped_title_span_never_shows() {
     let mut folds = Folds::new(["a"]);
     shut(&mut folds, &["a"]);
     let first = row(&draw(&mut folds, &column, (7, 3)), 0);
-    assert_eq!(first, "▸ 日本a");
+    assert_eq!(first, "▸ 日本…");
 }
 
 #[test]

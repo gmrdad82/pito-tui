@@ -400,9 +400,9 @@ fn more_toasts_than_fit_are_dropped_not_drawn_out_of_bounds() {
     assert!(!text.contains("note 11"), "{text}");
     let small = dump::text(&tui.frame(40, 12));
     assert!(small.contains("note 00"));
-    let mut tui = run(vec![Act::Toast(Toast::new("a".repeat(200)))]);
+    let mut tui = run(vec![Act::Toast(Toast::new("word ".repeat(60)))]);
     let buffer = frame(&mut tui);
-    let Some((x, y)) = found(&buffer, "aaaa") else {
+    let Some((x, y)) = found(&buffer, "word") else {
         panic!("the wide toast is drawn:\n{}", dump::text(&buffer));
     };
     let left = (0..x).rev().find(|at| buffer[(*at, y)].symbol() == "│");
@@ -411,15 +411,21 @@ fn more_toasts_than_fit_are_dropped_not_drawn_out_of_bounds() {
         panic!("the wide toast is boxed:\n{}", dump::text(&buffer));
     };
     assert!(right < WIDTH && right - left > WIDTH / 2, "{left}..{right}");
-    assert!(
-        (left + 1..right).all(|at| buffer[(at, y)].symbol() == "a"),
-        "the text fills the box and is cut at its right border"
-    );
+    let inner: String = (left + 1..right)
+        .map(|at| buffer[(at, y)].symbol())
+        .collect();
+    let body = inner.trim_end();
+    assert!(body.ends_with("word…"), "cut after a whole word: {body:?}");
     assert_eq!(
         buffer[(right, y - 1)].symbol(),
         "╮",
         "the top right corner is drawn"
     );
+    let mut tui = run(vec![Act::Toast(Toast::new("a".repeat(200)))]);
+    let buffer = frame(&mut tui);
+    let text = dump::text(&buffer);
+    assert!(text.contains('…') && !text.contains("aaaa"), "{text}");
+    assert!(text.contains('╮'), "{text}");
 }
 
 #[test]
