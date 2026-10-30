@@ -1,9 +1,9 @@
 use std::borrow::Cow;
 use std::time::Duration;
 
+use crate::footer::{Edit, Hint, Input, InputBar, Key};
+use crate::list::{Cell, Column, Keys, List, Part as Piece, Row, Step};
 use crossterm::event::{KeyCode, KeyEvent};
-use pito_footer::{Edit, Hint, Input, InputBar, Key};
-use pito_list::{Cell, Column, Keys, List, Part as Piece, Row, Step};
 use ratatui::{
     Frame,
     layout::Rect,

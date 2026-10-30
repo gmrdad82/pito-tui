@@ -1,9 +1,9 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
+use crate::footer::{Input, InputBar};
+use crate::list::{Cell, Column, Key, Keys, List, ListView, Row, Source};
 use crossterm::event::KeyEvent;
-use pito_footer::{Input, InputBar};
-use pito_list::{Cell, Column, Key, Keys, List, ListView, Row, Source};
 use ratatui::{
     Frame,
     buffer::Buffer,

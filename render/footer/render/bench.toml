@@ -1,0 +1,20 @@
+title = "DRAW TIME PER PART"
+unit = "MICROSECONDS PER DRAW"
+better = "lower"
+subtitle = "150×40 CELLS, MEAN OF 20,000 FRAMES, RYZEN 9 9950X"
+date = "2026-10-14"
+suffix = " US"
+
+[[parties]]
+name = "PITO-FOOTER 1.0.0"
+
+[[groups]]
+name = "ONE FRAME DRAWS ALL SIX IN 38.5 US (MEAN)"
+rows = [
+  { label = "HINTS AND NOTICE", values = [8.37] },
+  { label = "INPUT BAR", values = [8.08] },
+  { label = "STATUS ROW", values = [7.61] },
+  { label = "WRAPPED HINTS", values = [5.85] },
+  { label = "MASKED INPUT BAR", values = [5.52] },
+  { label = "CONFIRM BAR", values = [3.06] },
+]

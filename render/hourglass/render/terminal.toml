@@ -1,0 +1,59 @@
+app = "pito-tui"
+bin = "hourglass_demo"
+grid = [30, 10]
+frame = "bare"
+
+[build]
+command = "cargo build --release --locked --example hourglass_demo --example hourglass_gallery --example hourglass_fit --example hourglass_frames"
+bin_dir = "{target}/release/examples"
+
+[theme]
+name = "hourglass"
+background = "#141821"
+foreground = "#e3e7ef"
+cursor = "#92a6d9"
+selection = "#334054"
+black = "#141821"
+red = "#d9603b"
+green = "#91b79a"
+yellow = "#d6b078"
+blue = "#6f86d6"
+magenta = "#c38bd9"
+cyan = "#82abb8"
+white = "#e3e7ef"
+brightBlack = "#7a8699"
+brightRed = "#e88668"
+brightGreen = "#afd4b7"
+brightYellow = "#f0ca91"
+brightBlue = "#9aaceb"
+brightMagenta = "#dcadf0"
+brightCyan = "#a8cfda"
+brightWhite = "#ffffff"
+
+[shots.hourglass_demo]
+kind = "clip"
+line = "The README's example: the glass drains and flips while its label shimmers"
+tape = "render/terminal/demo.tape"
+launch = "hourglass_demo"
+settle = "1500ms"
+
+[shots.hourglass_gallery]
+kind = "clip"
+line = "Four apps' hourglasses, each with its own copy, script and accent"
+tape = "render/terminal/gallery.tape"
+launch = "hourglass_gallery"
+settle = "1500ms"
+
+[shots.hourglass_fit]
+kind = "clip"
+line = "One hourglass as its area shrinks: the glass goes first, then the hint, then the label is cut"
+tape = "render/terminal/fit.tape"
+launch = "hourglass_fit"
+settle = "1500ms"
+
+[shots.hourglass_frames]
+kind = "still"
+line = "The 13 frames and the time each one starts"
+tape = "render/terminal/frames.tape"
+launch = "hourglass_frames"
+settle = "1500ms"

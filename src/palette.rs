@@ -1,9 +1,9 @@
 use std::time::Duration;
 
-use pito_footer::Styles as FooterStyles;
-use pito_header::Styles as HeaderStyles;
-use pito_hourglass::Hourglass;
-use pito_list::{Bar, Column, Count, List, ListView, Source, Styles as ListStyles};
+use crate::footer::Styles as FooterStyles;
+use crate::header::Styles as HeaderStyles;
+use crate::hourglass::Hourglass;
+use crate::list::{Bar, Column, Count, List, ListView, Source, Styles as ListStyles};
 use ratatui::style::{Color, Modifier, Style};
 
 const GOOD: Color = Color::Rgb(0x8c, 0xe6, 0xb4);
@@ -277,7 +277,7 @@ impl Palette {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pito_list::{Count, Row};
+    use crate::list::{Count, Row};
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
     use ratatui::widgets::Widget;
