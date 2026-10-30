@@ -235,3 +235,80 @@ fn a_panel_drawn_with_another_keymap_shows_that_keymaps_rows() {
         "{other}"
     );
 }
+
+#[test]
+fn an_empty_title_leaves_the_top_border_whole() {
+    static BARE: LazyLock<Keymap<()>> = LazyLock::new(|| {
+        Keymap::new()
+            .words(Words {
+                title: "".into(),
+                ..Words::default()
+            })
+            .modes(&[ALPHA])
+            .group("Grp", [bind("x", "zaps", ()).on(ALPHA)])
+    });
+    let at = moment();
+    let mut panel = Panel::new().still(true);
+    panel.toggle(at);
+    let mut buffer = Buffer::empty(Rect::new(0, 0, 80, 24));
+    let area = buffer.area;
+    let palette = Palette::new(Color::Cyan);
+    panel.draw(&mut buffer, area, &palette, &*BARE, Now::new(ALPHA), at);
+    let text = shown(&buffer);
+    let top = text.lines().find(|line| line.contains('╭'));
+    let top = top.unwrap_or_default().trim();
+    let inner = top.trim_start_matches('╭').trim_end_matches('╮');
+    assert!(
+        !inner.is_empty() && inner.chars().all(|c| c == '─'),
+        "{text}"
+    );
+}
+
+#[test]
+fn keys_wider_than_their_column_end_in_an_ellipsis() {
+    static WIDE_KEYS: LazyLock<Keymap<()>> = LazyLock::new(|| {
+        Keymap::new().modes(&[ALPHA]).group(
+            "Grp",
+            [
+                bind("x", "zaps", ()).on(ALPHA),
+                bind("f2", "jumps far", ())
+                    .on(ALPHA)
+                    .shown("f2 or the very long name of a key"),
+            ],
+        )
+    });
+    let at = moment();
+    let mut panel = Panel::new().still(true);
+    panel.toggle(at);
+    let mut buffer = Buffer::empty(Rect::new(0, 0, 80, 24));
+    let area = buffer.area;
+    let palette = Palette::new(Color::Cyan);
+    panel.draw(
+        &mut buffer,
+        area,
+        &palette,
+        &*WIDE_KEYS,
+        Now::new(ALPHA),
+        at,
+    );
+    let text = shown(&buffer);
+    let far = text.lines().find(|line| line.contains("jumps far"));
+    let far = far.unwrap_or_default();
+    assert!(far.contains("f2 or the very long nam…"), "{text}");
+    assert!(!far.contains("of a key"), "{text}");
+    let zaps = text.lines().find(|line| line.contains("zaps"));
+    assert!(!zaps.unwrap_or_default().contains('…'), "{text}");
+}
+
+#[test]
+fn a_huge_paste_fills_the_query_to_its_limit_and_no_further() {
+    let at = moment();
+    let mut panel = Panel::new().still(true);
+    typed(&mut panel, "?/ab", at);
+    let huge = "x\ty".repeat(100_000);
+    assert!(panel.paste(&huge));
+    let query = panel.sheet().query();
+    assert_eq!(query.chars().count(), 64, "{query}");
+    assert!(query.starts_with("abx y"), "{query}");
+    assert!(!query.contains('\t'), "{query}");
+}

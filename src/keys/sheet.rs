@@ -1,7 +1,7 @@
 use crate::keys::chord::{Chord, Key, Mods};
 use crate::keys::keymap::{Group, Keymap, Mode, Now, Row};
 
-const QUERY_CHARS: usize = 64;
+pub(crate) const QUERY_CHARS: usize = 64;
 const QUERY_TERMS: usize = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -144,6 +144,21 @@ impl Sheet {
                 || (typed && matches!(chord.key, Key::Char(_) | Key::Space));
         }
         plain && matches!(chord.key, Key::Char('?' | '/') | Key::Esc)
+    }
+
+    pub(crate) fn takes_text(&self, keys: &str) -> bool {
+        if let Some(chord) = Chord::read(keys) {
+            return self.takes(chord);
+        }
+        keys.split_whitespace()
+            .filter(|word| *word != "/")
+            .any(|word| match Chord::read(word) {
+                Some(chord) => self.takes(chord),
+                None => word
+                    .split('/')
+                    .filter_map(Chord::read)
+                    .any(|chord| self.takes(chord)),
+            })
     }
 
     fn type_key(&mut self, chord: Chord) -> Outcome {

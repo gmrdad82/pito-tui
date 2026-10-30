@@ -4,6 +4,7 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 use pito_tui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use pito_tui::footer::Hint;
 use pito_tui::header::NavKeys;
 use pito_tui::keys::{Keymap, Mode, Now, When, bind};
 use pito_tui::ratatui::{
@@ -103,9 +104,14 @@ impl Screen<()> for Plain {
 }
 
 fn tui(still: bool) -> Tui<()> {
+    hinted(still, [])
+}
+
+fn hinted<const N: usize>(still: bool, hints: [Hint<'static>; N]) -> Tui<()> {
     let mut tui = Tui::new("steady", "1.0.0", Color::Cyan)
         .nav_keys(NavKeys::NONE)
         .screen("Clips", Plain)
+        .hints(hints)
         .keymap(&KEYS)
         .keys_now(Now::new(RAIL).when(&[PLAYING]))
         .still_sheet(still);
@@ -167,6 +173,25 @@ fn a_steady_frame_with_keymap_hints_and_the_sheet_shut_allocates_nothing() {
         let (count, shown) = steady(&mut tui, width, height);
         assert_eq!(count, 0, "{width}x{height}");
         assert!(shown.contains("space or esc stops it"), "{shown}");
+    }
+}
+
+#[test]
+fn a_steady_frame_filtering_app_hints_under_the_open_sheet_allocates_nothing() {
+    let hints = [
+        Hint::new("x", "marks"),
+        Hint::new("↑/↓", "moves"),
+        Hint::new("space or tab", "steps"),
+        Hint::new("a key with a name far too long to be one", "waits"),
+    ];
+    for keys in ["?", "?/u"] {
+        for (width, height) in SIZES {
+            let mut tui = hinted(true, hints);
+            press(&mut tui, keys);
+            let (count, shown) = steady(&mut tui, width, height);
+            assert_eq!(count, 0, "{keys} {width}x{height}");
+            assert!(shown.contains("Keys"), "{shown}");
+        }
     }
 }
 

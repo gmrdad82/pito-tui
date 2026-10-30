@@ -372,11 +372,11 @@ impl<A> Keymap<A> {
 
     pub fn hints(&self, now: Now) -> Vec<Hint<'_>> {
         let mut hints = Vec::with_capacity(self.spots_in(now.mode).len() + 1);
-        self.each_hint(now, |hint| hints.push(hint));
+        self.each_hint(now, |hint, _| hints.push(hint));
         hints
     }
 
-    pub(crate) fn each_hint<'k>(&'k self, now: Now, put: impl FnMut(Hint<'k>)) {
+    pub(crate) fn each_hint<'k>(&'k self, now: Now, put: impl FnMut(Hint<'k>, bool)) {
         self.walk(now, Some(self.help_hint()), |_| false, put);
     }
 
@@ -405,7 +405,7 @@ impl<A> Keymap<A> {
         }
         let help = (!sheet.typing()).then(|| self.help_hint());
         let taken = |bind: &Bind<A>| bind.chords.iter().any(|chord| sheet.takes(*chord));
-        self.walk(now, help, taken, |hint| put(hint, false));
+        self.walk(now, help, taken, put);
     }
 
     fn walk<'k>(
@@ -413,7 +413,7 @@ impl<A> Keymap<A> {
         now: Now,
         mut help: Option<Hint<'k>>,
         skip: impl Fn(&Bind<A>) -> bool,
-        mut put: impl FnMut(Hint<'k>),
+        mut put: impl FnMut(Hint<'k>, bool),
     ) {
         for bind in self.spots_in(now.mode).iter().map(|spot| self.at(*spot)) {
             if !now.holds(bind.when) || skip(bind) {
@@ -422,12 +422,12 @@ impl<A> Keymap<A> {
             if bind.rank > 0
                 && let Some(help) = help.take()
             {
-                put(help);
+                put(help, true);
             }
-            put(bind.hint());
+            put(bind.hint(), false);
         }
         if let Some(help) = help {
-            put(help);
+            put(help, true);
         }
     }
 

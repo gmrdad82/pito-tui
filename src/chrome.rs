@@ -728,6 +728,14 @@ impl<E: Send + 'static> Tui<E> {
         let screen = &self.screens[index].screen;
         let again = self.quit.notice().filter(|text| !text.is_empty());
         let mut hints = recycle(std::mem::take(&mut self.hint_buf));
+        let now = Now {
+            mode: self.keys_mode,
+            when: &self.keys_when,
+        };
+        let sheet = self.panel.sheet();
+        let keymap = self.keymap.filter(|_| !self.gated);
+        let open = keymap.is_some() && sheet.is_open();
+        let kept = |hint: &Hint| !open || !sheet.takes_text(hint.key);
         let prompted = match (self.out.modals.last(), &self.out.picking) {
             (Some(top), _) => {
                 hints.extend_from_slice(&top.modal.hints);
@@ -738,25 +746,24 @@ impl<E: Send + 'static> Tui<E> {
                 true
             }
             (None, None) => {
+                if let Some(keymap) = keymap.filter(|_| open) {
+                    keymap.hints(now, sheet, &mut hints);
+                }
                 let list = screen.hint_list();
                 if list.is_empty() {
-                    hints.extend(screen.hints());
+                    hints.extend(screen.hints().into_iter().filter(|hint| kept(hint)));
                 } else {
-                    hints.extend_from_slice(list);
+                    hints.extend(list.iter().filter(|hint| kept(hint)).copied());
                 }
                 false
             }
         };
         if !self.gated {
-            if let Some(keymap) = self.keymap.filter(|_| !prompted) {
-                let now = Now {
-                    mode: self.keys_mode,
-                    when: &self.keys_when,
-                };
-                keymap.hints(now, self.panel.sheet(), &mut hints);
+            if let Some(keymap) = keymap.filter(|_| !prompted && !open) {
+                keymap.hints(now, sheet, &mut hints);
             }
             let shown = self.hints.iter().filter(|hint| !prompted || hint.pinned);
-            hints.extend(shown.copied());
+            hints.extend(shown.filter(|hint| kept(hint)).copied());
         }
         if again.is_some() && !self.quit_hints {
             hints.clear();

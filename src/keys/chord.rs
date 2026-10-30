@@ -1,6 +1,8 @@
 use std::fmt;
 use std::ops::BitOr;
 
+const WORD: usize = 16;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Key {
@@ -99,7 +101,10 @@ impl Chord {
     }
 
     pub fn parse(text: &str) -> Result<Chord, Unknown> {
-        let unknown = || Unknown(text.to_string());
+        Chord::read(text).ok_or_else(|| Unknown(text.to_string()))
+    }
+
+    pub(crate) fn read(text: &str) -> Option<Chord> {
         let text = text.trim();
         let (mods, key) = if text == "+" {
             ("", "+")
@@ -112,18 +117,25 @@ impl Chord {
             }
         };
         let mut all = Mods::NONE;
+        let mut buf = [0u8; WORD];
         for word in mods.split('+').filter(|word| !word.is_empty()) {
-            all = all.with(match word.to_ascii_lowercase().as_str() {
+            all = all.with(match lowered(word, &mut buf)? {
                 "ctrl" | "control" => Mods::CTRL,
                 "alt" | "option" => Mods::ALT,
                 "shift" => Mods::SHIFT,
                 "super" | "cmd" | "command" | "meta" => Mods::SUPER,
-                _ => return Err(unknown()),
+                _ => return None,
             });
         }
-        let key = named(key).ok_or_else(unknown)?;
-        Ok(Chord::new(key, all))
+        Some(Chord::new(named(key)?, all))
     }
+}
+
+fn lowered<'b>(word: &str, buf: &'b mut [u8; WORD]) -> Option<&'b str> {
+    let out = buf.get_mut(..word.len())?;
+    out.copy_from_slice(word.as_bytes());
+    out.make_ascii_lowercase();
+    std::str::from_utf8(out).ok()
 }
 
 fn named(word: &str) -> Option<Key> {
@@ -137,8 +149,9 @@ fn named(word: &str) -> Option<Key> {
             c => Key::Char(c),
         });
     }
-    let lower = word.to_ascii_lowercase();
-    Some(match lower.as_str() {
+    let mut buf = [0u8; WORD];
+    let lower = lowered(word, &mut buf)?;
+    Some(match lower {
         "space" => Key::Space,
         "enter" | "return" => Key::Enter,
         "esc" | "escape" => Key::Esc,

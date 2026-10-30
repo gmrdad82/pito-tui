@@ -1293,9 +1293,6 @@ impl<E: Send + 'static> Tui<E> {
 
     fn apply(&mut self) -> Flow {
         self.absorb();
-        if self.covered() {
-            self.panel.shut();
-        }
         self.pending()
     }
 
@@ -1405,6 +1402,9 @@ impl<E: Send + 'static> Tui<E> {
         }
         if let Some(screen) = self.out.go.take() {
             self.go(screen);
+        }
+        if self.covered() {
+            self.panel.shut();
         }
     }
 

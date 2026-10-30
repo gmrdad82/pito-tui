@@ -12,11 +12,11 @@ use ratatui::{
 use crate::fold::ease;
 use crate::footer::Hint as Shown;
 use crate::keys::chord::Chord;
-use crate::keys::keymap::{Keymap, Mode, Now, Row, When};
-use crate::keys::sheet::{Outcome, Sheet};
+use crate::keys::keymap::{Hint, Keymap, Mode, Now, Row, When};
+use crate::keys::sheet::{Outcome, QUERY_CHARS, Sheet};
 use crate::layout::Spot;
 use crate::palette::Palette;
-use crate::text::cells;
+use crate::text::{ELLIPSIS, cells};
 
 const LASTING: Duration = Duration::from_millis(180);
 const KEYS: u16 = 24;
@@ -172,7 +172,9 @@ impl<'k> Panel<'k> {
         }
         if self.sheet.typing() {
             let mut query = String::from(self.sheet.query());
-            query.extend(text.chars().map(|c| if c.is_control() { ' ' } else { c }));
+            let room = QUERY_CHARS.saturating_sub(query.chars().count());
+            let pasted = text.chars().take(room);
+            query.extend(pasted.map(|c| if c.is_control() { ' ' } else { c }));
             self.sheet.search(query);
             self.stale = true;
         }
@@ -322,9 +324,11 @@ impl<'k> Panel<'k> {
         let edge = place
             .right()
             .saturating_sub(if self.top > 0 { 3 } else { 2 });
-        let x = put(buf, place.x + 2, place.y, edge, " ", palette.selected);
-        let x = put(buf, x, place.y, edge, self.title, palette.selected);
-        put(buf, x, place.y, edge, " ", palette.selected);
+        if !self.title.is_empty() {
+            let x = put(buf, place.x + 2, place.y, edge, " ", palette.selected);
+            let x = put(buf, x, place.y, edge, self.title, palette.selected);
+            put(buf, x, place.y, edge, " ", palette.selected);
+        }
         let head = self.head.min(height - 2);
         let body = height - 2 - head;
         let top = self.top;
@@ -411,7 +415,12 @@ impl Pen<'_> {
                 };
                 let start = x + 3;
                 let stop = self.right.min(start.saturating_add(self.keys));
-                put(self.buf, start, y, stop, row.keys, key);
+                if width(row.keys) > stop.saturating_sub(start) {
+                    let cut = put(self.buf, start, y, stop.saturating_sub(1), row.keys, key);
+                    put(self.buf, cut, y, stop, ELLIPSIS, key);
+                } else {
+                    put(self.buf, start, y, stop, row.keys, key);
+                }
                 let mut at = start.saturating_add(self.keys).saturating_add(2);
                 at = self.put(at, y, row.does, does);
                 if let Some(note) = row.note {
@@ -452,13 +461,14 @@ pub(crate) trait Map {
 
 impl<A> Map for Keymap<A> {
     fn hints<'k>(&'k self, now: Now<'_>, sheet: &Sheet, into: &mut Vec<Shown<'k>>) {
+        let put = |hint: Hint<'k>, own: bool| {
+            let shown = Shown::from(hint);
+            into.push(if own { shown.pinned() } else { shown });
+        };
         if sheet.is_open() {
-            self.each_open_hint(now, sheet, |hint, own| {
-                let shown = Shown::from(hint);
-                into.push(if own { shown.pinned() } else { shown });
-            });
+            self.each_open_hint(now, sheet, put);
         } else {
-            self.each_hint(now, |hint| into.push(hint.into()));
+            self.each_hint(now, put);
         }
     }
 

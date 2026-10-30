@@ -136,14 +136,17 @@ holds one place for the whole app. A keymap whose words arrive at run time is
 built once and kept in a `LazyLock` or with `Box::leak`, as `Tui::keymap`
 takes it `&'static`.
 The footer then shows `keys.hints(now)` in the keymap's order, ranks and
-words, beside the app's own `Tui::hints`; `?` opens the sheet, drawn as a
-centred overlay over the screen, eased open and closed (at once with
-`Tui::still_sheet(true)`), scrolling a page at a time when it outgrows the
-area, with no allocation on a steady frame. While it is open, keys go to the sheet
-first and those it passes on reach the screen as usual; the footer shows the
-sheet's own keys first (esc, `/`, pgup / pgdn, or esc and enter while a search
-is typed) and leaves out any app hint on a key the sheet takes just then; a
-layer a passed-on key opens closes the sheet at once; `ctrl+c` always quits. A screen still asks the keymap what a key does:
+words, beside the app's own `Tui::hints`, with `?` kept on it however full it
+is; `?` opens the sheet, drawn as a centred overlay over the screen, eased
+open and closed (at once with `Tui::still_sheet(true)`), scrolling a page at
+a time when it outgrows the area, with no allocation on a steady frame.
+While it is open, keys go to the sheet first and those it passes on reach
+the screen as usual; the footer shows the sheet's own keys first (esc, `/`,
+pgup / pgdn, or esc and enter while a search is typed) and leaves out any
+keymap, screen or app hint on a key the sheet takes just then; a layer a
+passed-on key opens closes the sheet at once; `ctrl+c` always quits.
+
+A screen still asks the keymap what a key does:
 
 ```rust,ignore
 fn key(&mut self, key: KeyEvent, cx: &mut Cx<'_, Msg>) {

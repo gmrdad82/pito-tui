@@ -2090,18 +2090,21 @@ can't stall the frame.
   changes the wording to the app's voice.
 - A screen typing into its own input gets `?` as text: the shell asks the
   sheet only when no screen is typing.
-- Keys follow what is shown: while the sheet is open the footer shows its
-  own keys first, and never drops them for width: esc with `Words::close`
+- Keys follow what is shown: with the sheet shut, `?` with `Words::hint`
+  stays on the footer however full it is, and beside a notice that takes
+  the footer over. While the sheet is open the footer shows its own keys
+  first, and never drops them for width: esc with `Words::close`
   (`Words::clear` once there is a search), `/` with `Words::search` and
   pgup / pgdn with `Words::scroll`; while a search is typed, esc with
-  `Words::clear` and enter with `Words::keep`. An app hint on a key the
-  sheet takes just then (`sheet.takes(chord)`), such as space while typing,
-  leaves the footer until the sheet lets that key through again.
+  `Words::clear` and enter with `Words::keep`. A keymap, screen or
+  `Tui::hints` hint on a key the sheet takes just then (`sheet.takes(chord)`,
+  the hint's keys read as the keymap writes them), such as space while
+  typing, leaves the footer until the sheet lets that key through again.
 - When a key the sheet passed on opens a modal, a pick, a confirm, a
   takeover or a typing input, or shuts the gate, the sheet closes at once,
-  without easing, so nothing acts or draws hidden under it. While it searches a paste goes to
-  its query; while it is open otherwise a paste goes nowhere, and so does a
-  click or a wheel.
+  without easing, so nothing acts or draws hidden under it. While it
+  searches a paste goes to its query; while it is open otherwise a paste
+  goes nowhere, and so does a click or a wheel.
 - A visible Help or `?` button calls `cx.toggle_sheet()`.
 - `ctrl+c` quits from anywhere, the open sheet and its search included.
 
