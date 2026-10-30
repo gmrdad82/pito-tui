@@ -6,8 +6,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 use std::time::Instant;
 
+use crate::footer::{Confirm, Hint, InputBar, Notice, Tone};
 use crossterm::event::{KeyEvent, MouseEvent};
-use pito_footer::{Confirm, Hint, InputBar, Notice, Tone};
 use ratatui::{Frame, layout::Rect, style::Style, text::Line};
 
 use crate::activity::{Activity, Change};

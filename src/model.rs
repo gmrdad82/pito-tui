@@ -1,5 +1,5 @@
-use pito_footer::Key;
-use pito_header::{Nav, NavKeys};
+use crate::footer::Key;
+use crate::header::{Nav, NavKeys};
 
 use crate::label::Label;
 

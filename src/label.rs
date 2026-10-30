@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use pito_header::{Group, Section};
+use crate::header::{Group, Section};
 use ratatui::style::Style;
 
 pub type Span = (Cow<'static, str>, Style);

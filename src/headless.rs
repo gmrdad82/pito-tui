@@ -91,9 +91,9 @@ impl<E: Send + 'static> Tui<E> {
 
 #[cfg(test)]
 mod tests {
+    use crate::footer::Key;
+    use crate::header::Section;
     use crossterm::event::{KeyCode, KeyModifiers};
-    use pito_footer::Key;
-    use pito_header::Section;
     use ratatui::{
         Frame,
         layout::Rect,

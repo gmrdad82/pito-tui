@@ -1,0 +1,85 @@
+app = "pito-tui"
+bin = "list_demo"
+grid = [96, 16]
+frame = "window"
+typing = "35ms"
+
+[build]
+command = "cargo build --release --locked --example list_demo"
+bin_dir = "{target}/release/examples"
+
+[theme]
+name = "Catppuccin Mocha"
+background = "#1e1e2e"
+foreground = "#cdd6f4"
+selection = "#45475a"
+cursor = "#f5e0dc"
+black = "#45475a"
+red = "#f38ba8"
+green = "#a6e3a1"
+yellow = "#f9e2af"
+blue = "#89b4fa"
+magenta = "#f5c2e7"
+cyan = "#94e2d5"
+white = "#bac2de"
+brightBlack = "#585b70"
+brightRed = "#f38ba8"
+brightGreen = "#a6e3a1"
+brightYellow = "#f9e2af"
+brightBlue = "#89b4fa"
+brightMagenta = "#f5c2e7"
+brightCyan = "#94e2d5"
+brightWhite = "#a6adc8"
+
+[shots.list_demo]
+kind = "clip"
+line = "The demo example: sections, a moving selection, a range, live sizes and the view following to the end with a scrollbar and a count of the rows on screen"
+tape = "render/terminal/demo.tape"
+launch = "list_demo"
+settle = "1s"
+closure = { crossfade = 0.4 }
+status = "SHIPPED"
+
+[shots.list_range]
+kind = "clip"
+line = "A selected range across a section: v starts it, the cursor moves, every row between draws selected"
+tape = "render/terminal/range.tape"
+launch = "list_demo"
+settle = "1s"
+closure = { crossfade = 0.4 }
+status = "SHIPPED"
+
+[shots.list_scroll]
+kind = "clip"
+line = "Paging and the ends: the view follows the selection with a scrollbar and the rows on screen counted at its foot"
+tape = "render/terminal/scroll.tape"
+launch = "list_demo"
+settle = "1s"
+closure = { crossfade = 0.4 }
+status = "SHIPPED"
+
+[shots.list_live]
+kind = "clip"
+line = "Rows rewritten in place: sizes and messages change and warm every 120 ms while the list stays"
+tape = "render/terminal/live.tape"
+launch = "list_demo"
+settle = "1s"
+closure = { crossfade = 0.4 }
+status = "SHIPPED"
+
+[shots.list_narrow]
+kind = "still"
+line = "The same list at 96, 46 and 38 columns (--set grid=46x16 and 38x16): Size drops first, then Version, and the messages clip"
+tape = "render/terminal/narrow.tape"
+launch = "list_demo"
+settle = "1s"
+status = "SHIPPED"
+
+[shots.list_columns]
+kind = "clip"
+line = "The terminal eases from 96 to 38 columns and back: Size drops first, then Version, the messages clip, and both columns return as the width comes back"
+tape = "render/terminal/columns.tape"
+launch = "list_demo"
+settle = "1s"
+closure = { crossfade = 0.4 }
+status = "SHIPPED"

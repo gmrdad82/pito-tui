@@ -1,0 +1,22 @@
+title = "PITO-LIST FRAME TIME"
+unit = "MEAN MICROSECONDS PER FRAME"
+better = "lower"
+subtitle = "150X40, 20,000 FRAMES EACH, RYZEN 9 9950X, EXAMPLES/BENCH.RS"
+date = "2026-10-14"
+suffix = " US"
+parties = [{ name = "PITO-LIST" }]
+
+[[groups]]
+name = "OWNED, 20,000 ROWS"
+rows = [
+  { label = "PLAIN", values = [288.9] },
+  { label = "RANGE, THEMED, 4 REWRITTEN", values = [302.5] },
+  { label = "COLUMNS FIT THEIR CELLS", values = [305.2] },
+]
+
+[[groups]]
+name = "BUILT ON DEMAND, 100,000 ITEMS"
+rows = [
+  { label = "LAZY, IN GROUPS OF 25", values = [291.8] },
+  { label = "SHARED, BAR AND COUNT", values = [353.5] },
+]

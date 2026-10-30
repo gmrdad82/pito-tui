@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
-use pito_footer::{Hint, Key};
-use pito_list::{Cell, Column, Keys, List, Row};
+use crate::footer::{Hint, Key};
+use crate::list::{Cell, Column, Keys, List, Row};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -152,8 +152,8 @@ impl Pick {
 
 #[cfg(test)]
 mod tests {
+    use crate::header::Section;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    use pito_header::Section;
     use ratatui::{Terminal, backend::TestBackend, style::Color};
 
     use super::*;

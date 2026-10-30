@@ -1,0 +1,81 @@
+app = "pito-tui"
+bin = "footer_demo"
+grid = [90, 14]
+frame = "window"
+typing = "35ms"
+
+[build]
+command = "cargo build --release --locked --example footer_demo --example footer_gallery"
+bin_dir = "{target}/release/examples"
+
+[env]
+HOME = "home"
+
+[theme]
+name = "pito-footer"
+background = "#1e1e2e"
+foreground = "#cdd6f4"
+selection = "#45475a"
+cursor = "#f5e0dc"
+black = "#45475a"
+red = "#f38ba8"
+green = "#a6e3a1"
+yellow = "#f9e2af"
+blue = "#89b4fa"
+magenta = "#f5c2e7"
+cyan = "#94e2d5"
+white = "#bac2de"
+brightBlack = "#585b70"
+brightRed = "#f38ba8"
+brightGreen = "#a6e3a1"
+brightYellow = "#f9e2af"
+brightBlue = "#89b4fa"
+brightMagenta = "#f5c2e7"
+brightCyan = "#94e2d5"
+brightWhite = "#a6adc8"
+
+[shots.footer_demo]
+kind = "clip"
+line = "The example's task list: hints, a notice, a search input, a delete confirm, ? and the ctrl+c guard"
+tape = "render/terminal/demo.tape"
+launch = "footer_demo"
+settle = "1s"
+closure = { crossfade = 0.5 }
+status = "SHIPPED"
+
+[shots.footer_fit]
+kind = "still"
+line = "One set of hints at four widths and wrapped: the highest rank drops first, the pinned hint stays"
+tape = "render/terminal/still.tape"
+launch = "footer_gallery fit"
+settle = "1s"
+
+[shots.footer_notices]
+kind = "still"
+line = "The notice line in each tone, and an over notice that wraps across the hint rows"
+tape = "render/terminal/still.tape"
+launch = "footer_gallery notices"
+settle = "1s"
+
+[shots.footer_status]
+kind = "still"
+line = "Footer::status at four widths: segments dropped and clipped by rank, the version first to go"
+tape = "render/terminal/still.tape"
+launch = "footer_gallery status"
+settle = "1s"
+
+[shots.footer_input]
+kind = "clip"
+line = "The one-line input with diacritics and wide glyphs, scrolling and word delete, and a masked key field"
+tape = "render/terminal/input.tape"
+launch = "footer_gallery input"
+settle = "1s"
+closure = { crossfade = 0.5 }
+
+[shots.footer_confirm]
+kind = "clip"
+line = "A y/n confirm over the hint line, then the quit guard arming and asking while an import runs"
+tape = "render/terminal/confirm.tape"
+launch = "footer_gallery confirm"
+settle = "1s"
+closure = { crossfade = 0.5 }

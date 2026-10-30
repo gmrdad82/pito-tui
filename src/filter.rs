@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 
+use crate::footer::{Edit, Input, InputBar, Key, Tone};
+use crate::list::{Column, Keys, List, ListView, Row, Step};
 use crossterm::event::KeyEvent;
-use pito_footer::{Edit, Input, InputBar, Key, Tone};
-use pito_list::{Column, Keys, List, ListView, Row, Step};
 
 use crate::palette::Palette;
 

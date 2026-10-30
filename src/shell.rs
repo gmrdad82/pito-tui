@@ -7,12 +7,12 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crossterm::event::{Event, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
-use pito_footer::{
+use crate::footer::{
     Answer, Footer, Guard, Help, Hint, Key, Mode, QuitGuard, Tone as Said, WINDOW, Wording,
 };
-use pito_header::{Action, Group, Header, Nav, NavKeys, Section, Step as Move};
-use pito_list::Step;
+use crate::header::{Action, Group, Header, Nav, NavKeys, Section, Step as Move};
+use crate::list::Step;
+use crossterm::event::{Event, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 

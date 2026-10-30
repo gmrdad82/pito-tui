@@ -443,56 +443,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "pito-footer"
-version = "1.1.0"
-source = "git+https://github.com/gmrdad82/pito-footer?tag=v1.1.0#e7cb3731ed7f7440085e84382f6b6242c9f03673"
-dependencies = [
- "crossterm",
- "ratatui",
- "unicode-segmentation",
- "unicode-width",
-]
-
-[[package]]
-name = "pito-header"
-version = "1.1.2"
-source = "git+https://github.com/gmrdad82/pito-header?tag=v1.1.2#adeca3cdad3cbe6eaba26a10fa407ba271460e27"
-dependencies = [
- "crossterm",
- "ratatui",
- "unicode-segmentation",
- "unicode-width",
-]
-
-[[package]]
-name = "pito-hourglass"
-version = "1.0.2"
-source = "git+https://github.com/gmrdad82/pito-hourglass?tag=v1.0.2#85b766f2cd873e7a62b9288b423685768b71f28c"
-dependencies = [
- "ratatui",
- "unicode-segmentation",
-]
-
-[[package]]
-name = "pito-list"
-version = "1.2.0"
-source = "git+https://github.com/gmrdad82/pito-list?tag=v1.2.0#cce8b5b549dcd9786bbb370a7cae0da3a8e380ea"
-dependencies = [
- "crossterm",
- "ratatui",
- "unicode-segmentation",
- "unicode-width",
-]
-
-[[package]]
 name = "pito-tui"
 version = "1.4.0"
 dependencies = [
  "crossterm",
- "pito-footer",
- "pito-header",
- "pito-hourglass",
- "pito-list",
  "ratatui",
  "rustix",
  "serde_json",

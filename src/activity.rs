@@ -4,10 +4,10 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::footer::{Hint, InputBar, Key};
+use crate::header::Section;
+use crate::list::{Cell, Column, List, Mark, Row, Step};
 use crossterm::event::KeyEvent;
-use pito_footer::{Hint, InputBar, Key};
-use pito_header::Section;
-use pito_list::{Cell, Column, List, Mark, Row, Step};
 use ratatui::{
     Frame,
     layout::Rect,

@@ -1,0 +1,22 @@
+title = "DRAW TIME PER FRAME"
+unit = "MICROSECONDS"
+better = "lower"
+subtitle = "RYZEN 9 9950X, RUST 1.97.1, MEAN OF 200000 FRAMES"
+date = "2026-10-14"
+notes = ["CARGO RUN --RELEASE --EXAMPLE BENCH 200000", "NOTHING IS ALLOCATED WHILE DRAWING"]
+parties = [{ name = "PITO-HEADER" }]
+
+[[groups]]
+name = "150 COLUMNS"
+rows = [
+  { label = "NAV ROWS ONLY", values = [2.08] },
+  { label = "FULL HEADER", values = [8.73] },
+  { label = "FULL HEADER, DRILLED IN", values = [4.16] },
+  { label = "HIT TEST, ONE CLICK", values = [0.11] },
+]
+
+[[groups]]
+name = "40 COLUMNS"
+rows = [
+  { label = "FULL HEADER, ABBREVIATED", values = [4.46] },
+]
