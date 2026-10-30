@@ -103,6 +103,35 @@ impl Screen<()> for Plain {
     }
 }
 
+struct Carrying(bool);
+
+impl Screen<()> for Carrying {
+    fn draw(&mut self, frame: &mut Frame, area: Rect, _palette: &Palette) {
+        frame
+            .buffer_mut()
+            .set_string(area.x, area.y, "steady body", Style::new());
+    }
+
+    fn typing(&self) -> bool {
+        true
+    }
+
+    fn lets_help(&self) -> bool {
+        self.0
+    }
+}
+
+fn carrying(lets: bool) -> Tui<()> {
+    let mut tui = Tui::new("steady", "1.0.0", Color::Cyan)
+        .nav_keys(NavKeys::NONE)
+        .screen("Board", Carrying(lets))
+        .keymap(&KEYS)
+        .keys_now(Now::new(RAIL))
+        .still_sheet(true);
+    tui.start();
+    tui
+}
+
 fn tui(still: bool) -> Tui<()> {
     hinted(still, [])
 }
@@ -191,6 +220,19 @@ fn a_steady_frame_filtering_app_hints_under_the_open_sheet_allocates_nothing() {
             let (count, shown) = steady(&mut tui, width, height);
             assert_eq!(count, 0, "{keys} {width}x{height}");
             assert!(shown.contains("Keys"), "{shown}");
+        }
+    }
+}
+
+#[test]
+fn a_steady_frame_over_a_typing_screen_allocates_nothing_with_or_without_help() {
+    for (lets, keys) in [(false, ""), (true, ""), (true, "?")] {
+        for (width, height) in SIZES {
+            let mut tui = carrying(lets);
+            press(&mut tui, keys);
+            let (count, shown) = steady(&mut tui, width, height);
+            assert_eq!(count, 0, "{lets} {keys} {width}x{height}");
+            assert_eq!(shown.contains("? help"), lets, "{shown}");
         }
     }
 }

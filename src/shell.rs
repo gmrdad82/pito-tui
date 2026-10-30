@@ -722,6 +722,35 @@ impl<E: Send + 'static> Tui<E> {
             .is_some_and(|slot| slot.screen.typing() || matches!(slot.role, Role::Gate))
     }
 
+    pub(crate) fn helps(&self) -> bool {
+        let reached =
+            self.keymap.is_some() && self.quit.asking().is_none() && self.out.takeover.is_none();
+        if !reached || self.panel.is_open() {
+            return reached;
+        }
+        let through = self.through.contains(&Key::Char('?'));
+        !self.gated
+            && self.out.modals.is_empty()
+            && (self.out.asking.is_none() || through)
+            && self.out.picking.is_none()
+            && self.current().is_some_and(|index| {
+                !self.screens[index].screen.typing() || self.screens[index].screen.lets_help()
+            })
+    }
+
+    fn lets_help(&self) -> bool {
+        self.current()
+            .and_then(|index| self.screens.get(index))
+            .is_some_and(|slot| slot.screen.lets_help())
+    }
+
+    fn sheet_key(&mut self, key: KeyEvent) -> bool {
+        self.keymap.is_some()
+            && !self.panel.is_open()
+            && Chord::from_crossterm(&key)
+                .is_some_and(|chord| self.panel.key(chord, self.moment) == keys::Outcome::Took)
+    }
+
     fn route(&mut self, key: KeyEvent) -> Flow {
         let busy = self.busy();
         let pressed: Key = key.into();
@@ -797,14 +826,13 @@ impl<E: Send + 'static> Tui<E> {
             return self.apply();
         }
         if self.screens[index].screen.typing() {
-            self.call(index, |screen, cx| screen.key(key, cx));
+            if !(self.screens[index].screen.lets_help() && self.sheet_key(key)) {
+                self.call(index, |screen, cx| screen.key(key, cx));
+            }
             return self.apply();
         }
         if self.keymap.is_some() {
-            if !self.panel.is_open()
-                && let Some(chord) = Chord::from_crossterm(&key)
-                && self.panel.key(chord, self.moment) == keys::Outcome::Took
-            {
+            if self.sheet_key(key) {
                 return Flow::Stay;
             }
         } else if self.help.as_mut().is_some_and(|help| help.key(pressed)) {
@@ -1302,7 +1330,7 @@ impl<E: Send + 'static> Tui<E> {
             || self.out.asking.is_some()
             || self.out.picking.is_some()
             || !self.out.modals.is_empty()
-            || self.typing_now()
+            || self.typing_now() && !self.lets_help()
     }
 
     fn absorb(&mut self) {
