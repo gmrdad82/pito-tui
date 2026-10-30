@@ -5,7 +5,7 @@ sidebar:
   order: 13
 ---
 
-![Three headers drilled two levels into Checks: at 76 columns the breadcrumb reads Checks / nightly / step 3: test, at 30 columns Checks / … / step 3: test, and at 20 columns … / step 3: test with the groups as first letters](../images/drill.png)
+![Three headers drilled two levels into Checks: at 76 columns the breadcrumb reads Checks / nightly / step 3: test, at 30 columns Checks / … / step 3: test, and at 20 columns … / step 3: test with the groups as first letters](../../images/header/drill.png)
 
 An app often shows a list in a section and opens an item from it. The nav
 keeps that path for each section: a stack of titles, each with the list row
@@ -37,7 +37,7 @@ assert_eq!(nav.depth(), 0);
 Each section keeps its own stack, so moving to another section and back
 finds the path as it was. With the default keys, `esc` and `q` map to
 `Step::Back { selected }` while drilled in, and to nothing at the top level;
-see [Map keys to moves](keys.md). Opening is the app's: it knows which key
+see [Map keys to moves](../keys/). Opening is the app's: it knows which key
 opens an item.
 
 ```rust
@@ -60,7 +60,7 @@ While drilled in, the header swaps the sections row for a breadcrumb rule,
 as HEY's terminal UI does: the section's name, then each title, joined by
 ` / `. The facts and breadcrumb rows step aside meanwhile, and come back
 with the sections row. When the trail doesn't fit, it elides its middle,
-then its head, as in the image above (this is `examples/gallery.rs drill`).
+then its head, as in the image above (this is `cargo run --example header_gallery -- drill`).
 Clicks on the breadcrumb rule hit nothing.
 
 `crumbs(true)` adds a breadcrumb row under the nav rows, which at the top

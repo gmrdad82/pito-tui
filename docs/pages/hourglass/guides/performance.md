@@ -5,7 +5,7 @@ sidebar:
   order: 5
 ---
 
-![Hourglass draw time in nanoseconds per draw, lower is better: 4807 at 200×50 and 4622 at 80×24 with the glass, label and hint; 2690 at 40×2 with the label and hint; 981 at 12×1 with the label cut](../images/draw-time.png)
+![Hourglass draw time in nanoseconds per draw, lower is better: 4807 at 200×50 and 4622 at 80×24 with the glass, label and hint; 2690 at 40×2 with the label and hint; 981 at 12×1 with the label cut](../../images/hourglass/draw-time.png)
 
 | Area | What's drawn | Per draw |
 |---|---|---|
@@ -20,13 +20,13 @@ written.
 
 ## How it's measured
 
-`examples/bench.rs` draws the widget into a ratatui `Buffer` a million times
+`examples/hourglass_bench.rs` draws the widget into a ratatui `Buffer` a million times
 per size, 1 ms of elapsed time apart, so every frame and band position comes
 round, after a warm-up, and prints the mean time per draw as
-[pito-compare](https://docs.pitomd.com/pito-compare/) data. From a clone:
+[pito-compare](https://docs.pitomd.com/pito-compare/) data. From a clone of pito-tui:
 
 ```sh
-cargo run --release --example bench > draw-time.toml
+cargo run --release --example hourglass_bench > draw-time.toml
 ```
 
 Measured once, on 2026-10-14, on an AMD Ryzen 9 9950X with Rust 1.97.1, a
@@ -58,10 +58,10 @@ pcmp draw-time.toml --out .
 
 ## Zero allocations
 
-Drawing allocates nothing. `tests/allocation.rs` counts every allocation
+Drawing allocates nothing. `tests/hourglass_allocation.rs` counts every allocation
 through a global allocator while 200 frames are drawn at six sizes, and holds
-the count at zero; it runs in the gate. From a clone:
+the count at zero; it runs in the gate. From a clone of pito-tui:
 
 ```sh
-cargo test --test allocation
+cargo test --test hourglass_allocation
 ```

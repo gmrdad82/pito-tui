@@ -148,7 +148,7 @@ tui.head(head)
 - `Tui::show(..)` and `Cx::show(..)` show or hide groups and tabs by the
   app's predicate (`Item::Group(n)`, `Item::Tab(screen)`).
 
-Without `head`, the header is pito-header's default layout: title, groups,
+Without `head`, the header is the header module's default layout: title, groups,
 sections, facts and crumbs.
 
 ## One app-wide screen

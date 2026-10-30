@@ -5,19 +5,19 @@ sidebar:
   order: 17
 ---
 
-![Draw time per frame in microseconds, lower is better, Ryzen 9 9950X, Rust 1.97.1, mean of 200,000 frames: at 150 columns nav rows only 2.1, full header 8.7, full header drilled in 4.2, hit test one click 0.1; at 40 columns full header abbreviated 4.5](../images/draw-time-bars.png)
+![Draw time per frame in microseconds, lower is better, Ryzen 9 9950X, Rust 1.97.1, mean of 200,000 frames: at 150 columns nav rows only 2.1, full header 8.7, full header drilled in 4.2, hit test one click 0.1; at 40 columns full header abbreviated 4.5](../../images/header/draw-time-bars.png)
 
 Drawing writes straight into ratatui's buffer: no allocation, no clock, no
 input and no randomness, so a frame costs microseconds and the same state
-always draws the same cells. A counting allocator in the crate's tests holds
+always draws the same cells. A counting allocator in pito-tui's tests holds
 that drawing and hit-testing allocate nothing.
 
 ## Run the bench
 
-From a clone of the repository, in release:
+From a clone of pito-tui, in release:
 
 ```sh
-cargo run --release --example bench 200000
+cargo run --release --example header_bench 200000
 ```
 
 The argument is the number of frames per case (20,000 when left out). It

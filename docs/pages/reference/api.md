@@ -8,6 +8,11 @@ sidebar:
 The whole API in one sketch, for finding a name fast. The
 [full API docs](../../api/pito_tui/index.html) list every item with its exact
 signature, and the [guides](../../guides/screens/) show each part in use.
+The header, footer, hourglass and list each have an API page of their own:
+[the header](../../header/reference/api/),
+[the footer](../../api/pito_tui/footer/index.html),
+[the hourglass](../../api/pito_tui/hourglass/index.html) and
+[the list](../../list/reference/api/).
 
 ```text
 Tui::new(name, version, accent: Color) -> Tui<E>          // E: the app's worker answers
@@ -178,9 +183,9 @@ facts row while a screen is drilled in (`keep_facts(true)` keeps it), has no
 activity band or screen until the app gives it `Activities` (the band then
 shows unless `band(false)`) or its own `Band`, lights the quit word in the
 accent over an input bar or a confirm (`lit_again`), lets no key past an open
-confirm (`through_keys`), draws pito-header's header (no `head`), shows an
+confirm (`through_keys`), draws the header module's own layout (no `head`), shows an
 hourglass at once and drops it at once (`hourglass_timing`), shows the name
-and version wherever pito-footer fits them (`version_fit`), has no app slot,
+and version wherever the footer fits them (`version_fit`), has no app slot,
 gate, takeover, modal, toast or top band until the app makes one, and turns
 on raw mode, the alternate screen and bracketed paste only.
 

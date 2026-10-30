@@ -5,7 +5,7 @@ sidebar:
   order: 13
 ---
 
-![Typing "Café în Brașov, ș ț 日本語 and a line long enough to scroll" into a search input that scrolls with an ellipsis, moving home and end, deleting words with ctrl+w and submitting; then a masked API key field that shows only its first and last four characters at rest, edited and submitted](../images/input.gif)
+![Typing "Café în Brașov, ș ț 日本語 and a line long enough to scroll" into a search input that scrolls with an ellipsis, moving home and end, deleting words with ctrl+w and submitting; then a masked API key field that shows only its first and last four characters at rest, edited and submitted](../../images/footer/input.gif)
 
 `Input` holds the text and the cursor. The app feeds it keys and gets an `Edit`
 back; it never submits, clears or closes anything itself:
@@ -30,7 +30,7 @@ open:
 
 ```rust
 use pito_tui::footer::{Edit, Footer, Hint, Input, InputBar, Key, Styles};
-use ratatui::{Frame, layout::Rect};
+use pito_tui::ratatui::{Frame, layout::Rect};
 
 const HINTS: [Hint; 1] = [Hint::new("/", "search")];
 
@@ -107,4 +107,4 @@ revealed share stays a quarter or less. The value stays whole for `Submit`, and
 neither `Input`'s nor `Edit`'s `Debug` prints it.
 
 The clip above is the gallery's `input` scene: tab moves between the two
-fields. `cargo run --example gallery --features crossterm -- input`.
+fields. `cargo run --example footer_gallery -- input`.

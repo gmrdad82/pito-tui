@@ -6,7 +6,7 @@ sidebar:
 ---
 
 The list never reads input itself. Your app reads its events, hands the list
-the keys it should handle as the crate's own `Key`, and asks it which row a
+the keys it should handle as the list's own `Key`, and asks it which row a
 click landed on.
 
 ## Keys in, steps out
@@ -28,7 +28,7 @@ parts are `up`, `down`, `half_up`, `half_down`, `page_up`, `page_down`,
 
 ```rust
 use pito_tui::list::{Column, Key, Keys, List, ListView, Row, Step};
-use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
+use pito_tui::ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 
 const OPEN: &[Key] = &[Key::Enter, Key::Char('o')];
 
@@ -56,8 +56,8 @@ go; here the 10-line area pages by 9 and half-pages by
 5 rows. `up`, `down`, `half_up`, `half_down`, `page_up`, `page_down`, `first`
 and `last` do the same as their keys, for an app that maps its own.
 
-With the `crossterm` feature, `Key::from(event)` converts a crossterm
-`KeyEvent`. Alt, Super, Meta or Hyper on a key that isn't a character gives
+`Key::from(event)` converts a crossterm `KeyEvent` (`pito_tui::crossterm`).
+Alt, Super, Meta or Hyper on a key that isn't a character gives
 `Key::Other`; Alt with a character stays apart as `Key::Alt(c)`; Ctrl+Alt
 with a character passes on as that character, which is how AltGr arrives on
 some platforms, so diacritics can still be typed. A key release is
@@ -73,7 +73,7 @@ it:
 
 ```rust
 use pito_tui::list::{Column, Key, Keys, List, ListView, Mods, Named, Row, Step};
-use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
+use pito_tui::ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 
 const NEXT_PAGE: &[Key] = &[Key::Mod(Mods::CTRL, Named::PageDown)];
 
@@ -109,7 +109,7 @@ the rows, the scrollbar's column and the count's line.
 
 ```rust
 use pito_tui::list::{Column, List, ListView, Row};
-use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
+use pito_tui::ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 
 let mut list = List::new().with_rows((1..=40).map(|n| Row::new([format!("item {n}")])));
 let columns = [Column::new("Item", 8, 0)];

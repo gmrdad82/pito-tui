@@ -114,7 +114,7 @@ fn input(&self) -> Option<InputBar<'_>> {
 }
 ```
 
-`Input` and `InputBar` come from pito-footer, as `pito_tui::footer`; an
+`Input` and `InputBar` come from the footer, `pito_tui::footer`; an
 `Input::new().masked(true)` is a password field.
 
 Next: [Colours and words](../palette-and-words/).

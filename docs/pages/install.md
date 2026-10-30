@@ -5,14 +5,20 @@ sidebar:
   order: 1
 ---
 
-pito-tui is a Rust library. With a current stable Rust installed
-([rustup](https://rustup.rs) on every platform), the same lines work on Linux,
-macOS and Windows, in a shell or in PowerShell:
+pito-tui is a Rust library, edition 2024, and it needs Rust 1.88 or newer. With
+a current stable Rust installed ([rustup](https://rustup.rs) on every
+platform), the same lines work on Linux, macOS and Windows, in a shell or in
+PowerShell:
 
 ```sh
 cargo new hello
 cd hello
 cargo add pito-tui --git https://github.com/gmrdad82/pito-tui --tag {{tag}}
+```
+
+```text
+    Updating git repository `https://github.com/gmrdad82/pito-tui`
+      Adding pito-tui (git) to dependencies
 ```
 
 or by hand in `Cargo.toml`:
@@ -23,17 +29,16 @@ pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "{{tag}}" }
 ```
 
 The crate is not on crates.io; it is pinned by its git tag. That one line
-brings ratatui 0.30, crossterm 0.29, pito-header v1.1.2, pito-footer v1.0.1,
-pito-hourglass v1.0.2 and pito-list v1.2.0, reachable as
-`pito_tui::ratatui`, `pito_tui::crossterm`, `pito_tui::header`,
-`pito_tui::footer`, `pito_tui::hourglass` and `pito_tui::list`, so the app
-needs no other line for them.
+brings ratatui 0.30 and crossterm 0.29, reachable as `pito_tui::ratatui` and
+`pito_tui::crossterm`, and the header, footer, hourglass and list are part of
+the crate, as `pito_tui::header`, `pito_tui::footer`, `pito_tui::hourglass` and
+`pito_tui::list`, so the app needs no other line for them.
 
 ## A first screen
 
 Put this in `src/main.rs`:
 
-```rust
+```rust,no_run
 use pito_tui::crossterm::event::KeyEvent;
 use pito_tui::footer::Hint;
 use pito_tui::header::Section;
@@ -123,5 +128,246 @@ $ cargo run --release --example demo -- --dump 72x14 --keys "tab"
  ──────────────────────────────────────────────────────────────────────
  ↑↓ move · enter open · / filter · ctrl+k go to · ctrl+c twice quit
 ```
+
+## The widgets on their own
+
+The header, footer, hourglass and list also draw on their own into any
+ratatui frame or buffer, for an app that keeps its own loop or wants one of
+them inside a screen. They need nothing beyond the same pito-tui line: each
+draws straight into ratatui's buffer, and each module's `Key` comes from
+crossterm's `KeyEvent` with `Key::from`.
+
+### The header on its own
+
+Build a nav, feed it keys and draw it at the top of the frame:
+
+```rust
+use pito_tui::header::{Group, Header, Key, Nav, Section};
+use pito_tui::ratatui::{Frame, layout::Rect};
+
+let mut nav = Nav::new(vec![
+    Group::new("Mail").section(Section::new("Inbox")).section(Section::new("Drafts")),
+    Group::new("Work").section(Section::new("Checks")),
+]);
+nav.key(Key::Char('3'));
+assert_eq!(nav.place().number, 3);
+
+fn draw(frame: &mut Frame, nav: &Nav) {
+    let area = frame.area();
+    let header = Header::new(nav).title(Some("Desk"));
+    frame.render_widget(header, Rect { height: header.height(), ..area });
+}
+```
+
+`header.height()` says how many rows the header takes for what it was given,
+so the rest of the frame goes to your content.
+
+To see it move before you write any code, run the demo shown on
+[the header's overview](../header/) from a checkout:
+
+```sh
+cargo run --example header_demo
+```
+
+`tab` and `shift+tab` change group, `]` and `[` change section, a digit jumps
+to a section, `enter` drills in, `esc` goes back and `ctrl+c` pressed twice
+quits. Two more examples show the other features:
+
+```sh
+cargo run --example header_fit
+cargo run --example header_gallery -- rows
+```
+
+`header_fit` narrows the header with `<` or left and widens it with `>` or
+right, so you can watch it abbreviate; `ctrl+c` quits. `header_gallery` takes
+`rows`, `spans` or `drill` and draws that still; `q` quits.
+
+### The footer on its own
+
+Put hints at the bottom of the screen. The footer says how many rows it needs
+for a width with `height(width)`, and the app gives it those rows:
+
+```rust,no_run
+use pito_tui::crossterm::event;
+use pito_tui::footer::{Footer, Hint};
+use pito_tui::ratatui::layout::Rect;
+
+const HINTS: [Hint; 3] = [
+    Hint::new("↑↓", "move"),
+    Hint::new("enter", "open").rank(1),
+    Hint::new("q", "quit").pinned(),
+];
+
+fn main() -> std::io::Result<()> {
+    let mut terminal = pito_tui::ratatui::init();
+    loop {
+        terminal.draw(|frame| {
+            let footer = Footer::new(&HINTS).version("app", "1.0.0");
+            let area = frame.area();
+            let height = footer.height(area.width);
+            let bottom = Rect { y: area.bottom().saturating_sub(height), height, ..area };
+            frame.render_widget(footer, bottom);
+        })?;
+        let quit = event::read()?
+            .as_key_press_event()
+            .is_some_and(|key| key.code == event::KeyCode::Char('q'));
+        if quit {
+            break;
+        }
+    }
+    pito_tui::ratatui::restore();
+    Ok(())
+}
+```
+
+`cargo run` draws `↑↓ move · enter open · q quit` on the last row with
+`app v1.0.0` at its right end; `q` quits. To turn crossterm key events into the
+footer's `Key`, see [Feed it keys from crossterm](../footer/guides/keys/).
+
+The footer's demo is a task list with the footer at its bottom: move with
+↑↓, mark a task done with enter, search with `/`, delete with `d`, hide the
+hints with `?`, and press ctrl+c twice to quit.
+
+```sh
+cargo run --example footer_demo
+```
+
+The gallery draws one scene for each part of the footer, the scenes the
+pictures in the footer's guides come from:
+
+```sh
+cargo run --example footer_gallery -- fit
+```
+
+The scenes are `fit`, `notices`, `status`, `input` and `confirm`; any other
+name prints `gallery: unknown scene '…', try fit, notices, status, input or
+confirm` and exits with 2.
+
+### The hourglass on its own
+
+Keep the moment the wait started and draw the widget from the time since:
+
+```rust
+use std::time::Instant;
+
+use pito_tui::hourglass::Hourglass;
+use pito_tui::ratatui::{
+    Frame,
+    style::{Color, Modifier, Style},
+};
+
+fn draw(frame: &mut Frame, started: Instant) {
+    let hourglass = Hourglass::new(started.elapsed())
+        .label("Loading the data...")
+        .hint(Some("esc stops waiting"))
+        .glass(Style::new().fg(Color::Yellow))
+        .accent(Style::new().fg(Color::Magenta))
+        .muted(Style::new().fg(Color::DarkGray).add_modifier(Modifier::DIM));
+    frame.render_widget(hourglass, frame.area());
+}
+```
+
+Redraw about every 50 ms while it shows; the picture depends only on the
+elapsed time. From a checkout, the demo draws exactly that, full screen. Esc
+or q quits:
+
+```sh
+cargo run --example hourglass_demo
+```
+
+![The demo: the hourglass drains and flips while "Loading the data..." shimmers under it](images/hourglass/demo.gif)
+
+Next for the hourglass: [show it while data loads](../hourglass/guides/show-while-loading/).
+
+### The list on its own
+
+Three rows, three columns, the cursor moved down once, drawn into a ratatui
+buffer at two widths:
+
+```rust
+use pito_tui::list::{Cell, Column, Key, List, ListView, Row, Styles};
+use pito_tui::ratatui::{
+    buffer::Buffer,
+    layout::Rect,
+    style::{Color, Modifier, Style},
+    widgets::Widget,
+};
+
+let columns = [
+    Column::new("Job", 8, 14).pinned(),
+    Column::new("Owner", 5, 7).priority(1),
+    Column::new("Message", 8, 0),
+];
+let mut list = List::new().with_rows([
+    Row::new(["deploy api", "web", "uploading the bundle"]),
+    Row::new([
+        Cell::new("build docs"),
+        Cell::new("docs"),
+        Cell::new("waiting for a runner").faint(),
+    ]),
+    Row::new(["rotate logs", "ops", "starts at 02:00"]),
+]);
+list.key(Key::Down);
+
+let styles = Styles::new().selected(Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+for width in [44, 24] {
+    let area = Rect::new(0, 0, width, 4);
+    let mut buffer = Buffer::empty(area);
+    ListView::new(&mut list, &columns)
+        .styles(styles)
+        .header(true)
+        .render(area, &mut buffer);
+#   let lines: Vec<String> = (0..area.height)
+#       .map(|y| (0..area.width).map(|x| buffer[(x, y)].symbol()).collect::<String>().trim_end().to_owned())
+#       .collect();
+#   let expected: &[&str] = if width == 44 {
+#       &[
+#           "  Job             Owner    Message",
+#           "  deploy api      web      uploading the…",
+#           "▌ build docs      docs     waiting for a…",
+#           "  rotate logs     ops      starts at 02:00",
+#       ]
+#   } else {
+#       &[
+#           "  Job           Message",
+#           "  deploy api    …",
+#           "▌ build docs    waiting…",
+#           "  rotate logs   starts…",
+#       ]
+#   };
+#   assert_eq!(lines, expected);
+}
+```
+
+It draws, at 44 and then 24 cells wide (the Owner column drops when it
+doesn't fit):
+
+```text
+  Job             Owner    Message
+  deploy api      web      uploading the…
+▌ build docs      docs     waiting for a…
+  rotate logs     ops      starts at 02:00
+
+  Job           Message
+  deploy api    …
+▌ build docs    waiting…
+  rotate logs   starts…
+```
+
+`Key::from(event)` turns crossterm's key events into the list's keys; an app
+on another backend builds the `Key` values itself.
+[Draw a list in your app](../list/guides/first-list/) puts a list in a real
+terminal app, with its keys.
+
+The list's demo is a small terminal app over sample jobs, the one recorded in
+the clips on the list's pages:
+
+```sh
+cargo run --example list_demo
+```
+
+Move with the arrows or `j` and `k`, press `v` for a range, ctrl+d and ctrl+u
+for half a page, Page Down and Page Up for a whole one, `g` and `G` for the
+ends, enter to open, and ctrl+c twice to quit.
 
 Next: [Screens, tabs and the header](../guides/screens/).
