@@ -54,5 +54,6 @@ pub use crossterm;
 pub mod footer;
 pub mod header;
 pub mod hourglass;
+pub mod keys;
 pub mod list;
 pub use ratatui;
