@@ -736,6 +736,7 @@ impl<E: Send + 'static> Tui<E> {
         let keymap = self.keymap.filter(|_| !self.gated);
         let open = keymap.is_some() && sheet.is_open();
         let kept = |hint: &Hint| !open || !sheet.takes_text(hint.key);
+        let helps = self.helps();
         let prompted = match (self.out.modals.last(), &self.out.picking) {
             (Some(top), _) => {
                 hints.extend_from_slice(&top.modal.hints);
@@ -747,7 +748,7 @@ impl<E: Send + 'static> Tui<E> {
             }
             (None, None) => {
                 if let Some(keymap) = keymap.filter(|_| open) {
-                    keymap.hints(now, sheet, &mut hints);
+                    keymap.hints(now, sheet, helps, &mut hints);
                 }
                 let list = screen.hint_list();
                 if list.is_empty() {
@@ -760,7 +761,7 @@ impl<E: Send + 'static> Tui<E> {
         };
         if !self.gated {
             if let Some(keymap) = keymap.filter(|_| !prompted && !open) {
-                keymap.hints(now, sheet, &mut hints);
+                keymap.hints(now, sheet, helps, &mut hints);
             }
             let shown = self.hints.iter().filter(|hint| !prompted || hint.pinned);
             hints.extend(shown.filter(|hint| kept(hint)).copied());

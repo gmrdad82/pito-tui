@@ -160,10 +160,16 @@ can't stall the frame.
   playback, and the sheet shows the mode the user is in.
 - The sheet lists its own keys in a last group, `Help`; `keys::Words`
   changes the wording to the app's voice.
-- A screen typing into its own input gets `?` as text: the shell asks the
-  sheet only when no screen is typing.
-- Keys follow what is shown: with the sheet shut, `?` with `Words::hint`
-  stays on the footer however full it is, and beside a notice that takes
+- A screen that types (`typing()` true) gets `?` as text, and the footer
+  leaves `?` out while it does: `?` shows only while it reaches the sheet,
+  never under a shut gate, a modal, a pick, a confirm, a takeover or the
+  quit question. A typing screen that keeps its other keys but not `?`, such
+  as a card being carried or a list it draws over itself, returns `true`
+  from `lets_help()`: `?` then opens the sheet and stays on the footer, and
+  every other key still reaches the screen. A screen that opens the sheet
+  itself calls `cx.toggle_sheet()` and shows its own hint.
+- Keys follow what is shown: with the sheet shut and `?` reaching it, `?`
+  with `Words::hint` stays on the footer however full it is, and beside a notice that takes
   the footer over. While the sheet is open the footer shows its own keys
   first, and never drops them for width: esc with `Words::close`
   (`Words::clear` once there is a search), `/` with `Words::search` and
@@ -173,7 +179,8 @@ can't stall the frame.
   the hint's keys read as the keymap writes them), such as space while
   typing, leaves the footer until the sheet lets that key through again.
 - When a key the sheet passed on opens a modal, a pick, a confirm, a
-  takeover or a typing input, or shuts the gate, the sheet closes at once,
+  takeover or a typing input (unless the screen lets `?` through), or shuts
+  the gate, the sheet closes at once,
   without easing, so nothing acts or draws hidden under it. While it
   searches a paste goes to its query; while it is open otherwise a paste
   goes nowhere, and so does a click or a wheel.

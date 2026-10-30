@@ -1,6 +1,6 @@
 [package]
 name = "pito-tui"
-version = "2.1.0"
+version = "2.2.0"
 authors = ["Gamer Dad"]
 edition = "2024"
 description = "The app shell for PITO MD terminal apps: one crate with its own header, footer, hourglass and list, a palette from one accent colour or a whole set, a panic-safe terminal guard, a 120 fps paced loop, key routing with a double ctrl+c quit guard, an activity band and screen, and headless dumps"

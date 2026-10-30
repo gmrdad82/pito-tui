@@ -372,12 +372,12 @@ impl<A> Keymap<A> {
 
     pub fn hints(&self, now: Now) -> Vec<Hint<'_>> {
         let mut hints = Vec::with_capacity(self.spots_in(now.mode).len() + 1);
-        self.each_hint(now, |hint, _| hints.push(hint));
+        self.each_hint(now, true, |hint, _| hints.push(hint));
         hints
     }
 
-    pub(crate) fn each_hint<'k>(&'k self, now: Now, put: impl FnMut(Hint<'k>, bool)) {
-        self.walk(now, Some(self.help_hint()), |_| false, put);
+    pub(crate) fn each_hint<'k>(&'k self, now: Now, help: bool, put: impl FnMut(Hint<'k>, bool)) {
+        self.walk(now, help.then(|| self.help_hint()), |_| false, put);
     }
 
     pub(crate) fn each_open_hint<'k>(

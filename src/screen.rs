@@ -137,6 +137,10 @@ pub trait Screen<E>: Any {
         false
     }
 
+    fn lets_help(&self) -> bool {
+        false
+    }
+
     fn input(&self) -> Option<InputBar<'_>> {
         None
     }
