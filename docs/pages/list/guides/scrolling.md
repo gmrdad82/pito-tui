@@ -5,7 +5,7 @@ sidebar:
   order: 6
 ---
 
-![Page Down moves a whole page and ctrl+d half a page, G jumps to the end where the end line shows, ctrl+u and Page Up move back and g returns to the top, the scrollbar's thumb and the count at its foot following](../images/scroll.gif)
+![Page Down moves a whole page and ctrl+d half a page, G jumps to the end where the end line shows, ctrl+u and Page Up move back and g returns to the top, the scrollbar's thumb and the count at its foot following](../../images/list/scroll.gif)
 
 The view always keeps the selection in view. A scrollbar and a count of the
 rows on screen are opt-in, and both show only when the list overflows: a list
@@ -22,7 +22,7 @@ thousands ("1,693–1,701 of 3,400").
 
 ```rust
 use pito_tui::list::{Bar, Column, Count, List, ListView, Row};
-use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
+use pito_tui::ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 
 let mut list = List::new().with_rows((1..=40).map(|n| Row::new([format!("item {n}")])));
 let columns = [Column::new("Item", 6, 0)];

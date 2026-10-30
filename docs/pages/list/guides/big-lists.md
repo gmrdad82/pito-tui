@@ -5,7 +5,7 @@ sidebar:
   order: 9
 ---
 
-![Bar chart of pito-list's mean frame time at 150x40: 289 µs plain, 302 µs with a range, theming and four rows rewritten, 305 µs with columns that fit their cells, 292 µs for a lazy 100,000-row list in groups and 354 µs for a shared 100,000-item vector with a scrollbar and a count](../images/bench-bars.png)
+![Bar chart of the list's mean frame time at 150x40: 289 µs plain, 302 µs with a range, theming and four rows rewritten, 305 µs with columns that fit their cells, 292 µs for a lazy 100,000-row list in groups and 354 µs for a shared 100,000-item vector with a scrollbar and a count](../../images/list/bench-bars.png)
 
 A list draws only the rows on screen, so its frame time doesn't grow with its
 length. A list that owns its rows still holds every one; for tens of
@@ -21,7 +21,7 @@ items. The builder turns one item into a `Row`:
 use std::sync::Arc;
 
 use pito_tui::list::{Bar, Column, Count, List, ListView, Row, Shared};
-use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
+use pito_tui::ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 
 struct Job {
     name: String,

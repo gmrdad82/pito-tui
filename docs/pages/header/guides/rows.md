@@ -5,7 +5,7 @@ sidebar:
   order: 14
 ---
 
-![A full header: a title rule reading Desk with trial 9 days left on the left and ? help on the right, the groups, the sections with 2 Drafts lit, a facts rule reading 3 drafts, 1 scheduled, synced just now, a closing rule and a confirm question, Delete the 3 drafts? y/n](../images/rows.png)
+![A full header: a title rule reading Desk with trial 9 days left on the left and ? help on the right, the groups, the sections with 2 Drafts lit, a facts rule reading 3 drafts, 1 scheduled, synced just now, a closing rule and a confirm question, Delete the 3 drafts? y/n](../../images/header/rows.png)
 
 `Header` draws only the rows it is given, top to bottom:
 
@@ -14,17 +14,17 @@ sidebar:
 | A title rule, the name in the middle, a slot each side | `title(Some(..))`, `left(..)`, `right(..)` |
 | The groups and sections rows | on by default; `tabs(false)` leaves them out |
 | A facts row, plain or on a rule | `facts(&[..])`, `facts_rule(true)` |
-| A breadcrumb row | `crumbs(true)`; see [Drill in with a breadcrumb](drill-in.md) |
+| A breadcrumb row | `crumbs(true)`; see [Drill in with a breadcrumb](../drill-in/) |
 | A closing rule | `closing(true)` |
 | A notice row, for a result, a warning or a question | `notice(Some(..))` |
 
 `height()` answers how many rows that makes, so the app lays out the rest of
 the frame under it. This is the header in the image above, from
-`examples/gallery.rs rows`:
+`cargo run --example header_gallery -- rows`:
 
 ```rust
 use pito_tui::header::{Fact, Group, Header, Nav, Section, Styles};
-use ratatui::{Frame, layout::Rect, style::{Color, Modifier, Style}};
+use pito_tui::ratatui::{Frame, layout::Rect, style::{Color, Modifier, Style}};
 
 const ACCENT: Style = Style::new().fg(Color::Yellow);
 const MUTED: Style = Style::new().fg(Color::DarkGray);

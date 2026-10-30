@@ -5,7 +5,7 @@ sidebar:
   order: 11
 ---
 
-The crate never reads the terminal. The app hands it a `Key`, and the nav
+The header never reads the terminal. The app hands it a `Key`, and the nav
 answers whether that key moves it; any key it doesn't take stays the app's.
 
 ## Feed it keys
@@ -33,7 +33,7 @@ is the two in one.
 
 - `Step::Moved(place)` says the nav moved, and where to.
 - `Step::Back { selected }` says a drill level closed, with the list row it
-  kept; see [Drill in with a breadcrumb](drill-in.md).
+  kept; see [Drill in with a breadcrumb](../drill-in/).
 - `Step::Swallowed` says the key was taken and nothing moved.
 - `None` says the key is not the nav's.
 
@@ -100,11 +100,11 @@ assert_eq!(nav.place().number, 2);
 
 ## Keys from crossterm
 
-With the `crossterm` feature, `Key::from(KeyEvent)` turns a crossterm 0.29
-key event into a `Key`:
+`Key::from(KeyEvent)` turns a crossterm 0.29 key event (`pito_tui::crossterm`)
+into a `Key`:
 
 ```rust
-use crossterm::event::{self, Event};
+use pito_tui::crossterm::event::{self, Event};
 use pito_tui::header::{Key, Nav};
 
 fn on_event(nav: &mut Nav) -> std::io::Result<()> {

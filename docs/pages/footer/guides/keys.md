@@ -1,13 +1,13 @@
 ---
 title: Feed it keys from crossterm
-description: Turn crossterm key events into the crate's Key with the crossterm feature, and what happens to Alt and AltGr.
+description: Turn crossterm key events into the footer's Key, and what happens to Alt and AltGr.
 sidebar:
   order: 16
 ---
 
-Every part of the footer that takes keys takes the crate's own `Key`: `Help`,
-`Confirm`, `Input` and `QuitGuard`. It is a small enum, so the crate needs no
-backend:
+Every part of the footer that takes keys takes the footer's own `Key`: `Help`,
+`Confirm`, `Input` and `QuitGuard`. It is a small enum, so drawing and
+answering keys need no backend:
 
 ```rust
 pub enum Key {
@@ -20,16 +20,12 @@ It is `#[non_exhaustive]`: match it with a wildcard arm.
 
 ## From crossterm
 
-With the `crossterm` feature (crossterm 0.29), `Key::from` takes a crossterm
-`KeyEvent`:
-
-```toml
-pito-footer = { git = "https://github.com/gmrdad82/pito-footer", tag = "v1.0.1", features = ["crossterm"] }
-```
+`Key::from` takes a crossterm 0.29 `KeyEvent`, the crossterm pito-tui brings
+as `pito_tui::crossterm`:
 
 ```rust
 use pito_tui::footer::Key;
-use ratatui::crossterm::event::{self, Event};
+use pito_tui::crossterm::event::{self, Event};
 
 if let Event::Key(event) = event::read()? {
     let key = Key::from(event);
@@ -46,6 +42,6 @@ The conversion:
 
 ## From another backend
 
-Without the feature, build the `Key` in the app: `Key::Char('q')`,
+An app on another backend builds the `Key` itself: `Key::Char('q')`,
 `Key::Ctrl('c')`, `Key::Enter`. Anything the footer doesn't use can be
 `Key::Other`.

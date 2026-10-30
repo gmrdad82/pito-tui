@@ -11,7 +11,7 @@ terminal's own look.
 
 ```rust
 use pito_tui::list::{Column, List, ListView, Row, Styles};
-use ratatui::{
+use pito_tui::ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::{Color, Modifier, Style},

@@ -5,13 +5,13 @@ sidebar:
   order: 3
 ---
 
-![The demo list at 96 columns: Job, Version, Owner, Size and Message all shown](../images/columns-96.png)
+![The demo list at 96 columns: Job, Version, Owner, Size and Message all shown](../../images/list/columns-96.png)
 
 The same list at 46 and 38 columns: first Size drops, then Version, while Job
 and Owner stay and the message clips with "…".
 
-![The same list at 46 columns: the Size column dropped, the messages clipped with an ellipsis](../images/columns-46.png)
-![The same list at 38 columns: Size and Version dropped, Job and Owner kept](../images/columns-38.png)
+![The same list at 46 columns: the Size column dropped, the messages clipped with an ellipsis](../../images/list/columns-46.png)
+![The same list at 38 columns: Size and Version dropped, Job and Owner kept](../../images/list/columns-38.png)
 
 ## Minimum, preferred and priority
 
@@ -36,7 +36,7 @@ The widths are worked out at each draw:
 
 ```rust
 use pito_tui::list::{Column, List, ListView, Row};
-use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
+use pito_tui::ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 
 let columns = [
     Column::new("Job", 10, 12).pinned(),

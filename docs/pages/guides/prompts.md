@@ -27,7 +27,7 @@ fn answer(&mut self, yes: bool, cx: &mut Cx<'_, Msg>) {
 ```
 
 The confirm bar takes the footer, with the app's `Words::yes`, `no` and
-`choose`. `Cx::confirm_with(question, Confirm)` takes pito-footer's
+`choose`. `Cx::confirm_with(question, Confirm)` takes the footer's
 `Confirm` for other keys. `Tui::through_keys(&[..])` lets chosen keys (a
 `ctrl+r` refresh, say) past an open confirm.
 
@@ -108,7 +108,7 @@ fn go_to() -> Modal {
 - `Choice::confirm(warning)` needs a second `enter`, and shows its warning
   on the status line.
 
-Its owner hears what happens in `layer(id, Event, cx)`:
+The screen that opened it hears what happens in `layer(id, Event, cx)`:
 
 ```rust
 fn layer(&mut self, id: u64, event: Event, cx: &mut Cx<'_, Msg>) {
@@ -156,8 +156,8 @@ $ demo --dump 100x24 --keys "ctrl+k"
 
 ## A filter over a list
 
-For a filter inside a screen rather than over it, `Filter` holds a pito-list
-`List`, an input and the rows that match: `/` starts typing, `enter` keeps
+For a filter inside a screen rather than over it, `Filter` holds a
+`list::List`, an input and the rows that match: `/` starts typing, `enter` keeps
 the filter, `esc` clears it. The demo's "What to do next" tab uses one:
 `Filter::key` returns `Turn::Filtered` (sift the rows again) or
 `Turn::Open(index)`, and `Filter::view(&columns, palette)` draws the list.

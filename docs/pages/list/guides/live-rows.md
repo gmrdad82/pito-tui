@@ -5,7 +5,7 @@ sidebar:
   order: 8
 ---
 
-![Two running jobs: their sizes grow and turn from green to yellow to red, and their progress messages change, every 120 ms, while the rest of the list stays still](../images/live.gif)
+![Two running jobs: their sizes grow and turn from green to yellow to red, and their progress messages change, every 120 ms, while the rest of the list stays still](../../images/list/live.gif)
 
 A list that shows live numbers, such as sizes, rates or progress, changes a
 few cells many times a second. Building new rows each time allocates; writing
@@ -30,7 +30,7 @@ the setters write into what is there:
 use std::fmt::Write;
 
 use pito_tui::list::{Cell, Column, List, ListView, Mark, Row};
-use ratatui::{
+use pito_tui::ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::{Color, Style},
@@ -76,11 +76,11 @@ selected style patched over it under `keep_colours(true)`.
 
 `row_mut` is for the list's own rows (`List::new()`). For a list over your own
 data, change the data and let the rows be built again: see
-[Show 100,000 items](big-lists.md).
+[Show 100,000 items](../big-lists/).
 
 ## Nothing allocated in a warm frame
 
-A counting-allocator test in the crate rewrites cells, parts and marks, draws
+A counting-allocator test in pito-tui rewrites cells, parts and marks, draws
 a range under a styled header and reads the drawn columns every frame, and
 holds that a warm frame allocates nothing. The mark column follows a
 rewritten mark at the next draw; a widest mark that narrowed costs one scan

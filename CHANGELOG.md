@@ -4,6 +4,16 @@ Every release of pito-tui, newest first. Versions follow [Semantic
 Versioning](https://semver.org/): from 1.0.0 on, only a change in the first
 number may break an app; the middle number adds, the last one fixes.
 
+## Unreleased
+
+### Changed
+
+- The header, footer, hourglass and list are part of pito-tui: `pito_tui::header`, `pito_tui::footer`, `pito_tui::hourglass` and `pito_tui::list` are modules of the crate, with their tests, examples (`cargo run --example <module>_<name>`), renders, guides and images, and the four git dependencies on pito-header, pito-footer, pito-hourglass and pito-list are gone.
+- Every public path under `pito_tui::` is unchanged, so an app that imports through pito-tui builds as before.
+- An app that pinned pito-header, pito-footer, pito-hourglass or pito-list itself drops those lines for pito-tui's one line and imports through `pito_tui::header`, `pito_tui::footer`, `pito_tui::hourglass` and `pito_tui::list`. It no longer needs `features = ["crossterm"]`: the header's, footer's and list's `Key::from(crossterm::event::KeyEvent)` is always there.
+- The README, the module pages and docs.pitomd.com carry every section, guide and image of the four: a part each in the README, a section each in the docs, and one install page.
+- Each module's earlier releases are listed in its own changelog: [pito-header](docs/changelogs/pito-header.md), [pito-footer](docs/changelogs/pito-footer.md), [pito-hourglass](docs/changelogs/pito-hourglass.md) and [pito-list](docs/changelogs/pito-list.md).
+
 ## v1.4.0 — 2026-10-26
 
 ### Added
@@ -196,7 +206,7 @@ or shape in it.
   the gate.
 - `Cx::takeover(Takeover)` and `Cx::end_takeover()`: an app-wide
   transition, its text on the title rule and the hourglass under it, tabs
-  and footer hidden, every key ignored but its cancel keys (the owner hears
+  and footer hidden, every key ignored but its cancel keys (the app hears
   `layer::Event::Closed`) and the quit guard, whose word and question take
   a bare footer line.
 - `layer::Modal`, opened with `Cx::open`, a container over the live screen:
@@ -206,8 +216,8 @@ or shape in it.
   as the field is typed, `Choice::skip()` for rows the cursor passes over,
   `Choice::confirm(warning)` for a row that needs a second enter with the
   warning on the status line, and `Modal::status(text, Tone)`. `Cx::modal(id)`
-  changes it while it is open, `Cx::close(id)` closes it, and its owner
-  hears `Screen::layer(id, Event)`: `Chosen`, `Moved`, `Edited`,
+  changes it while it is open, `Cx::close(id)` closes it, and the screen
+  that opened it hears `Screen::layer(id, Event)`: `Chosen`, `Moved`, `Edited`,
   `Submitted` or `Closed`. Modals stack. `Cx::alert(id, title, lines)` and
   `Modal::alert` are a dismiss-only one: `esc`, `enter` or `q` closes it.
 - `Cx::toast(Toast)`: app-wide notices that survive screen changes, at a

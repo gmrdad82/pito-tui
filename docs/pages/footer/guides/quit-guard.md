@@ -5,7 +5,7 @@ sidebar:
   order: 15
 ---
 
-![An import runs; d asks "Delete the 12 photos?" over the hint line, the choice moves between Yes and No and No keeps them; ctrl+c shows "Press ctrl+c again to quit", a second ctrl+c asks "The import is still running. Quit anyway?", and y quits](../images/confirm.gif)
+![An import runs; d asks "Delete the 12 photos?" over the hint line, the choice moves between Yes and No and No keeps them; ctrl+c shows "Press ctrl+c again to quit", a second ctrl+c asks "The import is still running. Quit anyway?", and y quits](../../images/footer/confirm.gif)
 
 `QuitGuard` sees every key first and says what to do with it. It never reads
 input or the clock itself: the app passes the key, the time and whether work
@@ -70,7 +70,7 @@ let footer = Footer::new(&HINTS)
 
 ```rust
 use std::time::{Duration, Instant};
-use ratatui::crossterm::event;
+use pito_tui::crossterm::event;
 
 let wait = guard
     .deadline()

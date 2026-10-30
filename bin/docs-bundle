@@ -16,14 +16,36 @@ target=${CARGO_TARGET_DIR:-target}
 rm -rf "$stage"
 mkdir -p "$stage"
 cp -R docs/pages "$stage/docs"
-mkdir -p "$stage/docs/images"
-cp docs/images/*.gif docs/images/*.png "$stage/docs/images/"
+while IFS= read -r image; do
+  mkdir -p "$stage/docs/$(dirname "$image")"
+  cp "docs/$image" "$stage/docs/$image"
+done < <(cd docs && find images \( -name '*.gif' -o -name '*.png' \) -print)
 find "$stage/docs" -name '*.md' -exec sed -i "s/{{tag}}/$tag/g" {} +
+hidden='
+  /^```/ && !fence { fence = 1; rust = ($0 ~ /^```rust/); if (rust) $0 = "```rust"; print; next }
+  /^```/ && fence { fence = 0; rust = 0; print; next }
+  rust && /^[ \t]*#( |$)/ { next }
+  { print }
+'
+while IFS= read -r page; do
+  awk "$hidden" "$page" > "$page.tmp"
+  mv "$page.tmp" "$page"
+done < <(find "$stage/docs" -name '*.md')
 
 {
   printf -- '---\ntitle: Changelog\ndescription: Every release of pito-tui, newest first.\nsidebar:\n  order: 300\n---\n\n'
-  sed '1{/^# /d}' CHANGELOG.md
+  sed -e '1{/^# /d}' -e 's|](docs/changelogs/\([a-z-]*\)\.md)|](../changelogs/\1/)|g' CHANGELOG.md
 } > "$stage/docs/changelog.md"
+mkdir -p "$stage/docs/changelogs"
+order=300
+for history in docs/changelogs/*.md; do
+  crate=$(basename "$history" .md)
+  order=$((order + 1))
+  {
+    printf -- '---\ntitle: %s changelog\ndescription: Every release of %s, newest first.\nsidebar:\n  order: %s\n---\n\n' "$crate" "$crate" "$order"
+    sed '1{/^# /d}' "$history"
+  } > "$stage/docs/changelogs/$crate.md"
+done
 
 quote='
   s{\A---\n(.*?)\n---\n}{
@@ -45,13 +67,14 @@ rm -rf "$target/doc"
 RUSTDOCFLAGS="-A rustdoc::broken_intra_doc_links" CARGO_TARGET_DIR=$target cargo doc --no-deps --all-features --quiet
 cp -R "$target/doc" "$stage/docs/api"
 printf '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=pito_tui/index.html"><title>pito-tui API</title><a href="pito_tui/index.html">pito_tui</a>\n' > "$stage/docs/api/index.html"
-perl -pi -e "s{src=\"docs/images/}{src=\"https://raw.githubusercontent.com/$repo/$tag/docs/images/}g; s{href=\"(?![a-z]+:|\\.|#|/)([^\"#]+)(?<!\\.html)\"}{href=\"https://github.com/$repo/blob/$tag/\$1\"}g" "$stage/docs/api/pito_tui/index.html"
+perl -pi -e "s{src=\"docs/images/}{src=\"https://raw.githubusercontent.com/$repo/$tag/docs/images/}g; s{href=\"(?![a-z]+:|\\.|#|/)([^\"#]+)(?<!\\.html)\"}{href=\"https://github.com/$repo/blob/$tag/\$1\"}g" "$stage/docs/api/pito_tui/index.html" "$stage/docs/api/pito_tui"/{header,footer,hourglass,list}/index.html
 
 broken=0
 while IFS= read -r page; do
   rel=${page#"$stage/docs/"}
   case $rel in
     index.md) url=. ;;
+    */index.md) url=${rel%/index.md} ;;
     *) url=${rel%.md} ;;
   esac
   dir=$(dirname "$rel")

@@ -1,18 +1,18 @@
 ---
 title: Move an existing app onto the shell
-description: For an app that draws with pito-header, pito-footer, pito-hourglass and pito-list and keeps its own loop, the steps to move onto pito-tui and prove nothing moved.
+description: For an app that draws the header, footer, hourglass and list itself and keeps its own loop, the steps to move onto the shell and prove nothing moved.
 sidebar:
   order: 110
 ---
 
-This guide is for an app that already draws with pito-header, pito-footer,
-pito-hourglass and pito-list directly, and keeps its own loop. Moving to the
+This guide is for an app that already draws the header, footer, hourglass
+and list itself, and keeps its own loop. Moving to the
 shell deletes that glue; the app's screens and data stay as they are.
 
 ## What the app keeps
 
 - Its screens' content: what each one draws, its data, its rows and
-  columns, its detail views. pito-list and pito-footer's `Input` stay the
+  columns, its detail views. The list and the footer's `Input` stay the
   app's to use inside a screen, through `pito_tui::list` and
   `pito_tui::footer`.
 - Its words, every one, in any language: `Words` for the shell's few
@@ -23,7 +23,7 @@ shell deletes that glue; the app's screens and data stay as they are.
   messages. An empty word is simply not drawn.
 - Its keys beyond the shell's: anything a screen's `key` takes, and
   app-wide actions through `on_key`. The shell's own keys are the app's to
-  change too: `nav_keys` (pito-header's `NavKeys`, `NavKeys::NONE`
+  change too: `nav_keys` (the header's `NavKeys`, `NavKeys::NONE`
   included), `quit_keys`, `stop_keys`, `help(None)`, and the filter's
   `start_keys` and `clear_keys`. Mouse capture stays off unless the app
   turns it on with `Modes`.
@@ -62,18 +62,18 @@ shell deletes that glue; the app's screens and data stay as they are.
 | A screen of its own opened over any other by a key, with unlit tabs and its own breadcrumb | `Tui::overlay(section, keys, screen)` |
 | Code that runs the app's own CLI, parses its `--progress json` lines and stops it | `Cx::run(id, label, Command)` (`Cx::run_from` when the lines come on stderr), `Cx::stop(id)`, `Screen::heard` for each line and the exit, and `command::read` for a single line |
 | A picker drawn over a screen, its keys and its answer | `Cx::pick(Pick)` and `Screen::picked` |
-| A long-log or trace pane: scroll, page, ends, find, copy, a cache of built rows | `Log`; a long list takes pito-list's `Shared` |
+| A long-log or trace pane: scroll, page, ends, find, copy, a cache of built rows | `Log`; a long list takes the list's `Shared` |
 | Age and duration text, Braille bars, percent, spinners, label redraw timing | `clock`, `progress`, `Activity::estimate` |
 | Frames compared cell by cell before and after a change, by hand | `capture::capture` and `capture::compare` behind `--capture` and `--compare`, `capture::Recorder` for the frames from before the move or from an app that keeps its own loop, and `capture::compare_dirs` for two captures |
-| A tone module mapped to four crates' `Styles` | `Palette`, and `Cx::palette` at runtime |
+| A tone module mapped to the header's, footer's, list's and hourglass's `Styles` | `Palette`, and `Cx::palette` at runtime |
 | A loading wrapper around the hourglass | `Phase::Loading(label)` |
 | The too-small guard, a centred message, OSC 52, text helpers | `min_size` and `Words::too_small`, `message`, `Cx::copy`, `text` |
 | Dump size and key parsing, text and ANSI output, a bench loop | `dump::*`, `Tui::shot`, `Tui::bench` |
 
 ## Moving over, step by step
 
-1. **One pin.** Replace the four `pito-*` lines in `Cargo.toml` with the
-   pito-tui line from [Install](../../install/), and import through `pito_tui::header`,
+1. **One pin.** Put the pito-tui line from [Install](../../install/) in
+   `Cargo.toml`, and import the widgets through `pito_tui::header`,
    `pito_tui::footer`, `pito_tui::hourglass` and `pito_tui::list`. Keep
    ratatui and crossterm through `pito_tui::ratatui` and
    `pito_tui::crossterm`, or pin the same versions (0.30 and 0.29).
@@ -131,12 +131,12 @@ shell deletes that glue; the app's screens and data stay as they are.
     the sizes the app cares about with the old build, through
     `capture::Recorder` ([Prove the switch](#prove-the-switch)); after
     it, compare. The header, footer and spacing should match, since the shell
-    draws them with the same crates and the same layout (a one-cell side
+    draws them with the same widgets and the same layout (a one-cell side
     margin for the header and footer, two cells for the content, one row
     above the footer). Then delete the captures: they are a safety net for
     the move, not a test to keep.
 11. **What the app had built in.** Its own pickers become `Cx::pick`, its
-    log and trace panes a `Log` (a long list a pito-list `Shared`), its
+    log and trace panes a `Log` (a long list a `list::Shared`), its
     age and duration text `clock`, its bars and spinners `progress`, and the
     code that ran its own CLI and read the progress lines `Cx::run` (or
     `Cx::run_from` for lines on stderr), with `Cx::stop` for its stop and

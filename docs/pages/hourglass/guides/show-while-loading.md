@@ -29,7 +29,7 @@ use std::{
 };
 
 use pito_tui::hourglass::Hourglass;
-use ratatui::{
+use pito_tui::ratatui::{
     DefaultTerminal, Frame,
     crossterm::event::{self, Event, KeyCode, KeyEventKind},
     style::{Color, Modifier, Style},
@@ -37,7 +37,7 @@ use ratatui::{
 };
 
 fn main() -> io::Result<()> {
-    ratatui::run(run)
+    pito_tui::ratatui::run(run)
 }
 
 fn run(terminal: &mut DefaultTerminal) -> io::Result<()> {
@@ -81,8 +81,8 @@ fn draw(frame: &mut Frame, started: Instant, data: Option<&str>) {
 
 `event::poll` with a 50 ms timeout is the redraw timer: it returns early on a
 key, and otherwise the loop draws the next picture. The crossterm it uses is
-ratatui's own (`ratatui::crossterm`, ratatui's default `crossterm` feature);
-pito-hourglass itself brings no backend.
+ratatui's own (`pito_tui::ratatui::crossterm`), the same crate as
+`pito_tui::crossterm`; the hourglass itself reads no terminal.
 
 ## Part of the screen
 
@@ -93,7 +93,7 @@ it can fill a pane while the rest of the screen stays live:
 use std::time::Instant;
 
 use pito_tui::hourglass::Hourglass;
-use ratatui::{
+use pito_tui::ratatui::{
     Frame,
     layout::{Constraint, Layout},
     widgets::{Block, Paragraph},
@@ -110,7 +110,7 @@ fn draw(frame: &mut Frame, started: Instant) {
 }
 ```
 
-What it draws when the pane is small is in [Small areas](small-areas.md).
+What it draws when the pane is small is in [Small areas](../small-areas/).
 
 ## By reference
 

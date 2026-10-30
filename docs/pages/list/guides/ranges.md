@@ -5,7 +5,7 @@ sidebar:
   order: 5
 ---
 
-![The cursor moves down into the Queued section, v starts a range, and every row from the anchor to the cursor draws selected while the section headings stay as they are](../images/range.gif)
+![The cursor moves down into the Queued section, v starts a range, and every row from the anchor to the cursor draws selected while the section headings stay as they are](../../images/list/range.gif)
 
 A range is the app's: the list draws it but never changes it. Keep an anchor
 in your app state when the user starts a Visual mode, and hand the list the
@@ -21,7 +21,7 @@ default, goes back to the one selected row.
 
 ```rust
 use pito_tui::list::{Key, List, ListView, Column, Row, Styles};
-use ratatui::{
+use pito_tui::ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::{Color, Style},
@@ -76,7 +76,7 @@ does set still wins: a foreground it sets colours every cell.
 
 ```rust
 use pito_tui::list::Styles;
-use ratatui::style::{Color, Modifier, Style};
+use pito_tui::ratatui::style::{Color, Modifier, Style};
 
 let styles = Styles::new()
     .selected(Style::new().bg(Color::DarkGray).add_modifier(Modifier::BOLD))
@@ -86,4 +86,4 @@ let styles = Styles::new()
 
 `Styles::cursor(style)` gives the marker a colour of its own, so a
 bold-only selection that keeps the cell colours can still colour the marker.
-[Theme the list](styles.md) has every style.
+[Theme the list](../styles/) has every style.
