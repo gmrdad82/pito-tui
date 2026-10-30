@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+root=$PWD
+app=$root/render/header
+bin=$root/target/release/examples
+out=tmp/renders
+images=docs/images/header
+cargo build --release --locked --example header_demo --example header_fit --example header_gallery
+for shot in demo fit; do
+    prec clip pito-tui "header_$shot" --app-dir "$app" --bin "$bin" --size 1280x512 --fps 30 --no-archive --out "$out"
+    pcod "$out/pito-tui/clip/pito-tui-clip-header_$shot-1280x512-30fps.master.mp4" "$images/$shot.gif" --size 1280 --fps 15 --force --no-progress
+done
+still() {
+    prec still pito-tui "header_$1" --app-dir "$app" --bin "$bin" --size "1280x$3" --set "grid=76x$2" --no-archive --out "$out"
+    cp "$out/pito-tui/still/pito-tui-still-header_$1-1280x$3.png" "$images/$1.png"
+}
+still rows 8 315
+still spans 6 236
+still drill 12 472
+pcmp "$images/draw-time.toml" --kind bars --out "$images"

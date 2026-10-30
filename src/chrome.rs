@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use pito_footer::{ConfirmBar, Footer, Hint, Notice, Words as Choice};
-use pito_header::{Breadcrumb, Drill, Header};
+use crate::footer::{ConfirmBar, Footer, Hint, Notice, Words as Choice};
+use crate::header::{Breadcrumb, Drill, Header};
 use ratatui::{
     Frame,
     buffer::Buffer,

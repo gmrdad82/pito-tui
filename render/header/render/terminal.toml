@@ -1,0 +1,70 @@
+app = "pito-tui"
+bin = "header_demo"
+grid = [76, 13]
+frame = "bare"
+typing = "35ms"
+
+[build]
+command = "cargo build --release --locked --example header_demo --example header_fit --example header_gallery"
+bin_dir = "{target}/release/examples"
+
+[env]
+HOME = "home"
+
+[theme]
+name = "pito-header"
+background = "#16181d"
+foreground = "#d8dee9"
+cursor = "#f2c14e"
+selection = "#2c313a"
+black = "#16181d"
+red = "#e06c75"
+green = "#8fc98a"
+yellow = "#f2c14e"
+blue = "#7aa2d6"
+magenta = "#c792ea"
+cyan = "#7fc1c9"
+white = "#d8dee9"
+brightBlack = "#5f6773"
+brightRed = "#ef8a91"
+brightGreen = "#a9dca4"
+brightYellow = "#f7d27a"
+brightBlue = "#9dbbe6"
+brightMagenta = "#d9aef2"
+brightCyan = "#a0d6dc"
+brightWhite = "#ffffff"
+
+[shots.header_demo]
+kind = "clip"
+line = "The header stepping through groups and sections, drilling into a check and back"
+tape = "render/terminal/demo.tape"
+launch = "header_demo"
+settle = "1s"
+
+[shots.header_fit]
+kind = "clip"
+line = "The same header narrowing column by column, abbreviating step by step, then widening back"
+tape = "render/terminal/fit.tape"
+launch = "header_fit"
+settle = "1s"
+
+[shots.header_rows]
+kind = "still"
+line = "Every optional row: the title rule with its slots, the groups, the sections, the facts, the closing rule and a confirm"
+tape = "render/terminal/still.tape"
+launch = "header_gallery rows"
+settle = "1s"
+
+[shots.header_spans]
+kind = "still"
+line = "Sections in several styles: each host's name beside its coloured state"
+tape = "render/terminal/still.tape"
+launch = "header_gallery spans"
+settle = "1s"
+
+[shots.header_drill]
+kind = "still"
+line = "Drilled two levels in, the breadcrumb rule at three widths"
+tape = "render/terminal/still.tape"
+launch = "header_gallery drill"
+settle = "1s"

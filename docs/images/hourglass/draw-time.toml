@@ -1,0 +1,14 @@
+title = "HOURGLASS DRAW TIME"
+unit = "NANOSECONDS PER DRAW"
+better = "lower"
+suffix = " NS"
+subtitle = "RYZEN 9 9950X, RUST 1.97.1, RELEASE, ONE THREAD"
+date = "2026-10-14"
+notes = ["MEAN OF 1,000,000 DRAWS PER ROW, 1 MS APART, ZERO ALLOCATIONS."]
+parties = [{ name = "PITO-HOURGLASS" }]
+rows = [
+  { label = "200×50: GLASS, LABEL, HINT", values = [4807.0] },
+  { label = "80×24: GLASS, LABEL, HINT", values = [4621.5] },
+  { label = "40×2: LABEL, HINT", values = [2689.8] },
+  { label = "12×1: LABEL, CUT", values = [981.4] },
+]

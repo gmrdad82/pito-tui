@@ -1,0 +1,15 @@
+title = "FRAME TIME, 20,000 ITEMS"
+unit = "MICROSECONDS PER FRAME"
+better = "lower"
+subtitle = "150X40, 5 COLUMNS, RYZEN 9 9950X, EXAMPLES/VERSUS.RS"
+date = "2026-10-14"
+suffix = " US"
+notes = ["WHOLE LIST: PITO-LIST KEEPS ITS ROWS; THE TABLE IS BUILT FROM EVERY ITEM.", "VISIBLE ROWS: PITO-LIST BUILDS THEM ON DEMAND; THE APP SLICES THE TABLE."]
+parties = [{ name = "PITO-LIST" }, { name = "RATATUI 0.30 TABLE" }]
+
+[[groups]]
+name = "SELECTION MOVING EVERY FRAME"
+rows = [
+  { label = "WHOLE LIST", values = [308.9, 21691.8] },
+  { label = "VISIBLE ROWS", values = [285.4, 167.2] },
+]

@@ -51,8 +51,8 @@ pub use wake::{Wake, Waker, listen};
 pub use words::Words;
 
 pub use crossterm;
-pub use pito_footer as footer;
-pub use pito_header as header;
-pub use pito_hourglass as hourglass;
-pub use pito_list as list;
+pub mod footer;
+pub mod header;
+pub mod hourglass;
+pub mod list;
 pub use ratatui;

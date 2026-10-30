@@ -7,3 +7,8 @@ MIT licence like the code (see ../../LICENSE). The names and logos in them stay 
 pitomd-wordmark.svg is the PITO MD wordmark, copied by ../../bin/marks from the
 PITO MD brand masters; it is not under the MIT licence (see ../../NOTICE.md and
 ../../TRADEMARKS.md).
+../../bin/marks takes it from the tracked export exports/pitomd/readme/wordmark.svg
+of the brand masters at aa3aee8b232a1b848995bf3d9a012a01d4aff8ec: © Cătălin
+Ilinca, all rights reserved. To refresh it, set the new commit in ../../bin/marks,
+run it with PITO_ASSETS naming a checkout of the brand masters, and update the
+commit above.

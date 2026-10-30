@@ -1,0 +1,13 @@
+Sleep 1.2s
+Type@120ms "<<<<<<<<"
+Sleep 900ms
+Type@120ms "<<<<<<<<"
+Sleep 900ms
+Type@120ms "<<<<<<"
+Sleep 900ms
+Type@120ms "<<<<<<"
+Sleep 900ms
+Type@120ms "<<<<<<"
+Sleep 1.2s
+Type@40ms ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
+Sleep 1.5s

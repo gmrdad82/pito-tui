@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 use std::time::{Duration, Instant};
 
+use crate::footer::Key;
 use crossterm::event::KeyEvent;
-use pito_footer::Key;
 use ratatui::{Frame, buffer::Buffer, layout::Rect, style::Style};
 
 use crate::head::RULE;
