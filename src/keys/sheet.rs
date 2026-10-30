@@ -17,6 +17,7 @@ pub struct Sheet {
     query: String,
     terms: Vec<String>,
     page: u16,
+    pages: u16,
 }
 
 impl Sheet {
@@ -41,6 +42,7 @@ impl Sheet {
     }
 
     pub fn fit(&mut self, pages: u16) {
+        self.pages = pages;
         self.page = self.page.min(pages.saturating_sub(1));
     }
 
@@ -103,7 +105,10 @@ impl Sheet {
         }
         match (chord.key, chord.mods.is_empty()) {
             (Key::PageDown, true) => {
-                self.page = self.page.saturating_add(1);
+                self.page = self
+                    .page
+                    .saturating_add(1)
+                    .min(self.pages.saturating_sub(1));
                 return Outcome::Took;
             }
             (Key::PageUp, true) => {
@@ -123,6 +128,22 @@ impl Sheet {
             _ => return Outcome::Pass,
         }
         Outcome::Took
+    }
+
+    pub fn takes(&self, chord: Chord) -> bool {
+        let plain = chord.mods.is_empty();
+        if !self.open {
+            return chord == Chord::char('?');
+        }
+        if plain && matches!(chord.key, Key::PageUp | Key::PageDown) {
+            return true;
+        }
+        if self.typing {
+            let typed = chord.mods.without(Mods::SHIFT).is_empty();
+            return matches!(chord.key, Key::Esc | Key::Enter | Key::Backspace)
+                || (typed && matches!(chord.key, Key::Char(_) | Key::Space));
+        }
+        plain && matches!(chord.key, Key::Char('?' | '/') | Key::Esc)
     }
 
     fn type_key(&mut self, chord: Chord) -> Outcome {

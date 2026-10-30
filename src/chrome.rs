@@ -753,7 +753,7 @@ impl<E: Send + 'static> Tui<E> {
                     mode: self.keys_mode,
                     when: &self.keys_when,
                 };
-                keymap.hints(now, &mut hints);
+                keymap.hints(now, self.panel.sheet(), &mut hints);
             }
             let shown = self.hints.iter().filter(|hint| !prompted || hint.pinned);
             hints.extend(shown.copied());

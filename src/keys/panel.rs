@@ -144,6 +144,14 @@ impl<'k> Panel<'k> {
         }
     }
 
+    pub fn shut(&mut self) {
+        if self.sheet.is_open() || self.since.is_some() {
+            self.sheet.close();
+            self.since = None;
+            self.stale = true;
+        }
+    }
+
     pub fn key(&mut self, chord: Chord, moment: Instant) -> Outcome {
         let open = self.sheet.is_open();
         let shown = self.shown(moment);
@@ -429,7 +437,7 @@ impl Pen<'_> {
 }
 
 pub(crate) trait Map {
-    fn hints<'k>(&'k self, now: Now<'_>, into: &mut Vec<Shown<'k>>);
+    fn hints<'k>(&'k self, now: Now<'_>, sheet: &Sheet, into: &mut Vec<Shown<'k>>);
 
     fn draw(
         &'static self,
@@ -443,8 +451,15 @@ pub(crate) trait Map {
 }
 
 impl<A> Map for Keymap<A> {
-    fn hints<'k>(&'k self, now: Now<'_>, into: &mut Vec<Shown<'k>>) {
-        self.each_hint(now, |hint| into.push(hint.into()));
+    fn hints<'k>(&'k self, now: Now<'_>, sheet: &Sheet, into: &mut Vec<Shown<'k>>) {
+        if sheet.is_open() {
+            self.each_open_hint(now, sheet, |hint, own| {
+                let shown = Shown::from(hint);
+                into.push(if own { shown.pinned() } else { shown });
+            });
+        } else {
+            self.each_hint(now, |hint| into.push(hint.into()));
+        }
     }
 
     fn draw(

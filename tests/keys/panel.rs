@@ -95,6 +95,8 @@ fn the_sheet_draws_no_words_the_keymap_does_not_supply() {
                 open: "toggles".into(),
                 close: "shuts".into(),
                 search: "finds".into(),
+                clear: "wipes".into(),
+                keep: "holds".into(),
                 hint: "hh".into(),
                 button: "bb".into(),
                 scroll: "rolls".into(),

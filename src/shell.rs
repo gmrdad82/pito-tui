@@ -1294,7 +1294,7 @@ impl<E: Send + 'static> Tui<E> {
     fn apply(&mut self) -> Flow {
         self.absorb();
         if self.covered() {
-            self.panel.close(self.moment);
+            self.panel.shut();
         }
         self.pending()
     }

@@ -101,7 +101,8 @@ The footer then shows the keymap's live hints for the place the app is in,
 in its order, ranks and words, before any `Tui::hints`, and `?` opens the
 sheet over the screen: the current mode's keys first, then the other modes'
 under "Elsewhere", `/` to search, pgdn and pgup to scroll, esc or `?` to
-close. A screen asks the keymap what a key does and tells the shell when it
+close. While the sheet is open the footer shows those keys of its own first,
+and leaves out any app hint on a key the sheet takes just then. A screen asks the keymap what a key does and tells the shell when it
 moves:
 
 ```rust

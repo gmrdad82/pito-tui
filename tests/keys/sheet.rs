@@ -138,6 +138,46 @@ fn the_sheet_scrolls_a_page_at_a_time_when_it_outgrows_the_area() {
 }
 
 #[test]
+fn the_sheets_own_keys_are_on_screen_on_its_first_page_at_80x24() {
+    let words = Words::default();
+    let mut tui = started(keyed(&BIG));
+    tui.key(ch('?'));
+    let first = text(&mut tui, SMALL);
+    assert!(first.contains('↓') && !first.contains("does 59"), "{first}");
+    for (keys, does) in [
+        ("esc", &words.close),
+        ("/", &words.search),
+        ("pgup / pgdn", &words.scroll),
+    ] {
+        let hint = format!("{keys} {does}");
+        assert!(first.contains(&hint), "{hint}:\n{first}");
+    }
+
+    tui.key(ch('/'));
+    let typing = text(&mut tui, SMALL);
+    for (keys, does) in [
+        ("esc", &words.clear),
+        ("enter", &words.keep),
+        ("pgup / pgdn", &words.scroll),
+    ] {
+        let hint = format!("{keys} {does}");
+        assert!(typing.contains(&hint), "{hint}:\n{typing}");
+    }
+}
+
+#[test]
+fn a_layer_opened_under_an_eased_sheet_shows_at_once() {
+    let mut tui = started(keyed(&KEYS).still_sheet(false));
+    tui.key(ch('?'));
+    tui.advance(Duration::from_millis(400));
+    assert!(text(&mut tui, WIDE).contains("Elsewhere"));
+    tui.key(ch('m'));
+    assert!(!tui.sheet().is_open());
+    let shown = text(&mut tui, WIDE);
+    assert!(!shown.contains("Elsewhere"), "{shown}");
+}
+
+#[test]
 fn the_sheet_eases_open_and_closed_and_is_instant_when_still() {
     let mut tui = started(keyed(&KEYS).still_sheet(false));
     tui.key(ch('?'));

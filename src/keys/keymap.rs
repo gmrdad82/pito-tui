@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::fmt;
 
 use crate::keys::chord::Chord;
+use crate::keys::sheet::Sheet;
 
 type Text = Cow<'static, str>;
 
@@ -10,8 +11,6 @@ pub struct Mode(pub &'static str);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct When(pub &'static str);
-
-pub(crate) const HELP_OPEN: When = When("");
 
 #[derive(Debug, Clone, Copy)]
 pub struct Now<'a> {
@@ -36,10 +35,6 @@ impl<'a> Now<'a> {
     fn holds(&self, when: Option<When>) -> bool {
         when.is_none_or(|when| self.when.contains(&when))
     }
-
-    fn holds_open(&self, when: Option<When>) -> bool {
-        when.is_none_or(|when| when == HELP_OPEN || self.when.contains(&when))
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -55,6 +50,7 @@ pub struct Bind<A> {
     when: Option<When>,
     rank: u8,
     quiet: bool,
+    open_only: bool,
     action: Option<A>,
 }
 
@@ -83,8 +79,14 @@ impl<A> Bind<A> {
             when: None,
             rank: 0,
             quiet: false,
+            open_only: false,
             action: None,
         }
+    }
+
+    fn open_only(mut self) -> Self {
+        self.open_only = true;
+        self
     }
 
     pub fn shown(mut self, keys: impl Into<Text>) -> Self {
@@ -143,7 +145,7 @@ impl<A> Bind<A> {
     }
 
     pub(crate) fn live_open(&self, now: &Now) -> bool {
-        self.applies(now.mode) && now.holds_open(self.when)
+        self.applies(now.mode) && (self.open_only || now.holds(self.when))
     }
 
     pub(crate) fn found(&self, terms: &[String]) -> bool {
@@ -172,7 +174,7 @@ impl<A> Bind<A> {
             &self.does,
             self.note.as_deref().unwrap_or(""),
             &self.modes_text,
-            self.shown_when().map_or("", |when| when.0),
+            self.when.map_or("", |when| when.0),
         ]
         .join(" ")
         .to_lowercase();
@@ -185,14 +187,10 @@ impl<A> Bind<A> {
             does: &self.does,
             note: self.note.as_deref(),
             modes: &self.modes_text,
-            when: self.shown_when().map(|when| when.0),
+            when: self.when.map(|when| when.0),
             rank: self.rank,
             live,
         }
-    }
-
-    fn shown_when(&self) -> Option<When> {
-        self.when.filter(|when| *when != HELP_OPEN)
     }
 
     fn hint(&self) -> Hint<'_> {
@@ -226,6 +224,8 @@ pub struct Words {
     pub open: Text,
     pub close: Text,
     pub search: Text,
+    pub clear: Text,
+    pub keep: Text,
     pub hint: Text,
     pub button: Text,
     pub scroll: Text,
@@ -241,6 +241,8 @@ impl Default for Words {
             open: "opens and closes this help".into(),
             close: "closes it".into(),
             search: "searches it".into(),
+            clear: "clears the search".into(),
+            keep: "keeps the search".into(),
             hint: "help".into(),
             button: "? Help".into(),
             scroll: "scrolls it".into(),
@@ -264,6 +266,7 @@ struct Ranked {
 pub struct Keymap<A> {
     pub(crate) groups: Vec<Group<A>>,
     pub(crate) help: Group<A>,
+    searching: Vec<Bind<A>>,
     order: Vec<Mode>,
     joiner: Text,
     words: Words,
@@ -285,6 +288,7 @@ impl<A> Keymap<A> {
                 name: Text::Borrowed(""),
                 binds: Vec::new(),
             },
+            searching: Vec::new(),
             order: Vec::new(),
             joiner: " / ".into(),
             words: Words::default(),
@@ -299,11 +303,15 @@ impl<A> Keymap<A> {
             name: words.group.clone(),
             binds: vec![
                 Bind::bare("?", words.open.clone()),
-                Bind::bare("esc", words.close.clone()).when(HELP_OPEN),
-                Bind::bare("/", words.search.clone()).when(HELP_OPEN),
-                Bind::bare("pgup pgdn", words.scroll.clone()).when(HELP_OPEN),
+                Bind::bare("esc", words.close.clone()).open_only(),
+                Bind::bare("/", words.search.clone()).open_only(),
+                Bind::bare("pgup pgdn", words.scroll.clone()).open_only(),
             ],
         };
+        self.searching = vec![
+            Bind::bare("esc", words.clear.clone()),
+            Bind::bare("enter", words.keep.clone()),
+        ];
         self.words = words;
         self.settle();
         self
@@ -368,10 +376,47 @@ impl<A> Keymap<A> {
         hints
     }
 
-    pub(crate) fn each_hint<'k>(&'k self, now: Now, mut put: impl FnMut(Hint<'k>)) {
-        let mut help = Some(self.help_hint());
+    pub(crate) fn each_hint<'k>(&'k self, now: Now, put: impl FnMut(Hint<'k>)) {
+        self.walk(now, Some(self.help_hint()), |_| false, put);
+    }
+
+    pub(crate) fn each_open_hint<'k>(
+        &'k self,
+        now: Now,
+        sheet: &Sheet,
+        mut put: impl FnMut(Hint<'k>, bool),
+    ) {
+        if let ([_, close, search, scroll], [clear, keep]) =
+            (&self.help.binds[..], &self.searching[..])
+        {
+            if sheet.typing() {
+                put(clear.hint(), true);
+                put(keep.hint(), true);
+            } else {
+                let esc = if sheet.query().is_empty() {
+                    close
+                } else {
+                    clear
+                };
+                put(esc.hint(), true);
+                put(search.hint(), true);
+            }
+            put(scroll.hint(), true);
+        }
+        let help = (!sheet.typing()).then(|| self.help_hint());
+        let taken = |bind: &Bind<A>| bind.chords.iter().any(|chord| sheet.takes(*chord));
+        self.walk(now, help, taken, |hint| put(hint, false));
+    }
+
+    fn walk<'k>(
+        &'k self,
+        now: Now,
+        mut help: Option<Hint<'k>>,
+        skip: impl Fn(&Bind<A>) -> bool,
+        mut put: impl FnMut(Hint<'k>),
+    ) {
         for bind in self.spots_in(now.mode).iter().map(|spot| self.at(*spot)) {
-            if !now.holds(bind.when) {
+            if !now.holds(bind.when) || skip(bind) {
                 continue;
             }
             if bind.rank > 0
@@ -534,6 +579,9 @@ impl<A> Keymap<A> {
             for bind in &mut group.binds {
                 bind.settle(&joiner, &group.name);
             }
+        }
+        for bind in &mut self.searching {
+            bind.settle(&joiner, &self.help.name);
         }
     }
 }

@@ -84,3 +84,49 @@ fn a_keymap_hint_becomes_a_footer_hint_with_its_rank() {
     let help = keys::Words::default();
     assert!(hints.iter().any(|hint| hint.does == help.hint));
 }
+
+#[test]
+fn the_open_sheet_puts_its_own_keys_first_in_the_footer() {
+    let mut tui = started(keyed(&KEYS));
+    tui.key(ch('?'));
+    let shown = text(&mut tui, WIDE);
+    let open = "esc closes it · / searches it · pgup / pgdn scrolls it · right keeps · space plays · ? help · left drops · tab switches · ctrl+z undoes";
+    assert!(shown.contains(open), "{shown}");
+}
+
+#[test]
+fn while_a_search_is_typed_the_footer_drops_the_keys_the_query_takes() {
+    let mut tui = started(keyed(&KEYS));
+    tui.key(ch('?'));
+    tui.key(ch('/'));
+    let shown = text(&mut tui, WIDE);
+    let typing = "esc clears the search · enter keeps the search · pgup / pgdn scrolls it · right keeps · left drops · tab switches · ctrl+z undoes";
+    assert!(shown.contains(typing), "{shown}");
+    for gone in ["space plays", "? help", "/ searches it", "esc closes it"] {
+        assert!(!shown.contains(gone), "{gone}:\n{shown}");
+    }
+
+    tui.key(ch('u'));
+    tui.key(code(KeyCode::Enter));
+    let kept = text(&mut tui, WIDE);
+    assert!(
+        kept.contains("esc clears the search · / searches it · pgup / pgdn scrolls it"),
+        "{kept}"
+    );
+    assert!(kept.contains("space plays · ? help"), "{kept}");
+}
+
+#[test]
+fn a_hint_on_a_key_the_open_sheet_takes_waits_until_it_closes() {
+    let mut tui = started(keyed(&KEYS));
+    tui.key(ch('?'));
+    tui.key(ch(' '));
+    let open = text(&mut tui, WIDE);
+    assert!(tui.sheet().is_open());
+    assert!(open.contains("stops it"), "{open}");
+    assert!(!open.contains("space or esc stops it"), "{open}");
+    tui.key(code(KeyCode::Esc));
+    assert!(!tui.sheet().is_open());
+    let shut = text(&mut tui, WIDE);
+    assert!(shut.contains("space or esc stops it"), "{shut}");
+}

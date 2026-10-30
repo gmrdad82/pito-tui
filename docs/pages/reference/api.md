@@ -142,10 +142,10 @@ keys::Keymap::new() .modes(&[Mode]) .group(name, [Bind]) .words(keys::Words) .jo
 keys::bind(keys, does, action) .on(Mode) .modes(&[Mode]) .when(When) .shown(text) .note(text) .rank(u8) .quiet()
 keys::Now::new(Mode) .when(&[When]);  keys::Mode(&'static str), keys::When(&'static str)
 keys::Sheet::new()  key(Chord) -> Outcome, view(&Keymap, Now) -> View, open(), close(), toggle(), search(text),
-  is_open(), typing(), query(), page(), fit(pages)
+  is_open(), typing(), query(), takes(Chord) -> bool, page(), fit(pages)
 pub enum keys::Outcome { Took, Pass };  View { mode, here, elsewhere: Vec<Section> };  Section { group, rows: Vec<Row> }
 keys::Panel::new() .still(bool)                            // the ? sheet drawn: eased, scrolled, allocation-free when steady
-  key(Chord, now) -> Outcome, toggle(now), close(now), paste(text) -> bool,
+  key(Chord, now) -> Outcome, toggle(now), close(now), shut(), paste(text) -> bool,
   draw(&mut Buffer, area, &Palette, &Keymap, Now, now),
   shown(now), animating(now), sheet(), is_open()
 keys::Chord::parse(text) -> Result<Chord, Unknown>, from_crossterm(&KeyEvent) -> Option<Chord>,

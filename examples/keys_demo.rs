@@ -22,7 +22,6 @@ enum Act {
     Play,
     Stop,
     Switch,
-    Quit,
 }
 
 fn keymap() -> Keymap<Act> {
@@ -63,10 +62,7 @@ fn keymap() -> Keymap<Act> {
         )
         .group(
             "Desk",
-            [
-                bind("tab", "switches clips and cut", Act::Switch).rank(2),
-                bind("ctrl+c", "quits", Act::Quit).rank(3).quiet(),
-            ],
+            [bind("tab", "switches clips and cut", Act::Switch).rank(2)],
         )
 }
 

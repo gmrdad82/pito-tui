@@ -5,15 +5,14 @@ sidebar:
   order: 0
 ---
 
-
 `pito_tui::keys` is one keymap per app. The app declares its keys once, in
 groups, with the modes and contexts each answers in; from that one
 declaration come the action a key does, the footer's hints for wherever the
 app is, and the `?` help sheet with every key, so the sheet, the hints and
 what a key really does never disagree. The keymap has no words of the
 shell's: every key and phrase is the app's, and the sheet's own few words
-(its title, "Elsewhere", "nothing matches" and its Help group) are defaults
-the app replaces through `keys::Words`.
+(its title, "Elsewhere", "nothing matches", its Help group and the search's
+two footer hints) are defaults the app replaces through `keys::Words`.
 
 - **One declaration** for the action, the footer hints and the `?` sheet.
 - **Zero allocations** on a steady frame with the sheet open, searched or
@@ -98,10 +97,14 @@ fn main() -> std::io::Result<()> {
 ```
 
 `Tui::keymap` takes a `&'static` keymap, which a `LazyLock` gives; every hint
-then borrows its words from it. `Tui::keys_now` sets where the app starts,
-and a screen calls `cx.keys_now(now)` whenever its mode or a context changes;
-the next frame's hints and the open sheet follow. Hints the app passes to
-`Tui::hints` still show, after the keymap's.
+then borrows its words from it. A keymap whose words arrive at run time, from
+a settings file or a locale, is built once and kept in a `LazyLock` or with
+`Box::leak`. `Tui::keys_now` sets where the app starts, and a screen calls
+`cx.keys_now(now)` whenever its mode or a context changes; the next frame's
+hints and the open sheet follow. The shell holds one place for the whole app,
+so an app with several screens also calls `cx.keys_now(self.now())` from
+`Screen::entered`, and a tab back to a screen shows that screen's keys at
+once. Hints the app passes to `Tui::hints` still show, after the keymap's.
 
 ## The model
 
@@ -159,9 +162,16 @@ can't stall the frame.
   changes the wording to the app's voice.
 - A screen typing into its own input gets `?` as text: the shell asks the
   sheet only when no screen is typing.
-- Keys follow what is shown: when a key the sheet passed on opens a modal, a
-  pick, a confirm, a takeover or a typing input, or shuts the gate, the sheet
-  closes, so nothing acts hidden under it. While it searches a paste goes to
+- Keys follow what is shown: while the sheet is open the footer shows its
+  own keys first, and never drops them for width: esc with `Words::close`
+  (`Words::clear` once there is a search), `/` with `Words::search` and
+  pgup / pgdn with `Words::scroll`; while a search is typed, esc with
+  `Words::clear` and enter with `Words::keep`. An app hint on a key the
+  sheet takes just then (`sheet.takes(chord)`), such as space while typing,
+  leaves the footer until the sheet lets that key through again.
+- When a key the sheet passed on opens a modal, a pick, a confirm, a
+  takeover or a typing input, or shuts the gate, the sheet closes at once,
+  without easing, so nothing acts or draws hidden under it. While it searches a paste goes to
   its query; while it is open otherwise a paste goes nowhere, and so does a
   click or a wheel.
 - A visible Help or `?` button calls `cx.toggle_sheet()`.

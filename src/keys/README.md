@@ -108,7 +108,8 @@ the frame.
 
 - `?` opens and closes the sheet; esc closes it (first clearing a search);
   `/` searches it (typing goes to the search, enter keeps it, esc drops it);
-  pgdn and pgup scroll it a page at a time.
+  pgdn and pgup scroll it a page at a time, up to the last page the drawing
+  gave `sheet.fit(pages)`.
 - It never steals focus: `sheet.key(chord)` returns `Outcome::Took` only for
   those keys and `Outcome::Pass` for every other, which the app handles as if
   the sheet were closed. Opening it changes no selection, mode or playback,
@@ -121,19 +122,28 @@ the frame.
 - The app calls `sheet.key` only when it isn't typing into its own text
   field, so a `?` typed there stays text, and closes the sheet when a key it
   passed on opens something of the app's own, so nothing acts hidden under it.
+- `sheet.takes(chord)` says whether the sheet would take a key just now, so
+  a footer can leave out the app's hints on keys the sheet holds while it is
+  open (space and letters while a search is typed).
 
 ## In the shell
 
 The shell does all of this for an app that hands it the keymap:
 `Tui::keymap(&KEYS)` and the current place, `Tui::keys_now(now)` at the start
-and `cx.keys_now(now)` from a screen whenever the mode or a context changes.
+and `cx.keys_now(now)` from a screen whenever the mode or a context changes,
+and from `Screen::entered` in an app with several screens, since the shell
+holds one place for the whole app. A keymap whose words arrive at run time is
+built once and kept in a `LazyLock` or with `Box::leak`, as `Tui::keymap`
+takes it `&'static`.
 The footer then shows `keys.hints(now)` in the keymap's order, ranks and
 words, beside the app's own `Tui::hints`; `?` opens the sheet, drawn as a
 centred overlay over the screen, eased open and closed (at once with
 `Tui::still_sheet(true)`), scrolling a page at a time when it outgrows the
 area, with no allocation on a steady frame. While it is open, keys go to the sheet
-first and those it passes on reach the screen as usual; `ctrl+c` always
-quits. A screen still asks the keymap what a key does:
+first and those it passes on reach the screen as usual; the footer shows the
+sheet's own keys first (esc, `/`, pgup / pgdn, or esc and enter while a search
+is typed) and leaves out any app hint on a key the sheet takes just then; a
+layer a passed-on key opens closes the sheet at once; `ctrl+c` always quits. A screen still asks the keymap what a key does:
 
 ```rust,ignore
 fn key(&mut self, key: KeyEvent, cx: &mut Cx<'_, Msg>) {
