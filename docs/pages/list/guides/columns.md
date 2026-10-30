@@ -18,9 +18,11 @@ and Owner stay and the message clips with "…".
 `Column::new(title, min, preferred)` makes a column. Every column pads its
 cells to its width so the rows line up, and a cell wider than it is cut after
 its last whole word that fits, or after a `/`, `-` or `_` inside a name, and
-ends in "…". A cut never lands inside a word or right after a bare number, a
-cell where no whole word fits shows "…" alone, and parts split by a spaced
-separator such as " · " drop whole. `pito_tui::list::cut(text, room)` gives an app
+ends in "…". A cut never lands inside a word or right after a bare number, and
+parts split by a spaced separator such as " · " drop whole. A cell where no
+whole word fits keeps the start of its first word instead, as many characters
+as leave a cell for the "…" (`household@example.com` in 20 cells shows
+`household@example.c…`), and a wide glyph is never split. `pito_tui::list::cut(text, room)` gives an app
 the same cut: `None` when the text fits, or the part to keep before the "…".
 The widths are worked out at each draw:
 

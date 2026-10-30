@@ -67,7 +67,7 @@ fn a_single_column_is_the_message() {
     let columns = [Column::new("Only", 3, 3)];
     let mut list = List::new().with_rows([Row::new(["abcdefghijkl"])]);
     let drawn = draw_with(&mut list, &columns, 10, 2, |view| view.header(true));
-    assert_eq!(drawn.text, ["  Only", "▌ …"]);
+    assert_eq!(drawn.text, ["  Only", "▌ abcdefg…"]);
 }
 
 #[test]

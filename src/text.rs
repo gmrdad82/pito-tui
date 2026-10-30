@@ -80,6 +80,7 @@ struct Scan {
     parted: bool,
     word: Option<Spot>,
     part: Option<Spot>,
+    fill: Spot,
 }
 
 impl Scan {
@@ -98,6 +99,7 @@ impl Scan {
             parted: false,
             word: None,
             part: None,
+            fill: Spot::default(),
         }
     }
 
@@ -168,6 +170,12 @@ impl Scan {
         self.prev = Some(kind);
         self.count += 1;
         self.used = self.used.saturating_add(cells);
+        if kind != Kind::Space && self.used <= self.limit {
+            self.fill = Spot {
+                count: self.count,
+                cells: self.used,
+            };
+        }
     }
 
     fn done(&self, room: usize) -> bool {
@@ -178,7 +186,7 @@ impl Scan {
         if self.used <= room {
             return None;
         }
-        Some(self.part.or(self.word).unwrap_or_default().count)
+        Some(self.part.or(self.word).unwrap_or(self.fill).count)
     }
 }
 
@@ -363,7 +371,7 @@ mod tests {
         assert_eq!(hard_wrap("a日本\n\nb", 2), ["a", "日", "本", "", "b"]);
     }
 
-    const SAMPLES: [&str; 12] = [
+    const SAMPLES: [&str; 15] = [
         "",
         "plain ascii words here",
         "日本語のテキスト",
@@ -376,6 +384,9 @@ mod tests {
         "family 👨\u{200d}👩\u{200d}👧 here",
         "flag 🇷🇴🇷🇴 ro",
         "love ❤\u{fe0f}❤\u{fe0f} you",
+        "household@example.com",
+        "first.last@company.com and more",
+        "12 files left",
     ];
 
     #[test]
@@ -430,14 +441,15 @@ mod tests {
         assert_eq!(clip("", 0), "");
         assert_eq!(clip("", 3), "");
         assert_eq!(clip("abc", 3), "abc");
-        assert_eq!(clip("abcd", 3), "…");
+        assert_eq!(clip("abcd", 3), "ab…");
         assert_eq!(clip("a", 0), "");
         assert_eq!(clip("ab", 1), "…");
         assert_eq!(clip("日本語", 4), "日…");
         assert_eq!(clip("日本語", 6), "日本語");
         assert_eq!(clip("a日本", 3), "a…");
         assert_eq!(clip("😀😀", 3), "😀…");
-        assert_eq!(clip("cafe\u{301}s", 4), "…");
+        assert_eq!(clip("cafe\u{301}s", 4), "caf…");
+        assert_eq!(clip("household@example.com", 20), "household@example.c…");
         assert_eq!(clip("deploy the api", 12), "deploy the…");
         assert_eq!(clip("deploy the api", 0), "");
         assert_eq!(clip("cafe\u{301}", 4), "cafe\u{301}");
@@ -466,7 +478,7 @@ mod tests {
         assert_eq!(fit("", 0), "");
         assert_eq!(fit("abc", 0), "");
         assert_eq!(fit("abc", 3), "abc");
-        assert_eq!(fit("abcd", 3), "…  ");
+        assert_eq!(fit("abcd", 3), "ab…");
         assert_eq!(fit("deploy the api", 9), "deploy…  ");
         assert_eq!(fit("日本", 3), "日…");
         assert_eq!(fit("a日本", 3), "a… ");
@@ -605,11 +617,47 @@ mod tests {
     }
 
     #[test]
-    fn cut_keeps_nothing_when_no_whole_word_fits() {
-        assert_eq!(cut("deployment", 5), Some(""));
+    fn cut_keeps_the_start_of_a_word_when_no_whole_word_fits() {
+        assert_eq!(cut("deployment", 5), Some("depl"));
+        assert_eq!(cut("1234567", 6), Some("12345"));
+        assert_eq!(
+            cut("household@example.com", 20),
+            Some("household@example.c")
+        );
+        assert_eq!(
+            cut("first.last@company.com", 21),
+            Some("first.last@company.c")
+        );
+        assert_eq!(cut("first.last@company.com", 12), Some("first.last@"));
+        assert_eq!(cut("first.last@company.com", 6), Some("first"));
+        assert_eq!(cut("first.last@company.com", 2), Some("f"));
+        assert_eq!(cut("  indented", 4), Some("  i"));
+        assert_eq!(cut("  indented", 3), Some(""));
+    }
+
+    #[test]
+    fn cut_keeps_only_the_ellipsis_when_no_grapheme_fits() {
         assert_eq!(cut("ab", 1), Some(""));
         assert_eq!(cut("abc", 0), Some(""));
-        assert_eq!(cut("1234567", 6), Some(""));
+        assert_eq!(cut("日本語", 2), Some(""));
+        assert_eq!(cut("😀x", 2), Some(""));
+    }
+
+    #[test]
+    fn cut_keeps_whole_words_whenever_one_fits_even_beside_a_longer_start() {
+        assert_eq!(cut("me household@example.com", 20), Some("me"));
+        assert_eq!(cut("deploy the api", 7), Some("deploy"));
+        assert_eq!(cut("deploy the api", 6), Some("deplo"));
+    }
+
+    #[test]
+    fn cut_keeps_wide_and_combined_graphemes_whole_at_a_start_cut() {
+        assert_eq!(cut("12日本", 4), Some("12"));
+        assert_eq!(cut("12日本", 5), Some("12日"));
+        assert_eq!(cut("1😀x", 3), Some("1"));
+        assert_eq!(cut("1😀xy", 4), Some("1😀"));
+        assert_eq!(cut("cafe\u{301}st", 5), Some("cafe\u{301}"));
+        assert_eq!(cut("1👨\u{200d}👩\u{200d}👧x", 3), Some("1"));
     }
 
     #[test]
@@ -619,23 +667,24 @@ mod tests {
         assert_eq!(cut("billing-team-lead", 13), Some("billing-"));
         assert_eq!(cut("snake_case_name", 12), Some("snake_case_"));
         assert_eq!(cut("/usr/local/bin", 9), Some("/usr/"));
-        assert_eq!(cut("-flag", 3), Some(""));
+        assert_eq!(cut("-flag", 3), Some("-f"));
     }
 
     #[test]
     fn cut_never_lands_right_after_a_bare_number() {
         assert_eq!(cut("uploaded 12 files", 15), Some("uploaded"));
-        assert_eq!(cut("12 files", 5), Some(""));
-        assert_eq!(cut("2026-10-26 release", 15), Some(""));
+        assert_eq!(cut("12 files", 5), Some("12 f"));
+        assert_eq!(cut("2026-10-26 release", 15), Some("2026-10-26 rel"));
         assert_eq!(cut("12.5 kB left", 10), Some("12.5 kB"));
         assert_eq!(cut("v1.2 build", 8), Some("v1.2"));
-        assert_eq!(cut("12日本", 4), Some(""));
+        assert_eq!(cut("12日本", 4), Some("12"));
     }
 
     #[test]
     fn cut_goes_between_wide_glyphs_and_keeps_graphemes_whole() {
         assert_eq!(cut("日本語のテキスト", 5), Some("日本"));
         assert_eq!(cut("日本語", 1), Some(""));
+        assert_eq!(cut("日本語", 3), Some("日"));
         assert_eq!(cut("a日本", 3), Some("a"));
         assert_eq!(cut("deploy 日本語", 10), Some("deploy 日"));
         assert_eq!(cut("😀😀 smile", 3), Some("😀"));
@@ -647,7 +696,7 @@ mod tests {
         let parts = "build · deploy api · tests";
         assert_eq!(cut(parts, 24), Some("build · deploy api"));
         assert_eq!(cut(parts, 18), Some("build"));
-        assert_eq!(cut(parts, 5), Some(""));
+        assert_eq!(cut(parts, 5), Some("buil"));
         assert_eq!(cut("a · b", 2), Some("a"));
         assert_eq!(cut("build 12 · deploy api · x", 20), Some("build"));
         assert_eq!(

@@ -32,15 +32,15 @@ fn a_cell_of_parts_clips_as_one() {
         Part::new("fghij").faint(),
     ]));
     let drawn = draw_with(&mut list, &TWO, 20, 2, |view| view.styles(STYLES));
-    assert_eq!(drawn.text[1], "  …         x");
-    assert_eq!(drawn.marks[1], "..g");
+    assert_eq!(drawn.text[1], "  abcdefg…  x");
+    assert_eq!(drawn.marks[1], "..gggggfff");
     let mut list = two(Cell::parts([
         Part::new("abcdefghij").style(GREEN),
         Part::new("zz").faint(),
     ]));
     let drawn = draw_with(&mut list, &TWO, 20, 2, |view| view.styles(STYLES));
-    assert_eq!(drawn.text[1], "  …         x");
-    assert_eq!(drawn.marks[1], "..g");
+    assert_eq!(drawn.text[1], "  abcdefg…  x");
+    assert_eq!(drawn.marks[1], "..gggggggg");
     let mut list = two(Cell::parts(["日本", "語日本語"]));
     let drawn = draw_with(&mut list, &TWO, 20, 2, |view| view.styles(STYLES));
     assert_eq!(drawn.text[1], "  日本語…   x");

@@ -62,10 +62,10 @@ fn forty_columns_drop_the_versions_and_shrink_the_rest() {
         drawn.text,
         [
             "    Operation     Owner  State  Message",
-            "▌ ⧗ deploy api    …      …      …",
+            "▌ ⧗ deploy api    bill…  runn…  uploadi…",
             "  ✓ update tool   tools  done   finished",
-            "  ✗ install app   …      …      exit 1:…",
-            "  ■ release       …      …      stopped…",
+            "  ✗ install app   desi…  fail…  exit 1:…",
+            "  ■ release       bill…  stop…  stopped…",
             "  · end ·",
             "",
             "",
@@ -81,7 +81,7 @@ fn thirty_columns_keep_only_the_pinned_one_and_the_message() {
         drawn.text,
         [
             "    Operation         Message",
-            "▌ ⧗ deploy api        …",
+            "▌ ⧗ deploy api        uploadi…",
             "  ✓ update tool       finished",
             "  ✗ install app       exit 1:…",
             "  ■ release           stopped…",

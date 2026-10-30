@@ -334,18 +334,18 @@ mod tests {
             let body = shown.strip_suffix('…').expect("an ellipsis");
             assert!(HINTS.starts_with(body), "room {room}: {shown}");
             assert!(
-                body.is_empty() || HINTS[body.len()..].starts_with(' '),
+                room < 5 || HINTS[body.len()..].starts_with(' '),
                 "room {room}: cut mid-word: {shown}"
             );
         }
     }
 
     #[test]
-    fn the_legend_is_an_ellipsis_alone_when_no_whole_word_fits() {
+    fn the_legend_keeps_its_start_when_no_whole_word_fits() {
         assert_eq!(legend(1), "…");
-        assert_eq!(legend(2), "…");
-        assert_eq!(legend(3), "…");
-        assert_eq!(legend(4), "…");
+        assert_eq!(legend(2), "↑…");
+        assert_eq!(legend(3), "↑↓…");
+        assert_eq!(legend(4), "↑↓…");
         assert_eq!(legend(5), "↑↓ j…");
     }
 

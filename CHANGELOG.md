@@ -4,6 +4,12 @@ Every release of pito-tui, newest first. Versions follow [Semantic
 Versioning](https://semver.org/): from 1.0.0 on, only a change in the first
 number may break an app; the middle number adds, the last one fixes.
 
+## v2.2.1 — 2026-10-31
+
+### Fixed
+
+- Text whose first word alone is wider than the room no longer draws as a bare "…": when no whole word fits, the cut keeps as many whole graphemes as leave a cell for the "…" (a wide glyph is never split, a combining mark stays with its letter), so `household@example.com` in a 20-cell column shows `household@example.c…`. The whole-word cut is unchanged whenever it keeps a word. This holds for `text::cut`, `clip` and `fit`, the status line, title, tab tails, fold titles, toasts and activity rows, `list::cut` and every list cell, cursor, mark and heading, and the footer's hints, segments, legends and notices. Drawing still allocates nothing.
+
 ## v2.2.0 — 2026-10-30
 
 ### Added
