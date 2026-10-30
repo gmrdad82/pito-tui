@@ -119,7 +119,7 @@ fn main() {
     }
     let micros = |time: Duration| time.as_secs_f64() * 1e6 / f64::from(frames.max(1));
     println!(
-        "pito-footer bench: {frames} frames at {WIDTH}x{HEIGHT}: mean {:.1} µs, worst {:.1} µs",
+        "footer bench: {frames} frames at {WIDTH}x{HEIGHT}: mean {:.1} µs, worst {:.1} µs",
         micros(total),
         worst.as_secs_f64() * 1e6
     );

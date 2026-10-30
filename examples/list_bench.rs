@@ -120,14 +120,14 @@ fn main() {
     let mut owned = List::new().with_rows((0..ROWS).map(row));
     let (mean, worst) = run(&mut owned, frames, styles, &columns, None, false, |_, _| {});
     println!(
-        "pito-list bench: {frames} frames of a {ROWS}-row list at {WIDTH}x{HEIGHT}: mean {:.1} µs, worst {:.1} µs",
+        "list bench: {frames} frames of a {ROWS}-row list at {WIDTH}x{HEIGHT}: mean {:.1} µs, worst {:.1} µs",
         mean.as_secs_f64() * 1e6,
         worst.as_secs_f64() * 1e6
     );
     let mut lazy = List::from_source(Grouped);
     let (mean, worst) = run(&mut lazy, frames, styles, &columns, None, false, |_, _| {});
     println!(
-        "pito-list bench: {frames} frames of a lazy {LAZY}-row list in groups of {GROUP} at {WIDTH}x{HEIGHT}: mean {:.1} µs, worst {:.1} µs",
+        "list bench: {frames} frames of a lazy {LAZY}-row list in groups of {GROUP} at {WIDTH}x{HEIGHT}: mean {:.1} µs, worst {:.1} µs",
         mean.as_secs_f64() * 1e6,
         worst.as_secs_f64() * 1e6
     );
@@ -169,7 +169,7 @@ fn main() {
         },
     );
     println!(
-        "pito-list bench: {frames} frames of a {ROWS}-row list with a range, kept colours, a styled header and four rows rewritten a frame at {WIDTH}x{HEIGHT}: mean {:.1} µs, worst {:.1} µs",
+        "list bench: {frames} frames of a {ROWS}-row list with a range, kept colours, a styled header and four rows rewritten a frame at {WIDTH}x{HEIGHT}: mean {:.1} µs, worst {:.1} µs",
         mean.as_secs_f64() * 1e6,
         worst.as_secs_f64() * 1e6
     );
@@ -194,7 +194,7 @@ fn main() {
         },
     );
     println!(
-        "pito-list bench: {frames} frames of a {ROWS}-row list with columns that fit their cells, a cursor style and the drawn columns read at {WIDTH}x{HEIGHT}: mean {:.1} µs, worst {:.1} µs",
+        "list bench: {frames} frames of a {ROWS}-row list with columns that fit their cells, a cursor style and the drawn columns read at {WIDTH}x{HEIGHT}: mean {:.1} µs, worst {:.1} µs",
         mean.as_secs_f64() * 1e6,
         worst.as_secs_f64() * 1e6
     );
@@ -213,7 +213,7 @@ fn main() {
         },
     );
     println!(
-        "pito-list bench: {frames} frames of a shared {LAZY}-item vector built on demand and handed over every frame, with a scrollbar and a count, at {WIDTH}x{HEIGHT}: mean {:.1} µs, worst {:.1} µs",
+        "list bench: {frames} frames of a shared {LAZY}-item vector built on demand and handed over every frame, with a scrollbar and a count, at {WIDTH}x{HEIGHT}: mean {:.1} µs, worst {:.1} µs",
         mean.as_secs_f64() * 1e6,
         worst.as_secs_f64() * 1e6
     );

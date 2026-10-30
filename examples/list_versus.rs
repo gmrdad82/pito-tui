@@ -191,12 +191,12 @@ fn main() {
 
     let mut owned = List::new().with_rows(items.iter().map(row));
     let measured = measure(frames, |at, buffer| pito(&mut owned, styles, at, buffer));
-    report("pito-list, owned rows", &measured);
+    report("list, owned rows", &measured);
 
     let mut shared =
         List::from_source(Shared::new(Arc::clone(&items), |_, item: &Item| row(item)).marks(1));
     let measured = measure(frames, |at, buffer| pito(&mut shared, styles, at, buffer));
-    report("pito-list, shared vector built on demand", &measured);
+    report("list, shared vector built on demand", &measured);
 
     let mut state = TableState::new();
     let measured = measure(frames, |at, buffer| {
