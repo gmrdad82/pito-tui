@@ -12,6 +12,7 @@ use ratatui::{
 };
 
 use crate::head::{self, Focus, Item, Kind, Labels, Numbers, Row, Rule};
+use crate::keys::Now;
 use crate::label::Span;
 use crate::layout::{Edge, PAD, Spot};
 use crate::screen::{Phase, Screen};
@@ -130,7 +131,7 @@ impl<E: Send + 'static> Tui<E> {
         again: Option<&'a str>,
         width: u16,
     ) -> Footer<'a> {
-        let hints_open = self.help.is_none_or(|help| help.open());
+        let hints_open = self.keymap.is_some() || self.help.is_none_or(|help| help.open());
         let notice = again
             .map(|text| Notice::new(text, self.quit_tone))
             .or_else(|| {
@@ -170,6 +171,7 @@ impl<E: Send + 'static> Tui<E> {
             .input(input);
         if let Some(help) = &self.help
             && !self.gated
+            && self.keymap.is_none()
         {
             footer = footer.help(help);
         }
@@ -196,7 +198,7 @@ impl<E: Send + 'static> Tui<E> {
     fn left(&self, index: usize, room: u16, buf: &mut Vec<(String, Style)>) -> usize {
         let help = self
             .help
-            .filter(|help| !help.open() && !self.gated)
+            .filter(|help| !help.open() && !self.gated && self.keymap.is_none())
             .map(|_| self.words.help.as_ref())
             .filter(|text| !text.is_empty());
         let (app, screen) = self.sides(index);
@@ -726,6 +728,14 @@ impl<E: Send + 'static> Tui<E> {
         let screen = &self.screens[index].screen;
         let again = self.quit.notice().filter(|text| !text.is_empty());
         let mut hints = recycle(std::mem::take(&mut self.hint_buf));
+        let now = Now {
+            mode: self.keys_mode,
+            when: &self.keys_when,
+        };
+        let sheet = self.panel.sheet();
+        let keymap = self.keymap.filter(|_| !self.gated);
+        let open = keymap.is_some() && sheet.is_open();
+        let kept = |hint: &Hint| !open || !sheet.takes_text(hint.key);
         let prompted = match (self.out.modals.last(), &self.out.picking) {
             (Some(top), _) => {
                 hints.extend_from_slice(&top.modal.hints);
@@ -736,18 +746,24 @@ impl<E: Send + 'static> Tui<E> {
                 true
             }
             (None, None) => {
+                if let Some(keymap) = keymap.filter(|_| open) {
+                    keymap.hints(now, sheet, &mut hints);
+                }
                 let list = screen.hint_list();
                 if list.is_empty() {
-                    hints.extend(screen.hints());
+                    hints.extend(screen.hints().into_iter().filter(|hint| kept(hint)));
                 } else {
-                    hints.extend_from_slice(list);
+                    hints.extend(list.iter().filter(|hint| kept(hint)).copied());
                 }
                 false
             }
         };
         if !self.gated {
+            if let Some(keymap) = keymap.filter(|_| !prompted && !open) {
+                keymap.hints(now, sheet, &mut hints);
+            }
             let shown = self.hints.iter().filter(|hint| !prompted || hint.pinned);
-            hints.extend(shown.copied());
+            hints.extend(shown.filter(|hint| kept(hint)).copied());
         }
         if again.is_some() && !self.quit_hints {
             hints.clear();
@@ -822,6 +838,20 @@ impl<E: Send + 'static> Tui<E> {
         }
         for opened in &mut self.out.modals {
             opened.modal.draw(frame, content, &palette);
+        }
+        if let Some(keymap) = self.keymap {
+            let now = Now {
+                mode: self.keys_mode,
+                when: &self.keys_when,
+            };
+            keymap.draw(
+                &mut self.panel,
+                frame.buffer_mut(),
+                content,
+                &palette,
+                now,
+                moment,
+            );
         }
         self.draw_toasts(frame, content);
     }

@@ -1,6 +1,6 @@
 ---
 title: Keys and the quit guard
-description: The fixed order every key goes through, app-wide keys, and the double ctrl+c quit guard that asks first while work runs.
+description: The fixed order every key goes through, one keymap for the hints and the ? help sheet, app-wide keys, and the double ctrl+c quit guard that asks first while work runs.
 sidebar:
   order: 30
 ---
@@ -49,23 +49,78 @@ So layers never fight over a key, each key goes through one fixed order:
 1. a key release is ignored;
 2. the quit guard;
 3. a takeover, which hears only its cancel keys;
-4. the modal on top;
-5. an open confirm (unless the key is in `Tui::through_keys`, which reaches
+4. the open `?` sheet, which takes `?`, esc, `/`, pgdn, pgup and its search,
+   closes when a key it passed on leaves a modal, a pick, a confirm, a
+   takeover, a shut gate or a typing input up,
+   and passes every other key on down this list;
+5. the modal on top;
+6. an open confirm (unless the key is in `Tui::through_keys`, which reaches
    `on_key` and the screen with the confirm left open);
-6. an open pick;
-7. the app slot's `claim`;
-8. a gate, which takes every other key;
-9. a screen that is typing into an input;
-10. the help toggle (`?`);
-11. the header's focus keys, and its arrows while a header row has focus;
-12. the keys that open an overlay (the activity screen or the app's own);
-13. the nav keys, the group keys and the number keys;
-14. the stop key while a screen loads;
-15. the app's own keys (`on_key`);
-16. the screen's `key`.
+7. an open pick;
+8. the app slot's `claim`;
+9. a gate, which takes every other key;
+10. a screen that is typing into an input;
+11. `?`: with a keymap it opens the sheet, without one it shows or hides the
+    hints;
+12. the header's focus keys, and its arrows while a header row has focus;
+13. the keys that open an overlay (the activity screen or the app's own);
+14. the nav keys, the group keys and the number keys;
+15. the stop key while a screen loads;
+16. the app's own keys (`on_key`);
+17. the screen's `key`.
 
 `Cx::key()` tells a callback which key led to it, so `back` knows `esc` from
 `q`.
+
+## One keymap for the hints and the `?` sheet
+
+An app that declares its keys in a `keys::Keymap` hands it to the shell, and
+the footer's hints and the `?` help sheet come from it:
+
+```rust
+static KEYS: LazyLock<Keymap<Act>> = LazyLock::new(|| {
+    Keymap::new()
+        .modes(&[LIST, EDIT])
+        .group(
+            "List",
+            [
+                bind("down j", "next", Act::Next).on(LIST),
+                bind("e", "edits", Act::Edit).on(LIST).rank(1),
+            ],
+        )
+        .group("Editor", [bind("enter", "saves", Act::Save).on(EDIT)])
+});
+
+Tui::new("hello", "0.1.0", Color::Cyan)
+    .screen("Home", Home::default())
+    .keymap(&KEYS)
+    .keys_now(Now::new(LIST))
+```
+
+The footer then shows the keymap's live hints for the place the app is in,
+in its order, ranks and words, before any `Tui::hints`, and `?` opens the
+sheet over the screen: the current mode's keys first, then the other modes'
+under "Elsewhere", `/` to search, pgdn and pgup to scroll, esc or `?` to
+close. The `?` hint stays on the footer however full it is. While the sheet is
+open the footer shows those keys of its own first, and leaves out any
+keymap, screen or app hint on a key the sheet takes just then.
+
+A screen asks the keymap what a key does and tells the shell when it moves:
+
+```rust
+fn key(&mut self, key: KeyEvent, cx: &mut Cx<'_, ()>) {
+    let Some(chord) = Chord::from_crossterm(&key) else {
+        return;
+    };
+    if let Some(act) = KEYS.action(self.now(), chord).copied() {
+        self.act(act);
+        cx.keys_now(self.now());
+    }
+}
+```
+
+Without a keymap, `?` shows and hides the hints as before. [Keys](../../keys/)
+has the whole model.
 
 ## App-wide keys
 
