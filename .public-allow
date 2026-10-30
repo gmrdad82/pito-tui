@@ -2,3 +2,14 @@ commit/7304632873fd:3 the folded keymap crate's own name, which its moved change
 commit/7304632873fd:16 the folded keymap crate's own name, which its moved changelog keeps as its page name
 commit/7304632873fd:docs/pages/keys/index.md:212 the folded keymap crate's own name in a link to its moved changelog, dropped in the next commit
 commit/9a3dd43460f5:docs/changelogs/pito-keys.md:7 the folded keymap crate's own name in an entry saying it went public, reverted in the next commit to keep the moved changelog at its pinned release
+commit/a833a2f350cb:src/footer/cut.rs:266 a placeholder address in a word-cut test, swapped for example.com in the next commit
+commit/a833a2f350cb:src/text.rs:388 a placeholder address in a word-cut test, swapped for example.com in the next commit
+commit/a833a2f350cb:src/text.rs:628 a placeholder address in a word-cut test, swapped for example.com in the next commit
+commit/a833a2f350cb:src/text.rs:631 a placeholder address in a word-cut test, swapped for example.com in the next commit
+commit/a833a2f350cb:src/text.rs:632 a placeholder address in a word-cut test, swapped for example.com in the next commit
+commit/a833a2f350cb:src/text.rs:633 a placeholder address in a word-cut test, swapped for example.com in the next commit
+commit/a833a2f350cb:tests/list/cut.rs:24 a placeholder address in a word-cut test, swapped for example.com in the next commit
+commit/a833a2f350cb:tests/list/cut.rs:58 a placeholder address in a word-cut test, swapped for example.com in the next commit
+commit/a833a2f350cb:tests/list/cut.rs:59 a placeholder address in a word-cut test, swapped for example.com in the next commit
+commit/a833a2f350cb:tests/list/cut.rs:60 a placeholder address in a word-cut test, swapped for example.com in the next commit
+commit/a833a2f350cb:tests/list/cut.rs:189 a placeholder address in a word-cut test, swapped for example.com in the next commit
