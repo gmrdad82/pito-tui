@@ -208,8 +208,8 @@ frame as text after those keys. Its tape for prec is kept in
   through, the sheet's place in it, and app-wide keys.
 - [The footer](../footer/): how the hints fit the width and drop by rank.
 - [API reference](../api/pito_tui/keys/index.html): the `cargo doc` pages.
-- [Changelog](../changelog/): every release, and
-  [the keymap's earlier releases](../changelogs/pito-keys/).
+- [Changelog](../changelog/): every release, with a link to the keymap's
+  earlier releases.
 
 ## Part of pito-tui
 
