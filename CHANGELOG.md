@@ -4,6 +4,16 @@ Every release of pito-tui, newest first. Versions follow [Semantic
 Versioning](https://semver.org/): from 1.0.0 on, only a change in the first
 number may break an app; the middle number adds, the last one fixes.
 
+## v2.2.0 — 2026-10-30
+
+### Added
+
+- `Screen::lets_help()`, false by default: a screen that types (`typing()` true) and returns true lets the keymap's `?` through, so `?` opens the sheet and stays on the footer while every other key still reaches the screen. Without a keymap it changes nothing.
+
+### Fixed
+
+- The footer no longer shows the keymap's `? help` while `?` would not reach the sheet: under a typing screen that does not let `?` through, a shut gate, a modal, a pick, a confirm, a takeover or the quit question. The keymap's other hints stay, and `? help` returns as soon as `?` opens the sheet again.
+
 ## v2.1.0 — 2026-10-30
 
 ### Added

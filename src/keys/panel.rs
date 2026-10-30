@@ -446,7 +446,7 @@ impl Pen<'_> {
 }
 
 pub(crate) trait Map {
-    fn hints<'k>(&'k self, now: Now<'_>, sheet: &Sheet, into: &mut Vec<Shown<'k>>);
+    fn hints<'k>(&'k self, now: Now<'_>, sheet: &Sheet, help: bool, into: &mut Vec<Shown<'k>>);
 
     fn draw(
         &'static self,
@@ -460,7 +460,7 @@ pub(crate) trait Map {
 }
 
 impl<A> Map for Keymap<A> {
-    fn hints<'k>(&'k self, now: Now<'_>, sheet: &Sheet, into: &mut Vec<Shown<'k>>) {
+    fn hints<'k>(&'k self, now: Now<'_>, sheet: &Sheet, help: bool, into: &mut Vec<Shown<'k>>) {
         let put = |hint: Hint<'k>, own: bool| {
             let shown = Shown::from(hint);
             into.push(if own { shown.pinned() } else { shown });
@@ -468,7 +468,7 @@ impl<A> Map for Keymap<A> {
         if sheet.is_open() {
             self.each_open_hint(now, sheet, put);
         } else {
-            self.each_hint(now, put);
+            self.each_hint(now, help, put);
         }
     }
 

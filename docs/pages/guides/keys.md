@@ -51,7 +51,8 @@ So layers never fight over a key, each key goes through one fixed order:
 3. a takeover, which hears only its cancel keys;
 4. the open `?` sheet, which takes `?`, esc, `/`, pgdn, pgup and its search,
    closes when a key it passed on leaves a modal, a pick, a confirm, a
-   takeover, a shut gate or a typing input up,
+   takeover, a shut gate or a typing input up (unless the typing screen lets
+   `?` through),
    and passes every other key on down this list;
 5. the modal on top;
 6. an open confirm (unless the key is in `Tui::through_keys`, which reaches
@@ -59,7 +60,8 @@ So layers never fight over a key, each key goes through one fixed order:
 7. an open pick;
 8. the app slot's `claim`;
 9. a gate, which takes every other key;
-10. a screen that is typing into an input;
+10. a screen that is typing, which takes every key but `?` when its
+    `lets_help()` is `true` and there is a keymap;
 11. `?`: with a keymap it opens the sheet, without one it shows or hides the
     hints;
 12. the header's focus keys, and its arrows while a header row has focus;
@@ -101,7 +103,9 @@ The footer then shows the keymap's live hints for the place the app is in,
 in its order, ranks and words, before any `Tui::hints`, and `?` opens the
 sheet over the screen: the current mode's keys first, then the other modes'
 under "Elsewhere", `/` to search, pgdn and pgup to scroll, esc or `?` to
-close. The `?` hint stays on the footer however full it is. While the sheet is
+close. The `?` hint stays on the footer however full it is, while `?`
+reaches the sheet: under a typing screen, a shut gate, a modal, a pick, a
+confirm, a takeover or the quit question it leaves the footer. While the sheet is
 open the footer shows those keys of its own first, and leaves out any
 keymap, screen or app hint on a key the sheet takes just then.
 
@@ -145,8 +149,24 @@ For keys that must win over a gate or a typing screen, use the app slot's
 ## Typing into an input
 
 A screen that takes text returns `true` from `typing()` and its input bar
-from `input()`; while it types, the nav and help keys reach it as text. A
-bracketed paste arrives in `paste`.
+from `input()`; while it types, the nav and help keys reach it as text, and
+the footer leaves out the keymap's `?` hint. A bracketed paste arrives in
+`paste`.
+
+A screen that types without an input bar, carrying a card with the arrows or
+drawing a list over itself, often wants `?` to open the sheet all the same.
+It returns `true` from `lets_help()`: `?` opens the sheet and stays on the
+footer, esc closes the sheet, and every other key still reaches the screen.
+
+```rust
+fn typing(&self) -> bool {
+    self.carrying.is_some()
+}
+
+fn lets_help(&self) -> bool {
+    true
+}
+```
 
 ```rust
 fn key(&mut self, key: KeyEvent, cx: &mut Cx<'_, Msg>) {

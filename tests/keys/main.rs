@@ -5,3 +5,4 @@ mod hints;
 mod model;
 mod panel;
 mod sheet;
+mod typing;
