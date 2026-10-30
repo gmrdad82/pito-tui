@@ -18,8 +18,6 @@ the app replaces through `keys::Words`.
 - **One declaration** for the action, the footer hints and the `?` sheet.
 - **Zero allocations** on a steady frame with the sheet open, searched or
   shut, held by a counting-allocator test.
-- **About 1 µs** for a mode's hints and 4 µs for the open sheet's view of a
-  200-bind keymap in three modes.
 
 ## A first keymap in the shell
 
@@ -161,6 +159,11 @@ can't stall the frame.
   changes the wording to the app's voice.
 - A screen typing into its own input gets `?` as text: the shell asks the
   sheet only when no screen is typing.
+- Keys follow what is shown: when a key the sheet passed on opens a modal, a
+  pick, a confirm, a takeover or a typing input, or shuts the gate, the sheet
+  closes, so nothing acts hidden under it. While it searches a paste goes to
+  its query; while it is open otherwise a paste goes nowhere.
+- A visible Help or `?` button calls `cx.toggle_sheet()`.
 - `ctrl+c` quits from anywhere, the open sheet and its search included.
 
 ## The `?` sheet

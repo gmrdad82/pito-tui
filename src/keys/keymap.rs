@@ -11,7 +11,7 @@ pub struct Mode(pub &'static str);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct When(pub &'static str);
 
-pub(crate) const HELP_OPEN: When = When("while this help is open");
+pub(crate) const HELP_OPEN: When = When("");
 
 #[derive(Debug, Clone, Copy)]
 pub struct Now<'a> {
@@ -172,7 +172,7 @@ impl<A> Bind<A> {
             &self.does,
             self.note.as_deref().unwrap_or(""),
             &self.modes_text,
-            self.when.map_or("", |when| when.0),
+            self.shown_when().map_or("", |when| when.0),
         ]
         .join(" ")
         .to_lowercase();
@@ -185,10 +185,14 @@ impl<A> Bind<A> {
             does: &self.does,
             note: self.note.as_deref(),
             modes: &self.modes_text,
-            when: self.when.map(|when| when.0),
+            when: self.shown_when().map(|when| when.0),
             rank: self.rank,
             live,
         }
+    }
+
+    fn shown_when(&self) -> Option<When> {
+        self.when.filter(|when| *when != HELP_OPEN)
     }
 
     fn hint(&self) -> Hint<'_> {

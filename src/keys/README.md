@@ -98,10 +98,9 @@ Every string is borrowed from the keymap; keep the keymap in a `static`
 The keymap does its work once, when it is declared: each bind's written keys
 and search text, and each mode's hints in rank order. So `action` is one pass
 with no allocation, `ticker` and `hints` copy the ready lists, and the sheet's
-search tests each bind's text without lowercasing it again. For a 200-bind map
-in three modes, `ticker` takes about 1 µs, the open sheet's `view` about 4 µs
-and a searched one about 7 µs. The search keeps its first 64 characters and
-its first 8 words, so a pasted page can't stall the frame.
+search tests each bind's text without lowercasing it again. The search keeps
+its first 64 characters and its first 8 words, so a pasted page can't stall
+the frame.
 
 ## The conventions
 
@@ -114,12 +113,14 @@ its first 8 words, so a pasted page can't stall the frame.
   those keys and `Outcome::Pass` for every other, which the app handles as if
   the sheet were closed. Opening it changes no selection, mode or playback,
   and the sheet shows the mode the user is in.
-- A visible Help or `?` button calls `sheet.toggle()`.
+- A visible Help or `?` button calls `sheet.toggle()` (`cx.toggle_sheet()`
+  from a screen in the shell).
 - The sheet lists its own keys in a last group, `Help`; `Words` changes the
   wording to the app's voice, the sheet's title, its "Elsewhere" heading and
   its "nothing matches" line among them.
 - The app calls `sheet.key` only when it isn't typing into its own text
-  field, so a `?` typed there stays text.
+  field, so a `?` typed there stays text, and closes the sheet when a key it
+  passed on opens something of the app's own, so nothing acts hidden under it.
 
 ## In the shell
 

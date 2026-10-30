@@ -49,7 +49,9 @@ So layers never fight over a key, each key goes through one fixed order:
 1. a key release is ignored;
 2. the quit guard;
 3. a takeover, which hears only its cancel keys;
-4. the open `?` sheet, which takes `?`, esc, `/`, pgdn, pgup and its search
+4. the open `?` sheet, which takes `?`, esc, `/`, pgdn, pgup and its search,
+   closes when a key it passed on leaves a modal, a pick, a confirm, a
+   takeover, a shut gate or a typing input up,
    and passes every other key on down this list;
 5. the modal on top;
 6. an open confirm (unless the key is in `Tui::through_keys`, which reaches

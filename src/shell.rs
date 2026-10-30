@@ -1031,6 +1031,9 @@ impl<E: Send + 'static> Tui<E> {
         {
             return Flow::Stay;
         }
+        if self.panel.paste(text) {
+            return Flow::Stay;
+        }
         if let Some(top) = self.out.modals.last_mut() {
             let (owner, id) = (top.screen, top.modal.id);
             if let Outcome::Heard(event) = top.modal.paste(text) {
@@ -1290,7 +1293,19 @@ impl<E: Send + 'static> Tui<E> {
 
     fn apply(&mut self) -> Flow {
         self.absorb();
+        if self.covered() {
+            self.panel.close(self.moment);
+        }
         self.pending()
+    }
+
+    fn covered(&self) -> bool {
+        self.gated
+            || self.out.takeover.is_some()
+            || self.out.asking.is_some()
+            || self.out.picking.is_some()
+            || !self.out.modals.is_empty()
+            || self.typing_now()
     }
 
     fn absorb(&mut self) {
@@ -1312,6 +1327,9 @@ impl<E: Send + 'static> Tui<E> {
             self.keys_mode = mode;
             self.keys_when.clear();
             self.keys_when.extend_from_slice(&self.out.keys_when);
+        }
+        if std::mem::take(&mut self.out.sheet) && self.keymap.is_some() {
+            self.panel.toggle(self.moment);
         }
         if let Some(title) = self.out.title.take() {
             self.title = title;

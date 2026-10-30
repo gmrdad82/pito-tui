@@ -331,7 +331,8 @@ and draw-time charts.
 - **Keys in a fixed order:** a key release is ignored; then the quit guard
   (a double `ctrl+c`, asking first while work runs, with the app's words);
   then a takeover, which hears only its cancel keys; then the open `?`
-  sheet, which takes its own keys and passes on the rest; then the modal on top;
+  sheet, which takes its own keys and passes on the rest, and closes when a
+  key it passed on leaves a layer or a typing input up; then the modal on top;
   then an open confirm, unless the key is one the app lets through
   (`through_keys`, such as `ctrl+r` for a refresh), which goes to `on_key`
   and the screen with the confirm left open; then an open pick; then the
@@ -721,7 +722,7 @@ Cx<'_, E>: screen(), now(), key() -> Option<KeyEvent>, detach(FnOnce() -> E), wa
   pick(Pick), focus() -> Focus, typing() -> bool, epoch(), title(text), title_spans([(text, Style)]),
   layout(Layout), role(Option<name>), show(Fn(Item) -> bool), go_group(n), toast(Toast),
   open(Modal), alert(id, title, [Line]), modal(id) -> Option<&mut Modal>, close(id),
-  takeover(Takeover), end_takeover(), gate(shut: bool), keys_now(keys::Now)
+  takeover(Takeover), end_takeover(), gate(shut: bool), keys_now(keys::Now), toggle_sheet()
 
 Head::new([Row]) .numbers(Numbers) .lone(bool)            // Head::default(): Title, Groups, Sections, Facts, Crumbs
 pub enum Row { Title, Groups, Caption, Sections, Facts, Crumbs, Blank }
@@ -781,7 +782,8 @@ keys::Sheet::new()  key(Chord) -> Outcome, view(&Keymap, Now) -> View, open(), c
   is_open(), typing(), query(), page(), fit(pages)
 pub enum keys::Outcome { Took, Pass };  View { mode, here, elsewhere: Vec<Section> };  Section { group, rows: Vec<Row> }
 keys::Panel::new() .still(bool)                            // the ? sheet drawn: eased, scrolled, allocation-free when steady
-  key(Chord, now) -> Outcome, toggle(now), draw(&mut Buffer, area, &Palette, &Keymap, Now, now),
+  key(Chord, now) -> Outcome, toggle(now), close(now), paste(text) -> bool,
+  draw(&mut Buffer, area, &Palette, &Keymap, Now, now),
   shown(now), animating(now), sheet(), is_open()
 keys::Chord::parse(text) -> Result<Chord, Unknown>, from_crossterm(&KeyEvent) -> Option<Chord>,
   new(Key, Mods), plain(Key), char(c), ctrl(c);  footer::Hint::from(keys::Hint)
@@ -828,7 +830,8 @@ TOP, SIDE, PAD, GAP                                        // Layout::new()'s sp
 
 Until the app says otherwise, a `Tui` wants at least 40 × 12 cells, uses
 `NavKeys::HEY` (`tab`, `[ ]`, digits, `esc` and `q` back), shows the hints
-with `?` to hide them (with no keymap; with one, `?` opens the sheet), quits on a double `ctrl+c` within 2 s and asks first
+with `?` to hide them (with no keymap; with one, `?` opens the sheet),
+quits on a double `ctrl+c` within 2 s and asks first
 while any screen is busy (`Mode::Ask`), stops a load on `esc`, reads a screen
 the first time it is shown (`eager(true)` reads them all at start), hides the
 facts row while a screen is drilled in (`keep_facts(true)` keeps it), has no
@@ -1941,8 +1944,6 @@ the app replaces through `keys::Words`.
 - **One declaration** for the action, the footer hints and the `?` sheet.
 - **Zero allocations** on a steady frame with the sheet open, searched or
   shut, held by a counting-allocator test.
-- **About 1 µs** for a mode's hints and 4 µs for the open sheet's view of a
-  200-bind keymap in three modes.
 
 ### A first keymap in the shell
 
@@ -2084,6 +2085,11 @@ can't stall the frame.
   changes the wording to the app's voice.
 - A screen typing into its own input gets `?` as text: the shell asks the
   sheet only when no screen is typing.
+- Keys follow what is shown: when a key the sheet passed on opens a modal, a
+  pick, a confirm, a takeover or a typing input, or shuts the gate, the sheet
+  closes, so nothing acts hidden under it. While it searches a paste goes to
+  its query; while it is open otherwise a paste goes nowhere.
+- A visible Help or `?` button calls `cx.toggle_sheet()`.
 - `ctrl+c` quits from anywhere, the open sheet and its search included.
 
 ### The `?` sheet

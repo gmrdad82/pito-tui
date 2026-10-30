@@ -1,4 +1,6 @@
+use crate::footer::Hint as Shown;
 use crate::keys::chord::{Chord, Key, Mods};
+use crate::keys::keymap::Hint;
 
 impl Chord {
     pub fn from_crossterm(event: &crossterm::event::KeyEvent) -> Option<Chord> {
@@ -41,5 +43,17 @@ impl Chord {
             _ => return None,
         };
         Some(Chord::new(key, mods))
+    }
+}
+
+impl<'k> From<Hint<'k>> for Shown<'k> {
+    fn from(hint: Hint<'k>) -> Self {
+        Shown::new(hint.keys, hint.does).rank(hint.rank)
+    }
+}
+
+impl<'k> From<&Hint<'k>> for Shown<'k> {
+    fn from(hint: &Hint<'k>) -> Self {
+        Shown::new(hint.keys, hint.does).rank(hint.rank)
     }
 }

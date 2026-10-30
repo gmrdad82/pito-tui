@@ -5,7 +5,9 @@ use pito_tui::crossterm::event::KeyCode;
 use pito_tui::footer::Hint;
 use pito_tui::keys::Words;
 
-use crate::common::{BIG, KEYS, WIDE, bare, ch, code, ctrl, heard, keyed, started, text, typed};
+use crate::common::{
+    BIG, KEYS, Probe, WIDE, bare, ch, code, ctrl, heard, keyed, started, text, typed,
+};
 
 const SMALL: (u16, u16) = (80, 24);
 
@@ -159,4 +161,70 @@ fn the_sheet_eases_open_and_closed_and_is_instant_when_still() {
     assert_eq!(boxed(&text(&mut still, WIDE)), full);
     still.key(ch('?'));
     assert_eq!(boxed(&text(&mut still, WIDE)), 0);
+}
+
+#[test]
+fn a_key_the_sheet_passes_on_that_opens_a_layer_closes_the_sheet() {
+    for key in ['m', 'p', 'i'] {
+        let mut tui = started(keyed(&KEYS));
+        tui.key(ch('?'));
+        assert!(tui.sheet().is_open(), "{key}");
+        tui.key(ch(key));
+        assert!(!tui.sheet().is_open(), "{key}");
+        assert!(!text(&mut tui, WIDE).contains("Elsewhere"), "{key}");
+        tui.key(ch('?'));
+        assert!(!tui.sheet().is_open(), "{key}");
+        assert!(!text(&mut tui, WIDE).contains("Elsewhere"), "{key}");
+    }
+}
+
+#[test]
+fn question_mark_typed_into_the_screens_input_stays_text() {
+    let mut tui = started(keyed(&KEYS));
+    tui.key(ch('i'));
+    tui.key(ch('?'));
+    tui.key(ch('/'));
+    assert!(!tui.sheet().is_open());
+    assert_eq!(
+        heard(&tui),
+        [KeyCode::Char('i'), KeyCode::Char('?'), KeyCode::Char('/')]
+    );
+}
+
+#[test]
+fn question_mark_does_nothing_while_the_shell_is_gated() {
+    let mut tui = started(keyed(&KEYS).gate(Probe::default(), true));
+    tui.key(ch('?'));
+    assert!(!tui.sheet().is_open());
+    assert!(!text(&mut tui, WIDE).contains("Elsewhere"));
+}
+
+#[test]
+fn a_paste_goes_to_the_query_while_searching_and_nowhere_else_while_open() {
+    let mut tui = started(keyed(&KEYS));
+    tui.key(ch('?'));
+    tui.paste("ignored");
+    assert!(tui.sheet().query().is_empty());
+    tui.key(ch('/'));
+    tui.paste("un\ndo");
+    assert_eq!(tui.sheet().query(), "un do");
+    assert!(tui.sheet().typing());
+    tui.key(code(KeyCode::Esc));
+    tui.key(code(KeyCode::Esc));
+    assert!(!tui.sheet().is_open());
+    tui.paste("body");
+    let pastes = tui.find::<Probe>().map(|probe| probe.pastes.clone());
+    assert_eq!(pastes.unwrap_or_default(), ["body"]);
+}
+
+#[test]
+fn a_screen_toggles_the_sheet_through_its_context() {
+    let mut tui = started(keyed(&KEYS));
+    tui.key(ch('h'));
+    assert!(tui.sheet().is_open());
+    assert!(text(&mut tui, WIDE).contains("Elsewhere"));
+
+    let mut without = started(bare());
+    without.key(ch('h'));
+    assert!(!without.sheet().is_open());
 }

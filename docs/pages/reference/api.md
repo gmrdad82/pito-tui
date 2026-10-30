@@ -85,7 +85,7 @@ Cx<'_, E>: screen(), now(), key() -> Option<KeyEvent>, detach(FnOnce() -> E), wa
   pick(Pick), focus() -> Focus, typing() -> bool, epoch(), title(text), title_spans([(text, Style)]),
   layout(Layout), role(Option<name>), show(Fn(Item) -> bool), go_group(n), toast(Toast),
   open(Modal), alert(id, title, [Line]), modal(id) -> Option<&mut Modal>, close(id),
-  takeover(Takeover), end_takeover(), gate(shut: bool), keys_now(keys::Now)
+  takeover(Takeover), end_takeover(), gate(shut: bool), keys_now(keys::Now), toggle_sheet()
 
 Head::new([Row]) .numbers(Numbers) .lone(bool)            // Head::default(): Title, Groups, Sections, Facts, Crumbs
 pub enum Row { Title, Groups, Caption, Sections, Facts, Crumbs, Blank }
@@ -145,7 +145,8 @@ keys::Sheet::new()  key(Chord) -> Outcome, view(&Keymap, Now) -> View, open(), c
   is_open(), typing(), query(), page(), fit(pages)
 pub enum keys::Outcome { Took, Pass };  View { mode, here, elsewhere: Vec<Section> };  Section { group, rows: Vec<Row> }
 keys::Panel::new() .still(bool)                            // the ? sheet drawn: eased, scrolled, allocation-free when steady
-  key(Chord, now) -> Outcome, toggle(now), draw(&mut Buffer, area, &Palette, &Keymap, Now, now),
+  key(Chord, now) -> Outcome, toggle(now), close(now), paste(text) -> bool,
+  draw(&mut Buffer, area, &Palette, &Keymap, Now, now),
   shown(now), animating(now), sheet(), is_open()
 keys::Chord::parse(text) -> Result<Chord, Unknown>, from_crossterm(&KeyEvent) -> Option<Chord>,
   new(Key, Mods), plain(Key), char(c), ctrl(c);  footer::Hint::from(keys::Hint)
@@ -192,7 +193,8 @@ TOP, SIDE, PAD, GAP                                        // Layout::new()'s sp
 
 Until the app says otherwise, a `Tui` wants at least 40 × 12 cells, uses
 `NavKeys::HEY` (`tab`, `[ ]`, digits, `esc` and `q` back), shows the hints
-with `?` to hide them (with no keymap; with one, `?` opens the sheet), quits on a double `ctrl+c` within 2 s and asks first
+with `?` to hide them (with no keymap; with one, `?` opens the sheet),
+quits on a double `ctrl+c` within 2 s and asks first
 while any screen is busy (`Mode::Ask`), stops a load on `esc`, reads a screen
 the first time it is shown (`eager(true)` reads them all at start), hides the
 facts row while a screen is drilled in (`keep_facts(true)` keeps it), has no

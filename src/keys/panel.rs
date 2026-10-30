@@ -11,7 +11,7 @@ use ratatui::{
 use crate::fold::ease;
 use crate::footer::Hint as Shown;
 use crate::keys::chord::Chord;
-use crate::keys::keymap::{Hint, Keymap, Mode, Now, Row, When};
+use crate::keys::keymap::{Keymap, Mode, Now, Row, When};
 use crate::keys::sheet::{Outcome, Sheet};
 use crate::layout::Spot;
 use crate::palette::Palette;
@@ -42,6 +42,8 @@ pub struct Panel<'k> {
     title: &'k str,
     mode: Option<Mode>,
     when: Vec<When>,
+    query: String,
+    typing: bool,
     stale: bool,
     keys: u16,
     natural: u16,
@@ -94,6 +96,8 @@ impl<'k> Panel<'k> {
             title: "",
             mode: None,
             when: Vec::new(),
+            query: String::new(),
+            typing: false,
             stale: true,
             keys: 0,
             natural: 0,
@@ -130,17 +134,37 @@ impl<'k> Panel<'k> {
         self.turned(shown, moment);
     }
 
+    pub fn close(&mut self, moment: Instant) {
+        if self.sheet.is_open() {
+            self.toggle(moment);
+        }
+    }
+
     pub fn key(&mut self, chord: Chord, moment: Instant) -> Outcome {
         let open = self.sheet.is_open();
         let shown = self.shown(moment);
         let outcome = self.sheet.key(chord);
         if outcome == Outcome::Took {
-            self.stale = true;
             if open != self.sheet.is_open() {
                 self.turned(shown, moment);
+            } else if self.sheet.typing() != self.typing || self.sheet.query() != self.query {
+                self.stale = true;
             }
         }
         outcome
+    }
+
+    pub fn paste(&mut self, text: &str) -> bool {
+        if !self.sheet.is_open() {
+            return false;
+        }
+        if self.sheet.typing() {
+            let mut query = String::from(self.sheet.query());
+            query.extend(text.chars().map(|c| if c.is_control() { ' ' } else { c }));
+            self.sheet.search(query);
+            self.stale = true;
+        }
+        true
     }
 
     fn turned(&mut self, shown: f32, moment: Instant) {
@@ -171,6 +195,9 @@ impl<'k> Panel<'k> {
         self.mode = Some(now.mode);
         self.when.clear();
         self.when.extend_from_slice(now.when);
+        self.query.clear();
+        self.query.push_str(self.sheet.query());
+        self.typing = self.sheet.typing();
         let words = keymap.sheet_words();
         self.title = &words.title;
         let groups = || keymap.groups.iter().chain(iter::once(&keymap.help));
@@ -205,7 +232,7 @@ impl<'k> Panel<'k> {
             .unwrap_or(0);
         let view = self.sheet.view(keymap, now);
         self.entries.clear();
-        if self.sheet.typing() || !self.sheet.query().is_empty() {
+        if self.typing || !self.query.is_empty() {
             self.entries.push(Entry::Query);
         }
         if !view.here.is_empty() && !now.mode.0.is_empty() {
@@ -276,7 +303,9 @@ impl<'k> Panel<'k> {
             .border_style(palette.rule)
             .style(palette.base)
             .render(place, buf);
-        let edge = place.right().saturating_sub(2);
+        let edge = place
+            .right()
+            .saturating_sub(if self.top > 0 { 3 } else { 2 });
         let x = put(buf, place.x + 2, place.y, edge, " ", palette.selected);
         let x = put(buf, x, place.y, edge, self.title, palette.selected);
         put(buf, x, place.y, edge, " ", palette.selected);
@@ -288,7 +317,8 @@ impl<'k> Panel<'k> {
             right: place.right().saturating_sub(2),
             keys: self.keys,
             palette,
-            sheet: &self.sheet,
+            query: &self.query,
+            typing: self.typing,
         };
         let shown = self.entries.iter().skip(usize::from(top));
         for (y, entry) in (place.y + 1..).zip(shown.take(usize::from(body))) {
@@ -317,7 +347,8 @@ struct Pen<'a> {
     right: u16,
     keys: u16,
     palette: &'a Palette,
-    sheet: &'a Sheet,
+    query: &'a str,
+    typing: bool,
 }
 
 impl Pen<'_> {
@@ -331,8 +362,16 @@ impl Pen<'_> {
         match entry {
             Entry::Query => {
                 let x = self.put(x, y, SLASH, palette.accent);
-                let x = self.put(x, y, self.sheet.query(), palette.ink);
-                if self.sheet.typing() {
+                let caret = if self.typing { width(CARET) } else { 0 };
+                let room = usize::from(self.right.saturating_sub(x).saturating_sub(caret));
+                let query = self.query;
+                let from = query
+                    .char_indices()
+                    .map(|(at, _)| at)
+                    .find(|at| cells(&query[*at..]) <= room)
+                    .unwrap_or(query.len());
+                let x = self.put(x, y, &query[from..], palette.ink);
+                if self.typing {
                     self.put(x, y, CARET, palette.accent);
                 }
             }
@@ -372,18 +411,6 @@ impl Pen<'_> {
                 self.put(x + 1, y, text, palette.muted);
             }
         }
-    }
-}
-
-impl<'k> From<Hint<'k>> for Shown<'k> {
-    fn from(hint: Hint<'k>) -> Self {
-        Shown::new(hint.keys, hint.does).rank(hint.rank)
-    }
-}
-
-impl<'k> From<&Hint<'k>> for Shown<'k> {
-    fn from(hint: &Hint<'k>) -> Self {
-        Shown::new(hint.keys, hint.does).rank(hint.rank)
     }
 }
 

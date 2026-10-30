@@ -214,6 +214,7 @@ pub(crate) struct Outbox<E> {
     pub(crate) hints: Option<Vec<Hint<'static>>>,
     pub(crate) keys_mode: Option<Mode>,
     pub(crate) keys_when: Vec<When>,
+    pub(crate) sheet: bool,
     pub(crate) title: Option<Vec<Span>>,
     pub(crate) layout: Option<Layout>,
     pub(crate) role: Option<Option<Cow<'static, str>>>,
@@ -248,6 +249,7 @@ impl<E> Outbox<E> {
             hints: None,
             keys_mode: None,
             keys_when: Vec::new(),
+            sheet: false,
             title: None,
             layout: None,
             role: None,
@@ -422,6 +424,10 @@ impl<E: Send + 'static> Cx<'_, E> {
         self.out.keys_mode = Some(now.mode);
         self.out.keys_when.clear();
         self.out.keys_when.extend_from_slice(now.when);
+    }
+
+    pub fn toggle_sheet(&mut self) {
+        self.out.sheet = !self.out.sheet;
     }
 
     pub fn title(&mut self, text: impl Into<Cow<'static, str>>) {

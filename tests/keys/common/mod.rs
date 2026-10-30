@@ -8,7 +8,7 @@ use pito_tui::ratatui::{
     layout::Rect,
     style::{Color, Style},
 };
-use pito_tui::{Cx, Palette, Screen, Tui, dump};
+use pito_tui::{Cx, Modal, Palette, Pick, Screen, Tui, dump};
 
 pub const RAIL: Mode = Mode("clips");
 pub const CUT: Mode = Mode("cut");
@@ -79,6 +79,8 @@ pub struct Probe {
     pub keys: Vec<KeyCode>,
     pub cut: bool,
     pub playing: bool,
+    pub input: bool,
+    pub pastes: Vec<String>,
 }
 
 impl Probe {
@@ -101,6 +103,13 @@ impl Screen<()> for Probe {
 
     fn key(&mut self, key: KeyEvent, cx: &mut Cx<'_, ()>) {
         self.keys.push(key.code);
+        match key.code {
+            KeyCode::Char('m') => cx.open(Modal::new(4, "Rename")),
+            KeyCode::Char('p') => cx.pick(Pick::new("Choose", ["alpha", "beta"])),
+            KeyCode::Char('i') => self.input = true,
+            KeyCode::Char('h') => cx.toggle_sheet(),
+            _ => {}
+        }
         let act = Chord::from_crossterm(&key).and_then(|chord| KEYS.action(self.now(), chord));
         match act {
             Some(Act::Switch) => self.cut = !self.cut,
@@ -109,6 +118,14 @@ impl Screen<()> for Probe {
             _ => {}
         }
         cx.keys_now(self.now());
+    }
+
+    fn paste(&mut self, text: &str, _cx: &mut Cx<'_, ()>) {
+        self.pastes.push(text.to_string());
+    }
+
+    fn typing(&self) -> bool {
+        self.input
     }
 }
 
