@@ -263,7 +263,7 @@ mod tests {
             head("household@example.com", 20),
             Some("household@example.c")
         );
-        assert_eq!(head("first.last@company.com", 8), Some("first.l"));
+        assert_eq!(head("first.last@example.com", 8), Some("first.l"));
         assert_eq!(head("me household@example.com", 20), Some("me"));
         assert_eq!(head("12日本", 4), Some("12"));
         assert_eq!(head("1😀x", 3), Some("1"));

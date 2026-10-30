@@ -21,7 +21,7 @@ const SAMPLES: [&str; 18] = [
     "build 12 · deploy api · x",
     "• item one two",
     "household@example.com",
-    "first.last@company.com and more",
+    "first.last@example.com and more",
     "12日本 x",
 ];
 
@@ -55,9 +55,9 @@ fn a_value_where_no_whole_word_fits_keeps_its_start() {
         cut("household@example.com", 20),
         Some("household@example.c")
     );
-    assert_eq!(cut("first.last@company.com", 16), Some("first.last@comp"));
-    assert_eq!(cut("first.last@company.com", 11), Some("first.last"));
-    assert_eq!(cut("first.last@company.com", 4), Some("fir"));
+    assert_eq!(cut("first.last@example.com", 16), Some("first.last@exam"));
+    assert_eq!(cut("first.last@example.com", 11), Some("first.last"));
+    assert_eq!(cut("first.last@example.com", 4), Some("fir"));
 }
 
 #[test]
@@ -186,7 +186,7 @@ fn an_email_column_of_twenty_cells_shows_the_start_of_the_address() {
     let columns = [Column::new("Login", 20, 20), Column::new("Note", 4, 0)];
     let mut list = List::new().with_rows([
         Row::new(["household@example.com", "x"]),
-        Row::new(["first.last@company.com", "y"]),
+        Row::new(["first.last@example.com", "y"]),
         Row::new(["me@example.com", "z"]),
     ]);
     let drawn = draw_with(&mut list, &columns, 30, 3, |view| view);
@@ -194,7 +194,7 @@ fn an_email_column_of_twenty_cells_shows_the_start_of_the_address() {
         drawn.text,
         [
             "▌ household@example.c…  x",
-            "  first.last@company.…  y",
+            "  first.last@example.…  y",
             "  me@example.com        z",
         ]
     );

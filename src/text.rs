@@ -385,7 +385,7 @@ mod tests {
         "flag 🇷🇴🇷🇴 ro",
         "love ❤\u{fe0f}❤\u{fe0f} you",
         "household@example.com",
-        "first.last@company.com and more",
+        "first.last@example.com and more",
         "12 files left",
     ];
 
@@ -625,12 +625,12 @@ mod tests {
             Some("household@example.c")
         );
         assert_eq!(
-            cut("first.last@company.com", 21),
-            Some("first.last@company.c")
+            cut("first.last@example.com", 21),
+            Some("first.last@example.c")
         );
-        assert_eq!(cut("first.last@company.com", 12), Some("first.last@"));
-        assert_eq!(cut("first.last@company.com", 6), Some("first"));
-        assert_eq!(cut("first.last@company.com", 2), Some("f"));
+        assert_eq!(cut("first.last@example.com", 12), Some("first.last@"));
+        assert_eq!(cut("first.last@example.com", 6), Some("first"));
+        assert_eq!(cut("first.last@example.com", 2), Some("f"));
         assert_eq!(cut("  indented", 4), Some("  i"));
         assert_eq!(cut("  indented", 3), Some(""));
     }
