@@ -12,7 +12,8 @@ The header, footer, hourglass and list each have an API page of their own:
 [the header](../../header/reference/api/),
 [the footer](../../api/pito_tui/footer/index.html),
 [the hourglass](../../api/pito_tui/hourglass/index.html) and
-[the list](../../list/reference/api/).
+[the list](../../list/reference/api/); the keymap's is in the sketch below,
+and [Keys](../../keys/) shows it in use.
 
 ```text
 Tui::new(name, version, accent: Color) -> Tui<E>          // E: the app's worker answers
@@ -28,12 +29,14 @@ Tui::new(name, version, accent: Color) -> Tui<E>          // E: the app's worker
   .band(impl Band) .top_band(impl Band) .lit_again(bool) .through_keys(&[footer::Key])
   .header_look(fn(Header) -> Header) .footer_look(fn(Footer, width: u16) -> Footer)
   .on_key(FnMut(KeyEvent, &mut Cx<E>) -> bool) .after_draw(FnMut(Duration))
+  .keymap(&'static keys::Keymap<A>) .keys_now(keys::Now) .still(bool)  // the hints and the ? sheet
   run() -> io::Result<()>, run_in(&mut Term)
   key(KeyEvent) -> Flow, paste(&str) -> Flow, mouse(MouseEvent) -> Flow, event(screen, E) -> Flow, handle(Wake<E>) -> Flow
   loaded(screen, generation, E) -> bool, landed(screen, generation, E) -> Option<Flow>  // None: a late or unknown load
   changed(source), go(screen) -> bool, start() -> Flow  // a quit from go comes back from start, settle or the next wake
   pump(), settle() -> Flow, advance(Duration) -> Flow, draw(&mut Frame), busy(), current(), names()
   find::<T>(), find_mut::<T>(), sender(), waker(screen), set_palette(..), set_words(..), set_layout(..)
+  set_keys_now(keys::Now), sheet() -> &keys::Sheet
   frame(w, h) -> Buffer, shot(w, h, &[KeyEvent], settle) -> Buffer, bench(w, h, frames) -> Vec<Bench>
 pub enum Flow { Stay, Quit }
 
@@ -82,7 +85,7 @@ Cx<'_, E>: screen(), now(), key() -> Option<KeyEvent>, detach(FnOnce() -> E), wa
   pick(Pick), focus() -> Focus, typing() -> bool, epoch(), title(text), title_spans([(text, Style)]),
   layout(Layout), role(Option<name>), show(Fn(Item) -> bool), go_group(n), toast(Toast),
   open(Modal), alert(id, title, [Line]), modal(id) -> Option<&mut Modal>, close(id),
-  takeover(Takeover), end_takeover(), gate(shut: bool)
+  takeover(Takeover), end_takeover(), gate(shut: bool), keys_now(keys::Now)
 
 Head::new([Row]) .numbers(Numbers) .lone(bool)            // Head::default(): Title, Groups, Sections, Facts, Crumbs
 pub enum Row { Title, Groups, Caption, Sections, Facts, Crumbs, Blank }
@@ -133,6 +136,19 @@ capture::Recorder::new(dir) -> io::Result<Recorder>        // frames from an app
 capture::Recorder::against(dir) -> io::Result<Recorder>    // the same frames compared with a capture instead
   .screen(index, name, &Buffer) .record(script name, &Buffer) -> io::Result<()>, frames(), finish() -> io::Result<Vec<Difference>>
 
+keys::Keymap::new() .modes(&[Mode]) .group(name, [Bind]) .words(keys::Words) .joiner(text)
+  action(Now, Chord) -> Option<&A>, hints(Now) -> Vec<keys::Hint>, ticker(Now) -> Vec<keys::Line>,
+  clashes() -> Vec<Clash>, button(), groups(), order()
+keys::bind(keys, does, action) .on(Mode) .modes(&[Mode]) .when(When) .shown(text) .note(text) .rank(u8) .quiet()
+keys::Now::new(Mode) .when(&[When]);  keys::Mode(&'static str), keys::When(&'static str)
+keys::Sheet::new()  key(Chord) -> Outcome, view(&Keymap, Now) -> View, open(), close(), toggle(), search(text),
+  is_open(), typing(), query(), page(), fit(pages)
+pub enum keys::Outcome { Took, Pass };  View { mode, here, elsewhere: Vec<Section> };  Section { group, rows: Vec<Row> }
+keys::Panel::new() .still(bool)                            // the ? sheet drawn: eased, scrolled, allocation-free when steady
+  key(Chord, now) -> Outcome, toggle(now), draw(&mut Buffer, area, &Palette, &Keymap, Now, now),
+  shown(now), animating(now), sheet(), is_open()
+keys::Chord::parse(text) -> Result<Chord, Unknown>, from_crossterm(&KeyEvent) -> Option<Chord>,
+  new(Key, Mods), plain(Key), char(c), ctrl(c);  footer::Hint::from(keys::Hint)
 Palette::new(accent: Color)                                // every token a pub field and a builder
   .base .ink .strong .muted .accent .selected .good .warn .bad .rule .line .glass .shimmer
   .title .inactive .focus .small (Style)  .bar(Option<list::Bar>) .count(Option<list::Count>)
@@ -176,7 +192,7 @@ TOP, SIDE, PAD, GAP                                        // Layout::new()'s sp
 
 Until the app says otherwise, a `Tui` wants at least 40 × 12 cells, uses
 `NavKeys::HEY` (`tab`, `[ ]`, digits, `esc` and `q` back), shows the hints
-with `?` to hide them, quits on a double `ctrl+c` within 2 s and asks first
+with `?` to hide them (with no keymap; with one, `?` opens the sheet), quits on a double `ctrl+c` within 2 s and asks first
 while any screen is busy (`Mode::Ask`), stops a load on `esc`, reads a screen
 the first time it is shown (`eager(true)` reads them all at start), hides the
 facts row while a screen is drilled in (`keep_facts(true)` keeps it), has no

@@ -14,6 +14,7 @@ use crate::activity::{Activity, Change};
 use crate::command::{Heard, Run, Stream};
 use crate::copy::COPY_MAX;
 use crate::head::Focus;
+use crate::keys::{Mode, Now, When};
 use crate::label::Span;
 use crate::layer::{Event as Layered, Modal, Takeover, Toast};
 use crate::layout::Layout;
@@ -211,6 +212,8 @@ pub(crate) struct Outbox<E> {
     pub(crate) palette: Option<Palette>,
     pub(crate) words: Option<Words>,
     pub(crate) hints: Option<Vec<Hint<'static>>>,
+    pub(crate) keys_mode: Option<Mode>,
+    pub(crate) keys_when: Vec<When>,
     pub(crate) title: Option<Vec<Span>>,
     pub(crate) layout: Option<Layout>,
     pub(crate) role: Option<Option<Cow<'static, str>>>,
@@ -243,6 +246,8 @@ impl<E> Outbox<E> {
             palette: None,
             words: None,
             hints: None,
+            keys_mode: None,
+            keys_when: Vec::new(),
             title: None,
             layout: None,
             role: None,
@@ -411,6 +416,12 @@ impl<E: Send + 'static> Cx<'_, E> {
 
     pub fn hints(&mut self, hints: Vec<Hint<'static>>) {
         self.out.hints = Some(hints);
+    }
+
+    pub fn keys_now(&mut self, now: Now<'_>) {
+        self.out.keys_mode = Some(now.mode);
+        self.out.keys_when.clear();
+        self.out.keys_when.extend_from_slice(now.when);
     }
 
     pub fn title(&mut self, text: impl Into<Cow<'static, str>>) {

@@ -11,7 +11,9 @@ the keys, the header, the footer, the hourglass while a screen loads, modals,
 toasts, a live activity band, a log viewer, and headless dumps for tests and
 reviews. Its [header](#the-header), [footer](#the-footer),
 [hourglass](#the-hourglass) and [list](#the-list) are part of the crate, and
-each also draws on its own, so an app pins one crate.
+each also draws on its own, so an app pins one crate. One
+[keymap](#keys) declares an app's keys once and gives the footer its hints
+and the `?` help sheet its rows.
 
 It has no words of its own: every label, hint and message on screen comes from
 the app, in any language.
@@ -35,19 +37,20 @@ With Rust installed, the same lines work on Linux, macOS and Windows:
 ```sh
 cargo new hello
 cd hello
-cargo add pito-tui --git https://github.com/gmrdad82/pito-tui --tag v2.0.0
+cargo add pito-tui --git https://github.com/gmrdad82/pito-tui --tag v2.1.0
 ```
 
 or by hand in `Cargo.toml`:
 
 ```toml
-pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v2.0.0" }
+pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v2.1.0" }
 ```
 
 That one line brings ratatui 0.30 and crossterm 0.29, reachable as
 `pito_tui::ratatui` and `pito_tui::crossterm`, and the header, footer,
 hourglass and list are part of the crate, as `pito_tui::header`,
-`pito_tui::footer`, `pito_tui::hourglass` and `pito_tui::list`.
+`pito_tui::footer`, `pito_tui::hourglass` and `pito_tui::list`, and the
+keymap behind the hints and the `?` sheet is `pito_tui::keys`.
 
 Put this in `src/main.rs`, then `cargo run`: a titled screen with a key count,
 the hints and version in the footer, and `ctrl+c` twice to quit.
@@ -162,6 +165,14 @@ the nav, the screen), so layers never fight over a key.
 
 ![The quit guard: one ctrl+c arms it until it lapses, and with work running two ask first](docs/images/quit.gif)
 
+### One keymap: the hints and the `?` sheet
+
+An app declares its keys once, in groups, with the modes and contexts each
+answers in. The footer's hints come from it for wherever the app is, `?`
+opens a help sheet of every key (the current mode's first, searchable with
+`/`), and a screen asks it what a key does, so the hints, the sheet and the
+keys never disagree ([Keys](#keys)).
+
 ### Modals
 
 `Cx::open(Modal)` puts a centred, titled container over the live screen, built
@@ -273,6 +284,8 @@ it carries their terminal widgets:
   loads.
 - [The list](#the-list): the selectable rows, scrollbar and range count of
   every list.
+- [Keys](#keys): the one keymap behind an app's actions, its footer hints
+  and its `?` help sheet.
 
 Its README visuals come from the PITO MD tools too:
 [prec](https://github.com/gmrdad82/prec) records the demo and the widgets'
@@ -317,12 +330,14 @@ and draw-time charts.
   draws nothing.
 - **Keys in a fixed order:** a key release is ignored; then the quit guard
   (a double `ctrl+c`, asking first while work runs, with the app's words);
-  then a takeover, which hears only its cancel keys; then the modal on top;
+  then a takeover, which hears only its cancel keys; then the open `?`
+  sheet, which takes its own keys and passes on the rest; then the modal on top;
   then an open confirm, unless the key is one the app lets through
   (`through_keys`, such as `ctrl+r` for a refresh), which goes to `on_key`
   and the screen with the confirm left open; then an open pick; then the
   app slot's `claim`; then a gate, which takes every other key; then a
-  screen that is typing into an input; then the help toggle (`?`); then the
+  screen that is typing into an input; then the help toggle (`?`, which
+  opens the sheet when the app gave the shell a keymap); then the
   header's focus keys and, while a header row has focus, its arrows; then
   the keys that open an overlay (the activity screen or the app's own);
   then the nav keys (only the back keys while an overlay is open), the
@@ -377,6 +392,17 @@ and draw-time charts.
   version only when they cost the footer no extra row and the quit guard
   is quiet. While a modal or pick owns the keys, only the app's pinned
   hints stay beside its own.
+- **Hints and a help sheet from one keymap:** `Tui::keymap(&KEYS)` hands the
+  shell the app's `keys::Keymap`, and `Tui::keys_now(now)` or
+  `cx.keys_now(now)` tells it where the app is (the mode and the contexts
+  that hold). The footer shows the keymap's live hints for that place, in
+  its order, ranks and words, before the app's `Tui::hints`; `?` opens the
+  sheet instead of hiding the hints, a centred overlay over the screen with
+  the current mode's keys first, every key's words and notes, the search
+  while typing, and a page at a time with pgdn and pgup when it outgrows
+  the area. It eases open and closed over 180 ms (`still(true)` shows it at
+  once), and a steady frame with it open allocates nothing. Without a
+  keymap, `?` shows and hides the hints as before.
 - **The header, assembled:** the app's name on the title rule, with the help
   word and the screen's `lead` on its left and the screen's status on its
   right, each in styled parts and each told the room it has, so a screen
@@ -638,12 +664,14 @@ Tui::new(name, version, accent: Color) -> Tui<E>          // E: the app's worker
   .band(impl Band) .top_band(impl Band) .lit_again(bool) .through_keys(&[footer::Key])
   .header_look(fn(Header) -> Header) .footer_look(fn(Footer, width: u16) -> Footer)
   .on_key(FnMut(KeyEvent, &mut Cx<E>) -> bool) .after_draw(FnMut(Duration))
+  .keymap(&'static keys::Keymap<A>) .keys_now(keys::Now) .still(bool)  // the hints and the ? sheet
   run() -> io::Result<()>, run_in(&mut Term)
   key(KeyEvent) -> Flow, paste(&str) -> Flow, mouse(MouseEvent) -> Flow, event(screen, E) -> Flow, handle(Wake<E>) -> Flow
   loaded(screen, generation, E) -> bool, landed(screen, generation, E) -> Option<Flow>  // None: a late or unknown load
   changed(source), go(screen) -> bool, start() -> Flow  // a quit from go comes back from start, settle or the next wake
   pump(), settle() -> Flow, advance(Duration) -> Flow, draw(&mut Frame), busy(), current(), names()
   find::<T>(), find_mut::<T>(), sender(), waker(screen), set_palette(..), set_words(..), set_layout(..)
+  set_keys_now(keys::Now), sheet() -> &keys::Sheet
   frame(w, h) -> Buffer, shot(w, h, &[KeyEvent], settle) -> Buffer, bench(w, h, frames) -> Vec<Bench>
 pub enum Flow { Stay, Quit }
 
@@ -693,7 +721,7 @@ Cx<'_, E>: screen(), now(), key() -> Option<KeyEvent>, detach(FnOnce() -> E), wa
   pick(Pick), focus() -> Focus, typing() -> bool, epoch(), title(text), title_spans([(text, Style)]),
   layout(Layout), role(Option<name>), show(Fn(Item) -> bool), go_group(n), toast(Toast),
   open(Modal), alert(id, title, [Line]), modal(id) -> Option<&mut Modal>, close(id),
-  takeover(Takeover), end_takeover(), gate(shut: bool)
+  takeover(Takeover), end_takeover(), gate(shut: bool), keys_now(keys::Now)
 
 Head::new([Row]) .numbers(Numbers) .lone(bool)            // Head::default(): Title, Groups, Sections, Facts, Crumbs
 pub enum Row { Title, Groups, Caption, Sections, Facts, Crumbs, Blank }
@@ -744,6 +772,19 @@ capture::Recorder::new(dir) -> io::Result<Recorder>        // frames from an app
 capture::Recorder::against(dir) -> io::Result<Recorder>    // the same frames compared with a capture instead
   .screen(index, name, &Buffer) .record(script name, &Buffer) -> io::Result<()>, frames(), finish() -> io::Result<Vec<Difference>>
 
+keys::Keymap::new() .modes(&[Mode]) .group(name, [Bind]) .words(keys::Words) .joiner(text)
+  action(Now, Chord) -> Option<&A>, hints(Now) -> Vec<keys::Hint>, ticker(Now) -> Vec<keys::Line>,
+  clashes() -> Vec<Clash>, button(), groups(), order()
+keys::bind(keys, does, action) .on(Mode) .modes(&[Mode]) .when(When) .shown(text) .note(text) .rank(u8) .quiet()
+keys::Now::new(Mode) .when(&[When]);  keys::Mode(&'static str), keys::When(&'static str)
+keys::Sheet::new()  key(Chord) -> Outcome, view(&Keymap, Now) -> View, open(), close(), toggle(), search(text),
+  is_open(), typing(), query(), page(), fit(pages)
+pub enum keys::Outcome { Took, Pass };  View { mode, here, elsewhere: Vec<Section> };  Section { group, rows: Vec<Row> }
+keys::Panel::new() .still(bool)                            // the ? sheet drawn: eased, scrolled, allocation-free when steady
+  key(Chord, now) -> Outcome, toggle(now), draw(&mut Buffer, area, &Palette, &Keymap, Now, now),
+  shown(now), animating(now), sheet(), is_open()
+keys::Chord::parse(text) -> Result<Chord, Unknown>, from_crossterm(&KeyEvent) -> Option<Chord>,
+  new(Key, Mods), plain(Key), char(c), ctrl(c);  footer::Hint::from(keys::Hint)
 Palette::new(accent: Color)                                // every token a pub field and a builder
   .base .ink .strong .muted .accent .selected .good .warn .bad .rule .line .glass .shimmer
   .title .inactive .focus .small (Style)  .bar(Option<list::Bar>) .count(Option<list::Count>)
@@ -787,7 +828,7 @@ TOP, SIDE, PAD, GAP                                        // Layout::new()'s sp
 
 Until the app says otherwise, a `Tui` wants at least 40 × 12 cells, uses
 `NavKeys::HEY` (`tab`, `[ ]`, digits, `esc` and `q` back), shows the hints
-with `?` to hide them, quits on a double `ctrl+c` within 2 s and asks first
+with `?` to hide them (with no keymap; with one, `?` opens the sheet), quits on a double `ctrl+c` within 2 s and asks first
 while any screen is busy (`Mode::Ask`), stops a load on `esc`, reads a screen
 the first time it is shown (`eager(true)` reads them all at start), hides the
 facts row while a screen is drilled in (`keep_facts(true)` keeps it), has no
@@ -813,7 +854,8 @@ version.
 The header, footer, hourglass and list each have their API sketch in their
 own part: [the header's](#the-headers-api), [the footer's](#the-footers-api),
 [the hourglass's](#the-hourglasss-api) and the list's in
-[docs/pages/list/reference/api.md](docs/pages/list/reference/api.md).
+[docs/pages/list/reference/api.md](docs/pages/list/reference/api.md); the
+keymap's is above, and [Keys](#keys) shows it in use.
 
 ## The header
 
@@ -1885,6 +1927,203 @@ shared sources, sections, a scrollbar and a count. The guides in
 [docs/pages/list/guides/](docs/pages/list/guides/) take one task a page, from
 a first list in an app to 100,000 items built on demand.
 
+## Keys
+
+`pito_tui::keys` is one keymap per app. The app declares its keys once, in
+groups, with the modes and contexts each answers in; from that one
+declaration come the action a key does, the footer's hints for wherever the
+app is, and the `?` help sheet with every key, so the sheet, the hints and
+what a key really does never disagree. The keymap has no words of the
+shell's: every key and phrase is the app's, and the sheet's own few words
+(its title, "Elsewhere", "nothing matches" and its Help group) are defaults
+the app replaces through `keys::Words`.
+
+- **One declaration** for the action, the footer hints and the `?` sheet.
+- **Zero allocations** on a steady frame with the sheet open, searched or
+  shut, held by a counting-allocator test.
+- **About 1 µs** for a mode's hints and 4 µs for the open sheet's view of a
+  200-bind keymap in three modes.
+
+### A first keymap in the shell
+
+Two modes, a list and an editor: the footer shows `down / j next`,
+`? help` and `e edits` while listing and `enter saves` while editing, and
+`?` opens the sheet with every key.
+
+```rust,no_run
+use std::sync::LazyLock;
+
+use pito_tui::crossterm::event::KeyEvent;
+use pito_tui::keys::{Chord, Keymap, Mode, Now, bind};
+use pito_tui::ratatui::{Frame, layout::Rect, style::Color};
+use pito_tui::{Cx, Palette, Screen, Tui};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Act {
+    Next,
+    Edit,
+    Save,
+}
+
+const LIST: Mode = Mode("list");
+const EDIT: Mode = Mode("edit");
+
+static KEYS: LazyLock<Keymap<Act>> = LazyLock::new(|| {
+    Keymap::new()
+        .modes(&[LIST, EDIT])
+        .group(
+            "List",
+            [
+                bind("down j", "next", Act::Next).on(LIST),
+                bind("e", "edits", Act::Edit).on(LIST).rank(1),
+            ],
+        )
+        .group("Editor", [bind("enter", "saves", Act::Save).on(EDIT)])
+});
+
+#[derive(Default)]
+struct Home {
+    editing: bool,
+    row: usize,
+}
+
+impl Home {
+    fn now(&self) -> Now<'static> {
+        Now::new(if self.editing { EDIT } else { LIST })
+    }
+}
+
+impl Screen<()> for Home {
+    fn draw(&mut self, frame: &mut Frame, area: Rect, palette: &Palette) {
+        let text = if self.editing { "editing" } else { "listing" };
+        frame.buffer_mut().set_string(area.x, area.y, text, palette.ink);
+    }
+
+    fn key(&mut self, key: KeyEvent, cx: &mut Cx<'_, ()>) {
+        let Some(chord) = Chord::from_crossterm(&key) else {
+            return;
+        };
+        match KEYS.action(self.now(), chord) {
+            Some(Act::Next) => self.row += 1,
+            Some(Act::Edit) => self.editing = true,
+            Some(Act::Save) => self.editing = false,
+            None => return,
+        }
+        cx.keys_now(self.now());
+    }
+}
+
+fn main() -> std::io::Result<()> {
+    Tui::new("hello", "0.1.0", Color::Cyan)
+        .screen("Home", Home::default())
+        .keymap(&KEYS)
+        .keys_now(Now::new(LIST))
+        .run()
+}
+```
+
+`Tui::keymap` takes a `&'static` keymap, which a `LazyLock` gives; every hint
+then borrows its words from it. `Tui::keys_now` sets where the app starts,
+and a screen calls `cx.keys_now(now)` whenever its mode or a context changes;
+the next frame's hints and the open sheet follow. Hints the app passes to
+`Tui::hints` still show, after the keymap's.
+
+### The model
+
+- **Group**: a section of the sheet (List, Editor, Player, Export…), in the
+  order declared. `Keymap::modes(&[..])` orders the modes; a mode a bind
+  names joins the order on its own.
+- **bind(keys, does, action)**: `keys` is one or more chords, space-separated
+  (`"ctrl+z"`, `"up down"`, `"shift+space"`, `"f2"`, `"?"`). A misspelled key
+  panics at declaration with `pito-tui: 'ctlr+z' is not a key`, so any test
+  that builds the keymap catches it. `does` is the one phrase both the sheet
+  and the footer show.
+- **.on(mode) / .modes(&[..])**: the modes or screens it answers in; none
+  means everywhere. **.when(context)**: only while that context holds, such
+  as `When("while the cut plays")`; a contextual bind declared before a
+  general one on the same key overrides it while the context holds.
+- **.shown(text)** writes the keys differently (`"up and down"`); otherwise
+  the chords are written `ctrl+z`, `shift+a`, `space`, `pgdn`, `f2`,
+  `cmd+…` on macOS and `super+…` elsewhere, joined by `" / "` (`.joiner(..)`).
+- **.note(text)**: longer words shown only on the sheet. **.rank(n)**: the
+  footer's priority, 0 first, as `footer::Hint::rank`; the footer drops the
+  highest ranks first when the width runs out. **.quiet()**: on the sheet
+  only, never in the footer.
+- **Now { mode, when }**: where the app is: `Now::new(CUT).when(&[PLAYING])`.
+
+### What it answers
+
+| call | gives |
+| --- | --- |
+| `keys.action(now, chord)` | the action that key does here, the first live bind in declared order |
+| `keys.hints(now)` | the live hints for a footer, by rank: `Hint { keys, does, rank }`, `"? help"` among them; `footer::Hint::from(hint)` makes the footer's |
+| `keys.ticker(now)` | a `Line` per mode, the current one first (all its live hints), then the others' plain hints; `line.to_string()` is `"right keeps · left drops"` |
+| `sheet.view(&keys, now)` | the sheet: `here` (the current mode's binds, grouped, `live` false for a context that doesn't hold) then `elsewhere` (the rest, grouped, with their modes), filtered by the search |
+| `keys.clashes()` | binds that answer the same chord in the same place, where the first silently wins; assert it empty in the app's tests |
+| `keys.button()` | the help button's words, `"? Help"` |
+
+The keymap does its work once, when it is declared: each bind's written keys
+and search text, and each mode's hints in rank order. So `action` is one pass
+with no allocation, the footer's hints are copied from a ready list, and the
+sheet's search tests each bind's text without lowercasing it again. The
+search keeps its first 64 characters and its first 8 words, so a pasted page
+can't stall the frame.
+
+### The conventions
+
+`keys::Sheet` holds them, so every app behaves the same:
+
+- `?` opens and closes the sheet; esc closes it (first clearing a search);
+  `/` searches it (typing goes to the search, enter keeps it, esc drops it);
+  pgdn and pgup scroll it a page at a time.
+- It never steals focus: `sheet.key(chord)` returns `Outcome::Took` only for
+  those keys and `Outcome::Pass` for every other, which reaches the screen as
+  if the sheet were closed. Opening it changes no selection, mode or
+  playback, and the sheet shows the mode the user is in.
+- The sheet lists its own keys in a last group, `Help`; `keys::Words`
+  changes the wording to the app's voice.
+- A screen typing into its own input gets `?` as text: the shell asks the
+  sheet only when no screen is typing.
+- `ctrl+c` quits from anywhere, the open sheet and its search included.
+
+### The `?` sheet
+
+The shell draws the sheet as a centred overlay over the screen, in the
+palette's rule, accent and ink: the current mode's name, then each group of
+the keys that answer here, each row its keys then what they do, its note,
+and its context in parentheses, muted while the context doesn't hold; then,
+under the keymap's "Elsewhere", the keys of the other modes with the modes
+they answer in. While a search is typed its query shows on the first row.
+When the keys outgrow the area the sheet keeps its height and scrolls a page
+at a time, with an arrow on its border for each way there is more. It fits
+80x24 to 200x60, eases open and closed over 180 ms (`Tui::still(true)` shows
+and hides it at once), and draws from the loop's moment, so a headless run
+gives the same frames. An app with its own loop draws the same sheet with
+`keys::Panel`: `panel.key(chord, now)` before its own keys,
+`panel.draw(buf, area, &palette, &KEYS, now, moment)` after its screen, and
+another frame while `panel.animating(moment)`.
+
+### Input
+
+`keys::Chord { key, mods }` is the keymap's own. A `Char` carries shift in
+its case (`shift+a` is `Char('A')`), so `?` is `?` however the platform
+reports it, and `Char(' ')` is `Space`. `Chord::from_crossterm(&KeyEvent)`
+converts crossterm's events (a release gives `None`, shift+tab is
+`shift+tab`); a desk's own key type or winit maps in a few lines with
+`Chord::new(Key::…, Mods::…)`.
+
+### Try the keys demo
+
+```sh
+cargo run --example keys_demo
+cargo run --example keys_demo -- --dump 90x24 right '?'
+```
+
+A rail of clips and a cut in two modes, a player with a context, a note, a
+quiet bind and the `?` sheet with search; `--dump WxH keys…` prints one
+frame as text after those keys. Its tape for prec is kept in
+`render/keys/`.
+
 ## Adopting pito-tui
 
 This section is for an app that already draws the header, footer, hourglass
@@ -2153,11 +2392,11 @@ README's examples, each widget's module page and the list's docs pages as
 doctests) and the release build of the demo.
 `bin/gate --fast` leaves the release build out. The tests are a safety net for what would hurt if it
 broke: the frame pacing, the terminal restore, the key order, the load
-generations and the dump formats. The header, footer, hourglass and list
-keep their own tests in `tests/<module>/`, drawing through ratatui's
+generations and the dump formats. The header, footer, hourglass, list and
+keys keep their own tests in `tests/<module>/`, drawing through ratatui's
 `TestBackend`, and `tests/<module>_allocation.rs` holds with a counting
-allocator that drawing them (and hit-testing the header, and a warm frame of
-the list) allocates nothing. Each release is listed in
+allocator that drawing them (and hit-testing the header, a warm frame of the
+list, and a steady frame with the `?` sheet open) allocates nothing. Each release is listed in
 [CHANGELOG.md](CHANGELOG.md). The clips are the demo recorded in a pseudo-terminal by prec from
 [render/terminal.toml](render/terminal.toml) and its tapes, made into GIFs by
 pcod (pito-codecs), and the chart is drawn by pcmp from

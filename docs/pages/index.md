@@ -14,7 +14,8 @@ the keys, the header, the footer, the hourglass while a screen loads, modals,
 toasts, a live activity band, a log viewer, and headless dumps for tests and
 reviews. Its [header](header/), [footer](footer/), [hourglass](hourglass/)
 and [list](list/) are part of the crate, and each also draws on its own, so
-an app pins one crate.
+an app pins one crate. One [keymap](keys/) declares an app's keys once and
+gives the footer its hints and the `?` help sheet its rows.
 
 It has no words of its own: every label, hint and message on screen comes from
 the app, in any language.
@@ -65,7 +66,7 @@ your own app.
   - [Give the terminal back, always](guides/terminal/)
   - [Move an existing app onto the shell](guides/adopting/)
   - [Fold sections](guides/folds/)
-- The four widgets, each a section of its own:
+- The four widgets and the keymap, each a section of its own:
   - [The header](header/): groups of numbered sections, drill-in with a
     breadcrumb, and rows that abbreviate to fit.
   - [The footer](footer/): key hints that fit the width, a notice line, a
@@ -73,6 +74,8 @@ your own app.
   - [The hourglass](hourglass/): the Braille hourglass shown while data loads.
   - [The list](list/): selectable rows with columns that make room, sections,
     ranges, a scrollbar and a count.
+  - [Keys](keys/): one keymap for an app's actions, its footer hints and its
+    `?` help sheet.
 - Reference: [the API at a glance](reference/api/),
   [formats](reference/formats/), the [full API docs](api/) and the
   [changelog](changelog/).

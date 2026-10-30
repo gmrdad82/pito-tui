@@ -68,7 +68,7 @@ pub struct Folds {
     scratch: Buffer,
 }
 
-fn ease(t: f32) -> f32 {
+pub(crate) fn ease(t: f32) -> f32 {
     if t < 0.5 {
         4.0 * t * t * t
     } else {

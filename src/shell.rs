@@ -11,6 +11,7 @@ use crate::footer::{
     Answer, Footer, Guard, Help, Hint, Key, Mode, QuitGuard, Tone as Said, WINDOW, Wording,
 };
 use crate::header::{Action, Group, Header, Nav, NavKeys, Section, Step as Move};
+use crate::keys::{self, Chord, Keymap, Map, Now, Panel, Sheet, When};
 use crate::list::Step;
 use crossterm::event::{Event, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
@@ -120,6 +121,10 @@ pub struct Tui<E> {
     running: Arc<AtomicUsize>,
     commands: Vec<command::Handle>,
     pub(crate) help: Option<Help>,
+    pub(crate) keymap: Option<&'static dyn Map>,
+    pub(crate) panel: Panel<'static>,
+    pub(crate) keys_mode: keys::Mode,
+    pub(crate) keys_when: Vec<When>,
     pub(crate) quit: QuitGuard,
     mode: Mode,
     window: Duration,
@@ -193,6 +198,10 @@ impl<E: Send + 'static> Tui<E> {
             running: Arc::new(AtomicUsize::new(0)),
             commands: Vec::new(),
             help: Some(Help::new(true)),
+            keymap: None,
+            panel: Panel::new(),
+            keys_mode: keys::Mode(""),
+            keys_when: Vec::new(),
             mode: Mode::Ask,
             window: WINDOW,
             triggers: QUIT,
@@ -411,6 +420,31 @@ impl<E: Send + 'static> Tui<E> {
     pub fn help(mut self, help: Option<Help>) -> Self {
         self.help = help;
         self
+    }
+
+    pub fn keymap<A: 'static>(mut self, keymap: &'static Keymap<A>) -> Self {
+        self.keymap = Some(keymap);
+        self
+    }
+
+    pub fn keys_now(mut self, now: Now<'_>) -> Self {
+        self.set_keys_now(now);
+        self
+    }
+
+    pub fn set_keys_now(&mut self, now: Now<'_>) {
+        self.keys_mode = now.mode;
+        self.keys_when.clear();
+        self.keys_when.extend_from_slice(now.when);
+    }
+
+    pub fn still(mut self, still: bool) -> Self {
+        self.panel.set_still(still);
+        self
+    }
+
+    pub fn sheet(&self) -> &Sheet {
+        self.panel.sheet()
     }
 
     pub fn quit(mut self, mode: Mode) -> Self {
@@ -716,6 +750,12 @@ impl<E: Send + 'static> Tui<E> {
             }
             return Flow::Stay;
         }
+        if self.panel.is_open()
+            && let Some(chord) = Chord::from_crossterm(&key)
+            && self.panel.key(chord, self.moment) == keys::Outcome::Took
+        {
+            return Flow::Stay;
+        }
         if !self.out.modals.is_empty() {
             return self.modal_key(key);
         }
@@ -760,7 +800,14 @@ impl<E: Send + 'static> Tui<E> {
             self.call(index, |screen, cx| screen.key(key, cx));
             return self.apply();
         }
-        if self.help.as_mut().is_some_and(|help| help.key(pressed)) {
+        if self.keymap.is_some() {
+            if !self.panel.is_open()
+                && let Some(chord) = Chord::from_crossterm(&key)
+                && self.panel.key(chord, self.moment) == keys::Outcome::Took
+            {
+                return Flow::Stay;
+            }
+        } else if self.help.as_mut().is_some_and(|help| help.key(pressed)) {
             return Flow::Stay;
         }
         if through && self.out.asking.is_some() {
@@ -1261,6 +1308,11 @@ impl<E: Send + 'static> Tui<E> {
         if let Some(hints) = self.out.hints.take() {
             self.hints = hints;
         }
+        if let Some(mode) = self.out.keys_mode.take() {
+            self.keys_mode = mode;
+            self.keys_when.clear();
+            self.keys_when.extend_from_slice(&self.out.keys_when);
+        }
         if let Some(title) = self.out.title.take() {
             self.title = title;
         }
@@ -1509,7 +1561,7 @@ impl<E: Send + 'static> Tui<E> {
     }
 
     pub(crate) fn animating(&self) -> bool {
-        if self.out.takeover.is_some() {
+        if self.out.takeover.is_some() || self.panel.animating(self.moment) {
             return true;
         }
         self.current()

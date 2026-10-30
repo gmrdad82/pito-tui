@@ -12,6 +12,7 @@ use ratatui::{
 };
 
 use crate::head::{self, Focus, Item, Kind, Labels, Numbers, Row, Rule};
+use crate::keys::Now;
 use crate::label::Span;
 use crate::layout::{Edge, PAD, Spot};
 use crate::screen::{Phase, Screen};
@@ -130,7 +131,7 @@ impl<E: Send + 'static> Tui<E> {
         again: Option<&'a str>,
         width: u16,
     ) -> Footer<'a> {
-        let hints_open = self.help.is_none_or(|help| help.open());
+        let hints_open = self.keymap.is_some() || self.help.is_none_or(|help| help.open());
         let notice = again
             .map(|text| Notice::new(text, self.quit_tone))
             .or_else(|| {
@@ -170,6 +171,7 @@ impl<E: Send + 'static> Tui<E> {
             .input(input);
         if let Some(help) = &self.help
             && !self.gated
+            && self.keymap.is_none()
         {
             footer = footer.help(help);
         }
@@ -196,7 +198,7 @@ impl<E: Send + 'static> Tui<E> {
     fn left(&self, index: usize, room: u16, buf: &mut Vec<(String, Style)>) -> usize {
         let help = self
             .help
-            .filter(|help| !help.open() && !self.gated)
+            .filter(|help| !help.open() && !self.gated && self.keymap.is_none())
             .map(|_| self.words.help.as_ref())
             .filter(|text| !text.is_empty());
         let (app, screen) = self.sides(index);
@@ -746,6 +748,13 @@ impl<E: Send + 'static> Tui<E> {
             }
         };
         if !self.gated {
+            if let Some(keymap) = self.keymap.filter(|_| !prompted) {
+                let now = Now {
+                    mode: self.keys_mode,
+                    when: &self.keys_when,
+                };
+                keymap.hints(now, &mut hints);
+            }
             let shown = self.hints.iter().filter(|hint| !prompted || hint.pinned);
             hints.extend(shown.copied());
         }
@@ -822,6 +831,20 @@ impl<E: Send + 'static> Tui<E> {
         }
         for opened in &mut self.out.modals {
             opened.modal.draw(frame, content, &palette);
+        }
+        if let Some(keymap) = self.keymap {
+            let now = Now {
+                mode: self.keys_mode,
+                when: &self.keys_when,
+            };
+            keymap.draw(
+                &mut self.panel,
+                frame.buffer_mut(),
+                content,
+                &palette,
+                now,
+                moment,
+            );
         }
         self.draw_toasts(frame, content);
     }
