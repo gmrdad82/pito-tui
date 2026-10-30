@@ -29,7 +29,7 @@ Tui::new(name, version, accent: Color) -> Tui<E>          // E: the app's worker
   .band(impl Band) .top_band(impl Band) .lit_again(bool) .through_keys(&[footer::Key])
   .header_look(fn(Header) -> Header) .footer_look(fn(Footer, width: u16) -> Footer)
   .on_key(FnMut(KeyEvent, &mut Cx<E>) -> bool) .after_draw(FnMut(Duration))
-  .keymap(&'static keys::Keymap<A>) .keys_now(keys::Now) .still(bool)  // the hints and the ? sheet
+  .keymap(&'static keys::Keymap<A>) .keys_now(keys::Now) .still_sheet(bool)  // the hints and the ? sheet
   run() -> io::Result<()>, run_in(&mut Term)
   key(KeyEvent) -> Flow, paste(&str) -> Flow, mouse(MouseEvent) -> Flow, event(screen, E) -> Flow, handle(Wake<E>) -> Flow
   loaded(screen, generation, E) -> bool, landed(screen, generation, E) -> Option<Flow>  // None: a late or unknown load

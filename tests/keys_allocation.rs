@@ -108,7 +108,7 @@ fn tui(still: bool) -> Tui<()> {
         .screen("Clips", Plain)
         .keymap(&KEYS)
         .keys_now(Now::new(RAIL).when(&[PLAYING]))
-        .still(still);
+        .still_sheet(still);
     tui.start();
     tui
 }

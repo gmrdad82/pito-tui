@@ -1,4 +1,5 @@
 use std::iter;
+use std::ptr;
 use std::time::{Duration, Instant};
 
 use ratatui::{
@@ -27,7 +28,6 @@ const DOWN: &str = "↓";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Entry<'k> {
-    Query,
     Heading(&'k str),
     Group(&'k str),
     Row(Row<'k>, bool),
@@ -39,6 +39,8 @@ enum Entry<'k> {
 pub struct Panel<'k> {
     sheet: Sheet,
     entries: Vec<Entry<'k>>,
+    map: usize,
+    head: u16,
     title: &'k str,
     mode: Option<Mode>,
     when: Vec<When>,
@@ -93,6 +95,8 @@ impl<'k> Panel<'k> {
         Panel {
             sheet: Sheet::new(),
             entries: Vec::new(),
+            map: 0,
+            head: 0,
             title: "",
             mode: None,
             when: Vec::new(),
@@ -192,6 +196,7 @@ impl<'k> Panel<'k> {
 
     fn build<A>(&mut self, keymap: &'k Keymap<A>, now: Now<'_>) {
         self.stale = false;
+        self.map = ptr::from_ref(keymap).addr();
         self.mode = Some(now.mode);
         self.when.clear();
         self.when.extend_from_slice(now.when);
@@ -232,9 +237,7 @@ impl<'k> Panel<'k> {
             .unwrap_or(0);
         let view = self.sheet.view(keymap, now);
         self.entries.clear();
-        if self.typing || !self.query.is_empty() {
-            self.entries.push(Entry::Query);
-        }
+        self.head = u16::from(self.typing || !self.query.is_empty());
         if !view.here.is_empty() && !now.mode.0.is_empty() {
             self.entries.push(Entry::Heading(now.mode.0));
         }
@@ -268,7 +271,9 @@ impl<'k> Panel<'k> {
         now: Now<'_>,
         moment: Instant,
     ) {
-        let moved = self.mode != Some(now.mode) || self.when != now.when;
+        let moved = self.mode != Some(now.mode)
+            || self.when != now.when
+            || self.map != ptr::from_ref(keymap).addr();
         if self.sheet.is_open() && (self.stale || moved) {
             self.build(keymap, now);
         }
@@ -282,12 +287,15 @@ impl<'k> Panel<'k> {
             .saturating_add(4)
             .max(NARROWEST)
             .min(area.width);
-        let full = rows.saturating_add(2).min(area.height);
+        let full = rows
+            .saturating_add(self.head)
+            .saturating_add(2)
+            .min(area.height);
         let height = ((f32::from(full) * shown).round() as u16).min(full);
         if height < 2 || wide < 6 {
             return;
         }
-        let page = full.saturating_sub(2).max(1);
+        let page = full.saturating_sub(2).saturating_sub(self.head).max(1);
         if self.sheet.is_open() {
             self.sheet.fit(rows.div_ceil(page).max(1));
             self.top = self
@@ -309,7 +317,8 @@ impl<'k> Panel<'k> {
         let x = put(buf, place.x + 2, place.y, edge, " ", palette.selected);
         let x = put(buf, x, place.y, edge, self.title, palette.selected);
         put(buf, x, place.y, edge, " ", palette.selected);
-        let body = height - 2;
+        let head = self.head.min(height - 2);
+        let body = height - 2 - head;
         let top = self.top;
         let mut pen = Pen {
             buf: &mut *buf,
@@ -320,8 +329,11 @@ impl<'k> Panel<'k> {
             query: &self.query,
             typing: self.typing,
         };
+        if head > 0 {
+            pen.query(place.y + 1);
+        }
         let shown = self.entries.iter().skip(usize::from(top));
-        for (y, entry) in (place.y + 1..).zip(shown.take(usize::from(body))) {
+        for (y, entry) in (place.y + 1 + head..).zip(shown.take(usize::from(body))) {
             pen.line(*entry, y);
         }
         let mark = place.right().saturating_sub(3);
@@ -356,25 +368,27 @@ impl Pen<'_> {
         put(self.buf, x, y, self.right, text, style)
     }
 
+    fn query(&mut self, y: u16) {
+        let palette = self.palette;
+        let x = self.put(self.left, y, SLASH, palette.accent);
+        let caret = if self.typing { width(CARET) } else { 0 };
+        let room = usize::from(self.right.saturating_sub(x).saturating_sub(caret));
+        let query = self.query;
+        let from = query
+            .char_indices()
+            .map(|(at, _)| at)
+            .find(|at| cells(&query[*at..]) <= room)
+            .unwrap_or(query.len());
+        let x = self.put(x, y, &query[from..], palette.ink);
+        if self.typing {
+            self.put(x, y, CARET, palette.accent);
+        }
+    }
+
     fn line(&mut self, entry: Entry, y: u16) {
         let palette = self.palette;
         let x = self.left;
         match entry {
-            Entry::Query => {
-                let x = self.put(x, y, SLASH, palette.accent);
-                let caret = if self.typing { width(CARET) } else { 0 };
-                let room = usize::from(self.right.saturating_sub(x).saturating_sub(caret));
-                let query = self.query;
-                let from = query
-                    .char_indices()
-                    .map(|(at, _)| at)
-                    .find(|at| cells(&query[*at..]) <= room)
-                    .unwrap_or(query.len());
-                let x = self.put(x, y, &query[from..], palette.ink);
-                if self.typing {
-                    self.put(x, y, CARET, palette.accent);
-                }
-            }
             Entry::Heading(text) => {
                 self.put(x, y, text, palette.selected);
             }

@@ -248,7 +248,7 @@ fn main() -> ExitCode {
                 return ExitCode::from(2);
             }
         };
-        let buffer = tui().still(true).shot(width, height, &keys, true);
+        let buffer = tui().still_sheet(true).shot(width, height, &keys, true);
         println!("{}", dump::text(&buffer));
         return ExitCode::SUCCESS;
     }

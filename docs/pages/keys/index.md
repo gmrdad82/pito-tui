@@ -162,7 +162,8 @@ can't stall the frame.
 - Keys follow what is shown: when a key the sheet passed on opens a modal, a
   pick, a confirm, a takeover or a typing input, or shuts the gate, the sheet
   closes, so nothing acts hidden under it. While it searches a paste goes to
-  its query; while it is open otherwise a paste goes nowhere.
+  its query; while it is open otherwise a paste goes nowhere, and so does a
+  click or a wheel.
 - A visible Help or `?` button calls `cx.toggle_sheet()`.
 - `ctrl+c` quits from anywhere, the open sheet and its search included.
 
@@ -175,9 +176,10 @@ and its context in parentheses, muted while the context doesn't hold; then,
 under the keymap's "Elsewhere", the keys of the other modes with the modes
 they answer in. While a search is typed its query shows on the first row.
 When the keys outgrow the area the sheet keeps its height and scrolls a page
-at a time, with an arrow on its border for each way there is more. It fits
-80x24 to 200x60, eases open and closed over 180 ms (`Tui::still(true)` shows
-and hides it at once), and draws from the loop's moment, so a headless run
+at a time below the query, with an arrow on its border for each way there is
+more. It fits 80x24 to 200x60, eases open and closed over 180 ms
+(`Tui::still_sheet(true)` shows and hides it at once), and draws from the
+loop's moment, so a headless run
 gives the same frames. An app with its own loop draws the same sheet with
 `keys::Panel`: `panel.key(chord, now)` before its own keys,
 `panel.draw(buf, area, &palette, &KEYS, now, moment)` after its screen, and

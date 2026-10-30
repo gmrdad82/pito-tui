@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.2 — 2026-10-30
+
+### Changed
+
+- pito-keys is now public, under the MIT licence.
+- The README covers installing it by tag, building, testing, contributing and the licence, and opens with a demo GIF of the example showing the sheet.
+- No API change.
+
 ## v0.1.1 — 2026-10-15
 
 ### Changed

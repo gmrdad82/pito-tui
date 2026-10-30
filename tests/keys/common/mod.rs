@@ -1,6 +1,6 @@
 use std::sync::LazyLock;
 
-use pito_tui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use pito_tui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent};
 use pito_tui::header::NavKeys;
 use pito_tui::keys::{Chord, Keymap, Mode, Now, When, bind};
 use pito_tui::ratatui::{
@@ -81,6 +81,7 @@ pub struct Probe {
     pub playing: bool,
     pub input: bool,
     pub pastes: Vec<String>,
+    pub mice: usize,
 }
 
 impl Probe {
@@ -124,6 +125,10 @@ impl Screen<()> for Probe {
         self.pastes.push(text.to_string());
     }
 
+    fn mouse(&mut self, _mouse: MouseEvent, _area: Rect, _cx: &mut Cx<'_, ()>) {
+        self.mice += 1;
+    }
+
     fn typing(&self) -> bool {
         self.input
     }
@@ -136,7 +141,10 @@ pub fn bare() -> Tui<()> {
 }
 
 pub fn keyed(keymap: &'static Keymap<Act>) -> Tui<()> {
-    bare().keymap(keymap).keys_now(Now::new(RAIL)).still(true)
+    bare()
+        .keymap(keymap)
+        .keys_now(Now::new(RAIL))
+        .still_sheet(true)
 }
 
 pub fn started(mut tui: Tui<()>) -> Tui<()> {

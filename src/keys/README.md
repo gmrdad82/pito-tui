@@ -130,8 +130,8 @@ and `cx.keys_now(now)` from a screen whenever the mode or a context changes.
 The footer then shows `keys.hints(now)` in the keymap's order, ranks and
 words, beside the app's own `Tui::hints`; `?` opens the sheet, drawn as a
 centred overlay over the screen, eased open and closed (at once with
-`Tui::still(true)`), scrolling a page at a time when it outgrows the area,
-with no allocation on a steady frame. While it is open, keys go to the sheet
+`Tui::still_sheet(true)`), scrolling a page at a time when it outgrows the
+area, with no allocation on a steady frame. While it is open, keys go to the sheet
 first and those it passes on reach the screen as usual; `ctrl+c` always
 quits. A screen still asks the keymap what a key does:
 

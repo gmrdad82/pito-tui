@@ -401,8 +401,8 @@ and draw-time charts.
   sheet instead of hiding the hints, a centred overlay over the screen with
   the current mode's keys first, every key's words and notes, the search
   while typing, and a page at a time with pgdn and pgup when it outgrows
-  the area. It eases open and closed over 180 ms (`still(true)` shows it at
-  once), and a steady frame with it open allocates nothing. Without a
+  the area. It eases open and closed over 180 ms (`still_sheet(true)` shows
+  it at once), and a steady frame with it open allocates nothing. Without a
   keymap, `?` shows and hides the hints as before.
 - **The header, assembled:** the app's name on the title rule, with the help
   word and the screen's `lead` on its left and the screen's status on its
@@ -665,7 +665,7 @@ Tui::new(name, version, accent: Color) -> Tui<E>          // E: the app's worker
   .band(impl Band) .top_band(impl Band) .lit_again(bool) .through_keys(&[footer::Key])
   .header_look(fn(Header) -> Header) .footer_look(fn(Footer, width: u16) -> Footer)
   .on_key(FnMut(KeyEvent, &mut Cx<E>) -> bool) .after_draw(FnMut(Duration))
-  .keymap(&'static keys::Keymap<A>) .keys_now(keys::Now) .still(bool)  // the hints and the ? sheet
+  .keymap(&'static keys::Keymap<A>) .keys_now(keys::Now) .still_sheet(bool)  // the hints and the ? sheet
   run() -> io::Result<()>, run_in(&mut Term)
   key(KeyEvent) -> Flow, paste(&str) -> Flow, mouse(MouseEvent) -> Flow, event(screen, E) -> Flow, handle(Wake<E>) -> Flow
   loaded(screen, generation, E) -> bool, landed(screen, generation, E) -> Option<Flow>  // None: a late or unknown load
@@ -2088,7 +2088,8 @@ can't stall the frame.
 - Keys follow what is shown: when a key the sheet passed on opens a modal, a
   pick, a confirm, a takeover or a typing input, or shuts the gate, the sheet
   closes, so nothing acts hidden under it. While it searches a paste goes to
-  its query; while it is open otherwise a paste goes nowhere.
+  its query; while it is open otherwise a paste goes nowhere, and so does a
+  click or a wheel.
 - A visible Help or `?` button calls `cx.toggle_sheet()`.
 - `ctrl+c` quits from anywhere, the open sheet and its search included.
 
@@ -2101,9 +2102,10 @@ and its context in parentheses, muted while the context doesn't hold; then,
 under the keymap's "Elsewhere", the keys of the other modes with the modes
 they answer in. While a search is typed its query shows on the first row.
 When the keys outgrow the area the sheet keeps its height and scrolls a page
-at a time, with an arrow on its border for each way there is more. It fits
-80x24 to 200x60, eases open and closed over 180 ms (`Tui::still(true)` shows
-and hides it at once), and draws from the loop's moment, so a headless run
+at a time below the query, with an arrow on its border for each way there is
+more. It fits 80x24 to 200x60, eases open and closed over 180 ms
+(`Tui::still_sheet(true)` shows and hides it at once), and draws from the
+loop's moment, so a headless run
 gives the same frames. An app with its own loop draws the same sheet with
 `keys::Panel`: `panel.key(chord, now)` before its own keys,
 `panel.draw(buf, area, &palette, &KEYS, now, moment)` after its screen, and

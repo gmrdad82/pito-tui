@@ -5,7 +5,7 @@ use pito_tui::Palette;
 use pito_tui::keys::{Chord, Key, Keymap, Mode, Now, Outcome, Panel, Words, bind};
 use pito_tui::ratatui::{buffer::Buffer, layout::Rect, style::Color};
 
-use crate::common::{Act, KEYS, RAIL};
+use crate::common::{Act, BIG, KEYS, RAIL};
 
 const ALPHA: Mode = Mode("alpha");
 const TITLE: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmn";
@@ -187,4 +187,49 @@ fn the_up_arrow_never_covers_the_title() {
     panel.key(Chord::plain(Key::PageDown), at);
     let top = row(&drawn(&mut panel, &*LONG, (30, 10), at), 0);
     assert_eq!(top, format!("╭─ {}↑─╮", &TITLE[..24]));
+}
+
+#[test]
+fn the_query_stays_in_view_while_typing_pages_the_rows_below_it() {
+    let at = moment();
+    let mut panel = Panel::new().still(true);
+    panel.key(Chord::char('?'), at);
+    typed(&mut panel, "/does", at);
+    let first = shown(&drawn(&mut panel, &*BIG, (80, 24), at));
+    assert!(
+        first.contains("/ does▏") && first.contains("does 00"),
+        "{first}"
+    );
+    for _ in 0..20 {
+        panel.key(Chord::plain(Key::PageDown), at);
+    }
+    assert!(panel.sheet().typing());
+    let last = shown(&drawn(&mut panel, &*BIG, (80, 24), at));
+    assert!(
+        last.contains("/ does▏") && last.contains("does 59"),
+        "{last}"
+    );
+    assert!(!last.contains("does 00"), "{last}");
+}
+
+#[test]
+fn a_panel_drawn_with_another_keymap_shows_that_keymaps_rows() {
+    static OTHER: LazyLock<Keymap<Act>> = LazyLock::new(|| {
+        Keymap::new()
+            .modes(&[RAIL])
+            .group("Other", [bind("x", "zaps", Act::Keep).on(RAIL)])
+    });
+    let at = moment();
+    let mut panel = Panel::new().still(true);
+    panel.toggle(at);
+    let first = shown(&drawn(&mut panel, keys(), (80, 24), at));
+    assert!(
+        first.contains("keeps") && !first.contains("zaps"),
+        "{first}"
+    );
+    let other = shown(&drawn(&mut panel, &*OTHER, (80, 24), at));
+    assert!(
+        other.contains("zaps") && !other.contains("keeps"),
+        "{other}"
+    );
 }

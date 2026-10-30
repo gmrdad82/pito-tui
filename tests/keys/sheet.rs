@@ -1,9 +1,9 @@
 use std::time::Duration;
 
-use pito_tui::Flow;
-use pito_tui::crossterm::event::KeyCode;
+use pito_tui::crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use pito_tui::footer::Hint;
 use pito_tui::keys::Words;
+use pito_tui::{Flow, Tui};
 
 use crate::common::{
     BIG, KEYS, Probe, WIDE, bare, ch, code, ctrl, heard, keyed, started, text, typed,
@@ -139,7 +139,7 @@ fn the_sheet_scrolls_a_page_at_a_time_when_it_outgrows_the_area() {
 
 #[test]
 fn the_sheet_eases_open_and_closed_and_is_instant_when_still() {
-    let mut tui = started(keyed(&KEYS).still(false));
+    let mut tui = started(keyed(&KEYS).still_sheet(false));
     tui.key(ch('?'));
     assert_eq!(boxed(&text(&mut tui, WIDE)), 0);
     tui.advance(Duration::from_millis(90));
@@ -227,4 +227,33 @@ fn a_screen_toggles_the_sheet_through_its_context() {
     let mut without = started(bare());
     without.key(ch('h'));
     assert!(!without.sheet().is_open());
+}
+
+fn mice(tui: &Tui<()>) -> usize {
+    tui.find::<Probe>().map_or(0, |probe| probe.mice)
+}
+
+#[test]
+fn clicks_and_wheels_under_the_open_sheet_reach_nothing() {
+    let mut tui = started(keyed(&KEYS));
+    let at = |kind| MouseEvent {
+        kind,
+        column: WIDE.0 / 2,
+        row: WIDE.1 / 2,
+        modifiers: KeyModifiers::NONE,
+    };
+    let click = at(MouseEventKind::Down(MouseButton::Left));
+    let wheel = at(MouseEventKind::ScrollDown);
+    text(&mut tui, WIDE);
+    tui.key(ch('?'));
+    assert!(text(&mut tui, WIDE).contains("Elsewhere"));
+    assert_eq!(tui.mouse(click), Flow::Stay);
+    assert_eq!(tui.mouse(wheel), Flow::Stay);
+    assert_eq!(mice(&tui), 0);
+    assert!(tui.sheet().is_open());
+
+    tui.key(ch('?'));
+    tui.mouse(click);
+    tui.mouse(wheel);
+    assert_eq!(mice(&tui), 2);
 }

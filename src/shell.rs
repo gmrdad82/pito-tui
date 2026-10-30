@@ -438,7 +438,7 @@ impl<E: Send + 'static> Tui<E> {
         self.keys_when.extend_from_slice(now.when);
     }
 
-    pub fn still(mut self, still: bool) -> Self {
+    pub fn still_sheet(mut self, still: bool) -> Self {
         self.panel.set_still(still);
         self
     }
@@ -1050,7 +1050,7 @@ impl<E: Send + 'static> Tui<E> {
     }
 
     pub fn mouse(&mut self, mouse: MouseEvent) -> Flow {
-        if self.out.takeover.is_some() || !self.out.modals.is_empty() {
+        if self.out.takeover.is_some() || !self.out.modals.is_empty() || self.panel.is_open() {
             return Flow::Stay;
         }
         let Some(index) = self.current() else {
