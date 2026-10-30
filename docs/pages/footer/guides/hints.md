@@ -5,7 +5,7 @@ sidebar:
   order: 10
 ---
 
-![One set of eight hints drawn at 88, 66, 48 and 30 columns: the higher ranks drop first and the pinned ctrl+c hint stays; at 48 columns with wrap(true) every hint flows over three rows with the app's version at the right end of the last](../images/fit.png)
+![One set of eight hints drawn at 88, 66, 48 and 30 columns: the higher ranks drop first and the pinned ctrl+c hint stays; at 48 columns with wrap(true) every hint flows over three rows with the app's version at the right end of the last](../../images/footer/fit.png)
 
 Each screen declares its hints as a `const` array. A `Hint` is a key, a label
 and a rank:
@@ -37,7 +37,7 @@ out:
   out and is never clipped.
 
 The picture above is the gallery's `fit` scene:
-`cargo run --example gallery --features crossterm -- fit`.
+`cargo run --example footer_gallery -- fit`.
 
 ## Wrap instead of drop
 
@@ -46,7 +46,7 @@ many rows to give it, and place it at the bottom:
 
 ```rust
 use pito_tui::footer::Footer;
-use ratatui::{Frame, layout::Rect};
+use pito_tui::ratatui::{Frame, layout::Rect};
 
 fn draw(frame: &mut Frame) {
     let footer = Footer::new(&HINTS).wrap(true).version("app", "1.4.2");
@@ -93,7 +93,7 @@ if footer.shown("s", area.width) {
 ## Fine tuning
 
 - `separator(" · ")` sets what goes between hints, and `gap(n)` the cells
-  between the segments of a [status row](status-row.md).
+  between the segments of a [status row](../status-row/).
 - `indent(n)` insets the hints, the notice and the confirm by `n` cells while
   the rule stays full width.
 - `rule(false)` drops the rule row above the footer.

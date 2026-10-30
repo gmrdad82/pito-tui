@@ -5,14 +5,14 @@ sidebar:
   order: 16
 ---
 
-The crate never reads the mouse. It answers where a click landed:
+The header never reads the mouse. It answers where a click landed:
 `hit(area, column, row)` names the group or section under the pointer, or
 `None`. Give it the same area the header was drawn in and the click's
 terminal column and row; the answer is a `Place` to move to.
 
 ```rust
 use pito_tui::header::{Header, Nav};
-use ratatui::layout::Rect;
+use pito_tui::ratatui::layout::Rect;
 
 fn click(nav: &mut Nav, area: Rect, column: u16, row: u16) {
     let place = Header::new(nav).title(Some("Desk")).hit(area, column, row);
@@ -32,14 +32,14 @@ Build the header for the hit test with the same rows as the one you drew
 
 `NavBar::hit` does the same for a nav bar drawn on its own. A hit test reads
 the layout the way drawing does and allocates nothing; it takes about a
-tenth of a microsecond ([Measure draw time](measure.md)).
+tenth of a microsecond ([Measure draw time](../measure/)).
 
 With crossterm, the column and row come from a mouse event:
 
 ```rust
-use crossterm::event::{Event, MouseButton, MouseEventKind};
+use pito_tui::crossterm::event::{Event, MouseButton, MouseEventKind};
 use pito_tui::header::{Header, Nav};
-use ratatui::layout::Rect;
+use pito_tui::ratatui::layout::Rect;
 
 fn on_event(nav: &mut Nav, area: Rect, event: Event) {
     if let Event::Mouse(mouse) = event

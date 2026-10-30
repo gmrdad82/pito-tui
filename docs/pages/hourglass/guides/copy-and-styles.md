@@ -5,7 +5,7 @@ sidebar:
   order: 2
 ---
 
-![Four hourglasses at once, each a quarter turn apart: "Loading the data..." in magenta, "Se încarcă datele…" in blue, a Japanese label in green with no hint, and "Syncing 3 inboxes" in yellow](../images/gallery.gif)
+![Four hourglasses at once, each a quarter turn apart: "Loading the data..." in magenta, "Se încarcă datele…" in blue, a Japanese label in green with no hint, and "Syncing 3 inboxes" in yellow](../../images/hourglass/gallery.gif)
 
 Every word and every style is the app's. The widget has five setters, each
 taking and returning the widget:
@@ -22,7 +22,7 @@ taking and returning the widget:
 use std::time::Duration;
 
 use pito_tui::hourglass::Hourglass;
-use ratatui::style::{Color, Modifier, Style};
+use pito_tui::ratatui::style::{Color, Modifier, Style};
 
 fn syncing(elapsed: Duration) -> Hourglass<'static> {
     Hourglass::new(elapsed)
@@ -67,4 +67,4 @@ fn lagged(elapsed: Duration, index: u32) -> Hourglass<'static> {
 }
 ```
 
-From a clone, `cargo run --example gallery` draws it; Esc or q quits.
+From a clone of pito-tui, `cargo run --example hourglass_gallery` draws it; Esc or q quits.

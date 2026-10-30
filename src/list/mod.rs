@@ -19,11 +19,11 @@ pub use text::cut;
 pub use view::{CURSOR, ListView, MAX_COLUMNS, Styles};
 
 #[cfg(doctest)]
-#[doc = include_str!("../../docs/pages/list/guide.md")]
+#[doc = include_str!("../../docs/pages/list/reference/api.md")]
 struct Guide;
 
 #[cfg(doctest)]
-#[doc = include_str!("../../docs/pages/list/install.md")]
+#[doc = include_str!("../../docs/pages/install.md")]
 struct Install;
 
 #[cfg(doctest)]

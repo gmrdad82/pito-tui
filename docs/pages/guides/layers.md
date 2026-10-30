@@ -77,9 +77,9 @@ cx.detach(|| {
 });
 ```
 
-When the work answers, the owner calls `cx.end_takeover()` (and usually
+When the work answers, the app calls `cx.end_takeover()` (and usually
 `cx.epoch()`, so reads from the old workspace are dropped). A cancel key
-closes it and the owner hears `layer(SWITCHING, Event::Closed, cx)`.
+closes it and the app hears `layer(SWITCHING, Event::Closed, cx)`.
 
 ## A gate before the app
 

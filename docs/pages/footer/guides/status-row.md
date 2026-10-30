@@ -5,14 +5,14 @@ sidebar:
   order: 12
 ---
 
-![Footer::status at 88, 72, 54 and 36 columns: a reversed mode label, a selection count clipped with an ellipsis, the hints, a clock and page dots, dropped and clipped by rank](../images/status.png)
+![Footer::status at 88, 72, 54 and 36 columns: a reversed mode label, a selection count clipped with an ellipsis, the hints, a clock and page dots, dropped and clipped by rank](../../images/footer/status.png)
 
 `Footer::status` lays out segments on one row instead of a row of hints. A
 segment is text in one style, text in several styles, or a set of hints:
 
 ```rust
 use pito_tui::footer::{Footer, Segment};
-use ratatui::style::{Color, Modifier, Style};
+use pito_tui::ratatui::style::{Color, Modifier, Style};
 
 const DIM: Style = Style::new().add_modifier(Modifier::DIM);
 const ACCENT: Style = Style::new().fg(Color::Magenta);

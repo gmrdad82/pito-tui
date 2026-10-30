@@ -5,7 +5,7 @@ sidebar:
   order: 4
 ---
 
-![The 13 frames: seven drain frames starting at 0, 429, 858, 1286, 1715, 2143 and 2572 ms, then six flip frames at 3000, 3200, 3400, 3600, 3800 and 4000 ms](../images/frames.png)
+![The 13 frames: seven drain frames starting at 0, 429, 858, 1286, 1715, 2143 and 2572 ms, then six flip frames at 3000, 3200, 3400, 3600, 3800 and 4000 ms](../../images/hourglass/frames.png)
 
 The picture is a pure function of the elapsed time: the widget keeps no state
 between frames, and a redraw at any moment lands on the same picture. The
@@ -99,7 +99,7 @@ no clock and no sleeping:
 use std::time::Duration;
 
 use pito_tui::hourglass::{FRAMES, Hourglass};
-use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
+use pito_tui::ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 
 fn main() {
     let area = Rect::new(0, 0, 20, 8);

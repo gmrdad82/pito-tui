@@ -1,6 +1,14 @@
-# pito-list guide
+---
+title: Every feature and the API
+description: Everything the list does, its whole public API on one page, and a full example.
+sidebar:
+  order: 30
+---
 
-Everything the crate does, its whole API and a full example. The [README](../README.md) has the overview, the numbers and the first steps.
+Everything the list does, its whole API and a full example. The
+[overview](../../) has the numbers and the first steps, and the
+[full API reference](../../../api/pito_tui/list/index.html) documents every
+item.
 
 ## What it does
 
@@ -210,7 +218,7 @@ Everything the crate does, its whole API and a full example. The [README](../REA
   where it sets the cell's style. The selected row and the range draw a
   restyled cell like any other: in the selected style, or with the selected
   style patched over it under `keep_colours(true)`.
-- **Keys in, steps out.** `List::key(Key)` takes the crate's own `Key` and
+- **Keys in, steps out.** `List::key(Key)` takes the list's own `Key` and
   returns a `Step`: `Moved`, `Held` (a list key that moved nothing, such as up
   on the first row), `Open(index)` for the open key, or `Pass` for a key that
   isn't the list's. It never reads input itself. The keys are the app's:
@@ -228,8 +236,8 @@ Everything the crate does, its whole API and a full example. The [README](../REA
   beyond what a lazy source's own rows do. Only the rows on screen are
   visited, so the frame time doesn't grow with the list: about 0.3 ms at
   150×40 for 20,000 owned rows or 100,000 items built on demand, measured by
-  `cargo run --release --example bench` (the README's Speed section has the
-  numbers and a comparison with ratatui's `Table`).
+  `cargo run --release --example list_bench` ([Measure it on your machine](../../guides/measure/)
+  has the numbers and a comparison with ratatui's `Table`).
 
 ## The API
 
@@ -316,7 +324,7 @@ use pito_tui::list::{
     Bar, Build, Cell, Column, Count, Key, List, ListView, Mark, Paging, Part, Place, Row, Shared,
     Source, Step, Styles,
 };
-use ratatui::{
+use pito_tui::ratatui::{
     Frame,
     layout::Rect,
     style::{Color, Modifier, Style},

@@ -1,41 +1,29 @@
-<p align="center"><img src="docs/images/demo.gif" alt="The demo example: a task list whose footer shows its key hints and version, a notice, a search input, a delete confirm, the hints hidden by ? and the ctrl+c guard"></p>
+# The footer
 
-# pito-footer
+<p align="center"><img src="docs/images/footer/demo.gif" alt="The demo example: a task list whose footer shows its key hints and version, a notice, a search input, a delete confirm, the hints hidden by ? and the ctrl+c guard"></p>
 
-[![Version](https://img.shields.io/github/v/tag/gmrdad82/pito-footer)](https://github.com/gmrdad82/pito-footer/tags)
-
-The bottom of a [PITO MD](https://pitomd.com) terminal app, as a small
-ratatui 0.30 crate: key hints that fit the width, a notice line, a y/n confirm, a
-one-line input, a quit guard and the app's version. The look is in the style of
-HEY's terminal UI. It has no app logic and no words of its own: the app passes
-in every hint, every word, every key and every style, so any language works.
+`pito_tui::footer` is the bottom of a [PITO MD](https://pitomd.com) terminal
+app, drawn with ratatui 0.30: key hints that fit the width, a notice line, a
+y/n confirm, a one-line input, a quit guard and the app's version. The look is
+in the style of HEY's terminal UI. It has no app logic and no words of its
+own: the app passes in every hint, every word, every key and every style, so
+any language works. The shell assembles it on every screen; an app with its
+own loop draws it on its own.
 
 - **8.4 µs** to draw a row of twelve hints with a notice at 150 columns, and
-  **38.5 µs** for a frame that draws every widget the crate has: 0.23% of a
+  **38.5 µs** for a frame that draws every widget the footer has: 0.23% of a
   60 fps frame.
 - **Zero allocations** while drawing: a counting allocator in the tests holds it.
-- **3 dependencies:** ratatui without its default features, unicode-width and
-  unicode-segmentation (crossterm 0.29 only with the `crossterm` feature).
-- **2,078 lines** of Rust, rebuilt in **1.5 s** after a change.
+- **2,357 lines** of Rust.
 
-Works on Linux, Windows and macOS.
+## A first footer
 
-Got questions or doubts? Ping me on Discord: https://discord.gg/XsNcn3kYzn
-
-## Install and first use
-
-The same line on Linux, Windows and macOS, in the app's `Cargo.toml`:
-
-```toml
-pito-footer = { git = "https://github.com/gmrdad82/pito-footer", tag = "v1.0.1" }
-ratatui = "0.30"
-```
-
-Then put hints at the bottom of the screen:
+Put hints at the bottom of the screen:
 
 ```rust,no_run,standalone_crate
+use pito_tui::crossterm::event;
 use pito_tui::footer::{Footer, Hint};
-use ratatui::{crossterm::event, layout::Rect};
+use pito_tui::ratatui::layout::Rect;
 
 const HINTS: [Hint; 3] = [
     Hint::new("↑↓", "move"),
@@ -44,7 +32,7 @@ const HINTS: [Hint; 3] = [
 ];
 
 fn main() -> std::io::Result<()> {
-    let mut terminal = ratatui::init();
+    let mut terminal = pito_tui::ratatui::init();
     loop {
         terminal.draw(|frame| {
             let footer = Footer::new(&HINTS).version("app", "1.0.0");
@@ -60,29 +48,29 @@ fn main() -> std::io::Result<()> {
             break;
         }
     }
-    ratatui::restore();
+    pito_tui::ratatui::restore();
     Ok(())
 }
 ```
 
-To see every part working, clone the repository and run the demo above, a task
-list with the footer at its bottom:
+To see every part working, run the demo above from a checkout of pito-tui, a
+task list with the footer at its bottom:
 
 ```sh
-git clone https://github.com/gmrdad82/pito-footer && cd pito-footer
-cargo run --example demo --features crossterm
+cargo run --example footer_demo
 ```
 
-Turn on the `crossterm` feature for `Key::from(crossterm::event::KeyEvent)`
-(crossterm 0.29); without it the crate has no backend dependency. The
-conversion keeps Alt apart (`Key::Alt('y')` is not `Key::Char('y')`, so Alt+y
-does not answer Yes), turns Alt, Super, Meta or Hyper on any other key into
-`Key::Other`, and passes Ctrl+Alt plus a character on as that character, which
-is how AltGr arrives on some platforms, so diacritics can still be typed.
+`Key::from(crossterm::event::KeyEvent)` (crossterm 0.29, as
+`pito_tui::crossterm`) turns a key event into the footer's `Key`; drawing
+needs no backend. The conversion keeps Alt apart (`Key::Alt('y')` is not
+`Key::Char('y')`, so Alt+y does not answer Yes), turns Alt, Super, Meta or
+Hyper on any other key into `Key::Other`, and passes Ctrl+Alt plus a
+character on as that character, which is how AltGr arrives on some platforms,
+so diacritics can still be typed.
 
 ## Hints that fit the width
 
-![One set of eight hints drawn at 88, 66, 48 and 30 columns: the higher ranks drop first and the pinned ctrl+c hint stays; at 48 columns with wrap(true) every hint flows over three rows with the app's version at the right end of the last](docs/images/fit.png)
+![One set of eight hints drawn at 88, 66, 48 and 30 columns: the higher ranks drop first and the pinned ctrl+c hint stays; at 48 columns with wrap(true) every hint flows over three rows with the app's version at the right end of the last](docs/images/footer/fit.png)
 
 Each `Hint` is a key, a label and a rank. When the width runs out the highest
 rank drops first, the order is kept and a pinned hint goes last of all; the
@@ -94,7 +82,7 @@ through `Help`.
 
 ## A notice line
 
-![Four footers with a notice under the hints, in the muted legend, accent, good and alert tones, and a long alert notice marked over() that wraps across the hint rows above the pinned hint](docs/images/notices.png)
+![Four footers with a notice under the hints, in the muted legend, accent, good and alert tones, and a long alert notice marked over() that wraps across the hint rows above the pinned hint](docs/images/footer/notices.png)
 
 Under the hints sits one line for a legend, a result or a warning, in the
 app's ink, muted, accent, alert or good style. A notice marked `over()` that is
@@ -103,7 +91,7 @@ pinned hints stay on the last row under it.
 
 ## A status row
 
-![Footer::status at 88, 72, 54 and 36 columns: a reversed mode label, a selection count clipped with an ellipsis, the hints, a clock and page dots, dropped and clipped by rank](docs/images/status.png)
+![Footer::status at 88, 72, 54 and 36 columns: a reversed mode label, a selection count clipped with an ellipsis, the hints, a clock and page dots, dropped and clipped by rank](docs/images/footer/status.png)
 
 `Footer::status` lays out text, styled spans and hints on one row, left or right
 aligned. The highest rank drops first, a segment marked `shrink()` is clipped
@@ -112,7 +100,7 @@ one segment, so a percentage or page dots carry their own colour.
 
 ## A one-line input, and a masked one for keys
 
-![Typing "Café în Brașov, ș ț 日本語 and a line long enough to scroll" into a search input that scrolls with an ellipsis, moving home and end, deleting words with ctrl+w and submitting; then a masked API key field that shows only its first and last four characters at rest, edited and submitted](docs/images/input.gif)
+![Typing "Café în Brașov, ș ț 日本語 and a line long enough to scroll" into a search input that scrolls with an ellipsis, moving home and end, deleting words with ctrl+w and submitting; then a masked API key field that shows only its first and last four characters at rest, edited and submitted](docs/images/footer/input.gif)
 
 `Input` edits by grapheme and cell, so diacritics, combining marks and wide
 glyphs move and delete whole: left and right, home and end, ctrl+a and ctrl+e,
@@ -125,54 +113,37 @@ while the user types; a stored key shown at rest can opt in to its ends with
 
 ## A confirm, and a quit guard
 
-![An import runs; d asks "Delete the 12 photos?" over the hint line, the choice moves between Yes and No and No keeps them; ctrl+c shows "Press ctrl+c again to quit", a second ctrl+c asks "The import is still running. Quit anyway?", and y quits](docs/images/confirm.gif)
+![An import runs; d asks "Delete the 12 photos?" over the hint line, the choice moves between Yes and No and No keeps them; ctrl+c shows "Press ctrl+c again to quit", a second ctrl+c asks "The import is still running. Quit anyway?", and y quits](docs/images/footer/confirm.gif)
 
 `ConfirmBar` draws "Question?  Yes   ▸ No" in the app's words, over a hint line
 or inline, and `Confirm` returns the answer and never runs anything. The
 `QuitGuard` arms on the first ctrl+c, shows the app's "again" notice and quits
 on a second press inside the window; in `Mode::Ask` it asks through a confirm
 first while the app says work is running. Every `key` call says what happened,
-and the crate never reads input, the clock or the mouse itself.
+and the footer never reads input, the clock or the mouse itself.
 
-## Speed
+## Footer speed
 
-![Draw time per part, microseconds per draw, lower is better, at 150×40 cells: hints and notice 8.4, input bar 8.1, status row 7.6, wrapped hints 5.8, masked input bar 5.5, confirm bar 3.1](docs/images/speed.png)
+![Draw time per part, microseconds per draw, lower is better, at 150×40 cells: hints and notice 8.4, input bar 8.1, status row 7.6, wrapped hints 5.8, masked input bar 5.5, confirm bar 3.1](docs/images/footer/speed.png)
 
 Drawing writes straight into ratatui's buffer and allocates nothing. The chart
-is `cargo run --release --example bench`: 20,000 frames into a 150×40 buffer,
-each drawing twelve hints with a notice, a status row of five segments, the
-hints wrapped at 60 columns, a confirm bar, an input bar holding diacritics and
-wide glyphs, and a masked input bar, timing each part. Measured once on
-2026-10-14 on an AMD Ryzen 9 9950X under Linux with Rust 1.97.1, release
-profile, on the code released as 1.0.0, while other renders ran on the machine: a mean of 38.5 µs a
-frame for all six. The chart is drawn with
-[pito-compare](https://github.com/gmrdad82/pito-compare) from
-[render/bench.toml](render/bench.toml).
+is `cargo run --release --example footer_bench`: 20,000 frames into a 150×40
+buffer, each drawing twelve hints with a notice, a status row of five
+segments, the hints wrapped at 60 columns, a confirm bar, an input bar holding
+diacritics and wide glyphs, and a masked input bar, timing each part. Measured
+once on 2026-10-14 on an AMD Ryzen 9 9950X under Linux with Rust 1.97.1,
+release profile, while other renders ran on the machine: a mean of 38.5 µs a
+frame for all six. The chart
+is drawn with [pito-compare](https://github.com/gmrdad82/pito-compare) from
+[render/footer/render/bench.toml](render/footer/render/bench.toml).
 
 | | |
 |---|---|
 | Frame of all six parts, mean | 38.5 µs |
 | Allocations while drawing | 0 |
-| Direct dependencies | 3 (4 with `crossterm`) |
-| Crates in the build, the crate included | 42 |
-| Lines of Rust in `src/`, blank lines left out | 2,078 |
-| Rebuild of the crate after a change, release | 1.5 s |
-| Clean release build with every dependency | 32.8 s |
+| Lines of Rust in `src/footer/`, blank lines left out | 2,357 |
 
-The build times are one run each on the same machine, with cargo's default jobs.
-
-## Part of PITO MD
-
-pito-footer is one of the terminal crates of [PITO MD](https://pitomd.com).
-[pito-tui](https://github.com/gmrdad82/pito-tui) is the app shell that brings
-it together with [pito-header](https://github.com/gmrdad82/pito-header) at the
-top, [pito-list](https://github.com/gmrdad82/pito-list) for the rows and
-[pito-hourglass](https://github.com/gmrdad82/pito-hourglass) while data loads.
-The clips above are recorded with [prec](https://github.com/gmrdad82/prec) and
-made into GIFs with [pcod](https://github.com/gmrdad82/pito-codecs), and the chart is
-drawn by [pito-compare](https://github.com/gmrdad82/pito-compare).
-
-## Every feature in detail
+## Every footer feature in detail
 
 - **Key hints, declared per screen.** Each `Hint` is a key, a label, an
   optional lead word ("Press ctrl+c again to quit") and a rank. When the
@@ -264,15 +235,15 @@ drawn by [pito-compare](https://github.com/gmrdad82/pito-compare).
   A screen that passes every key through (an embedded terminal) simply
   doesn't hand its keys to the guard.
 - **Nothing is taken behind the app's back:** every `key` call returns what
-  happened (`Guard::Pass` means the key is the app's), and the crate never
+  happened (`Guard::Pass` means the key is the app's), and the footer never
   reads input, the clock or the mouse itself. `deadline()` tells the event
   loop when the armed notice ends.
 - **Widths by cell:** Unicode widths throughout, so diacritics (ă, î, ș, ț),
   "…" and wide glyphs measure and clip cleanly.
 - **Cheap:** drawing writes straight into the buffer, with no allocation;
-  see [Speed](#speed).
+  see [Footer speed](#footer-speed).
 
-## The API
+## The footer's API
 
 ```text
 pub enum Key { Char(char), Ctrl(char), Alt(char), Tab, BackTab, Enter, Esc, Backspace,
@@ -312,19 +283,19 @@ wildcard arm, and build `Hint`, `Notice`, `Segment`, `Words`, `Wording`,
 `Styles` and `ConfirmKeys` with their constructors and methods, so a later
 release can add to them in a minor version.
 
-## Example
+## A footer example
 
-The demo at the top is `examples/demo.rs`: move with ↑↓, mark a task done with
-enter, search with `/`, delete with `d`, hide the hints with `?`, and press
-ctrl+c twice to quit. `examples/gallery.rs` draws the other pictures here, one
-scene each (`cargo run --example gallery --features crossterm -- fit`, or
-`notices`, `status`, `input`, `confirm`). The core of an
-app's footer looks like this:
+The demo at the top of this page is `examples/footer_demo.rs`: move with ↑↓,
+mark a task done with enter, search with `/`, delete with `d`, hide the hints
+with `?`, and press ctrl+c twice to quit. `examples/footer_gallery.rs` draws
+the other pictures here, one scene each
+(`cargo run --example footer_gallery -- fit`, or `notices`, `status`, `input`,
+`confirm`). The core of an app's footer looks like this:
 
 ```rust,standalone_crate
 use std::time::Instant;
 use pito_tui::footer::{Footer, Guard, Help, Hint, Key, Mode, Notice, QuitGuard, Styles, Words, Wording};
-use ratatui::{Frame, layout::Rect, style::{Color, Modifier, Style}};
+use pito_tui::ratatui::{Frame, layout::Rect, style::{Color, Modifier, Style}};
 
 const HINTS: [Hint; 4] = [
     Hint::new("↑↓", "move"),
@@ -367,7 +338,7 @@ fn draw(frame: &mut Frame, guard: &QuitGuard, help: &Help) {
 
 ```rust,standalone_crate
 use pito_tui::footer::{Edit, Footer, Hint, Input, InputBar, Key, Styles};
-use ratatui::{Frame, layout::Rect};
+use pito_tui::ratatui::{Frame, layout::Rect};
 
 const HINTS: [Hint; 1] = [Hint::new("/", "search")];
 
@@ -403,33 +374,5 @@ fn draw(frame: &mut Frame, input: Option<&Input>, styles: Styles) {
 A bracketed paste arrives as its own event, not a key: hand its text to
 `Input::paste`.
 
-## Development
-
-`bin/gate` runs `cargo fmt --check`, `cargo clippy --all-targets
---all-features -- -D warnings`, `cargo test --all-features` (the tests draw
-through ratatui's `TestBackend`, a counting allocator holds that drawing
-allocates nothing, and this README's example compiles as a doctest) and
-builds the bench; clippy checks the demo example too.
-`bin/gate --fast` leaves the bench build out. Each release is listed in
-[CHANGELOG.md](CHANGELOG.md).
-
-`bin/docs-bundle` builds the docs into `tmp/docs-vX.Y.Z.tar.gz`: the guides in
-`docs/pages/`, the pictures in `docs/images/`, the changelog and the
-`cargo doc` API reference. Each GitHub Release carries that bundle.
-
-## Contributing
-
-Issues and pull requests are welcome. Please read the
-[code of conduct](CODE_OF_CONDUCT.md) first. A change keeps `bin/gate` green
-with no warnings, draws without allocating, and leaves every word, style and
-key to the app. Report a security issue privately, as
-[SECURITY.md](SECURITY.md) says, not in a public issue.
-
-## Licence
-
-<img src="assets/marks/wordmark.svg" width="320" alt="PITO MD">
-
-The code is MIT licensed: see [LICENSE](LICENSE). The PITO MD name and its logos
-are © Catalin Ilinca, all rights reserved, and are not covered by the MIT
-licence; see [TRADEMARKS.md](TRADEMARKS.md). The look is in the style of HEY's
-terminal UI; see [NOTICE.md](NOTICE.md).
+The [footer's guides](https://docs.pitomd.com/pito-tui/footer/) take one task a
+page.

@@ -9,7 +9,7 @@ A `Nav` is a list of groups, each holding sections. The header draws the
 groups on one row and the current group's sections on the row under it,
 centred, with the current one in the accent and bold.
 
-![The demo stepping through groups and sections](../images/demo.gif)
+![The demo stepping through groups and sections](../../images/header/demo.gif)
 
 ## Build the nav
 
@@ -28,7 +28,7 @@ let nav = Nav::new(vec![
 ```
 
 Names are `&'static str` or `String`. `short` gives the name a row falls back
-to when the width runs out; see [Fit any width](fit.md).
+to when the width runs out; see [Fit any width](../fit/).
 
 ## Numbers run across every group
 
@@ -84,12 +84,12 @@ assert_eq!(nav.selected(0), Some(1));
 ## Draw it
 
 `Header::new(&nav)` draws the groups and sections rows, and any other rows
-you give it ([Add title, facts and notice rows](rows.md)). To draw the nav
+you give it ([Add title, facts and notice rows](../rows/)). To draw the nav
 rows alone, use `NavBar::new(&nav)`, or `nav.bar()`:
 
 ```rust
 use pito_tui::header::{Nav, NavBar};
-use ratatui::{Frame, layout::Rect};
+use pito_tui::ratatui::{Frame, layout::Rect};
 
 fn draw(frame: &mut Frame, nav: &Nav) {
     let bar = NavBar::new(nav).underline(true);
@@ -104,4 +104,4 @@ current section, for a page that sits over every section, such as help or
 settings. `Header` takes `underline` and `lit` too, and `Header::tabs(false)`
 leaves the nav rows out, for a page that shows only the header's other rows.
 
-Next: [Map keys to moves](keys.md).
+Next: [Map keys to moves](../keys/).

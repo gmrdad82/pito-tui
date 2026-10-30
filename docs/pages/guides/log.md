@@ -89,7 +89,7 @@ $ demo --dump 90x14 --keys "3 / 1999 enter n"
  ↑↓ scroll · g/G ends · / find · n/N next · o jobs · ctrl+k go to · ctrl+c twice quit
 ```
 
-A list that big, rather than a log, wants pito-list's `Shared`, which builds
+A list that big, rather than a log, wants the list's `Shared` (`pito_tui::list::Shared`), which builds
 only the rows on screen from the app's own items. The activity screen's
 detail is a `Log` too.
 

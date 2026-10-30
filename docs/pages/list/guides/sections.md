@@ -19,7 +19,7 @@ column for the whole list, so the cells still line up.
 
 ```rust
 use pito_tui::list::{Cell, Column, List, ListView, Mark, Part, Row};
-use ratatui::{
+use pito_tui::ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::{Color, Modifier, Style},
@@ -85,8 +85,8 @@ row from a heading or a blank line.
 a part without one takes the cell's. The parts pad, align and clip as one
 cell, and a text wider than the column ends in "…" in the style of the part
 it cuts. A selected row draws every part in the selected style, unless the
-list keeps cell colours (see [Select a range](ranges.md)).
+list keeps cell colours (see [Select a range](../ranges/)).
 
 Cells, parts and marks take the list's ink style by default, `faint()` for
-secondary text, or `style(..)` for their own; [Theme the list](styles.md)
+secondary text, or `style(..)` for their own; [Theme the list](../styles/)
 sets ink and faint for the whole list.

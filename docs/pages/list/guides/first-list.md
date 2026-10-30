@@ -17,7 +17,7 @@ minimum width, a preferred width (`0` for none) and options such as
 
 ```rust
 use pito_tui::list::{Column, Key, List, ListView, Row, Step};
-use ratatui::{Frame, Terminal, backend::TestBackend};
+use pito_tui::ratatui::{Frame, Terminal, backend::TestBackend};
 
 const COLUMNS: [Column; 2] = [
     Column::new("Name", 6, 12).pinned(),
@@ -73,29 +73,29 @@ The frame shows:
 
 The first selectable row is selected when the rows arrive, so one `Down`
 moves the "▌ " marker to `beta`. The header and the end line are opt-in, and
-their words are yours: the crate has none of its own.
+their words are yours: the list has none of its own.
 
 ## In a real terminal
 
-With ratatui's own `crossterm` backend and pito-list's `crossterm` feature
-(see [Install](../install.md)), the app loop draws the list, reads a key and
+With ratatui's own `crossterm` backend and the list's `Key::from(KeyEvent)`
+(see [Install](../../../install/)), the app loop draws the list, reads a key and
 hands it over:
 
 ```rust,no_run
 # use pito_tui::list::{Column, Key, List, ListView, Row, Step};
-# use ratatui::Frame;
+# use pito_tui::ratatui::Frame;
 # const COLUMNS: [Column; 2] = [Column::new("Name", 6, 12).pinned(), Column::new("Status", 6, 0)];
 # struct App { list: List }
 # fn draw(frame: &mut Frame, app: &mut App) {
 #     frame.render_widget(ListView::new(&mut app.list, &COLUMNS).header(true), frame.area());
 # }
-use crossterm::event::{self, Event, KeyCode};
+use pito_tui::crossterm::event::{self, Event, KeyCode};
 
 fn main() -> std::io::Result<()> {
     let mut app = App {
         list: List::new().with_rows([Row::new(["alpha", "ready"]), Row::new(["beta", "building"])]),
     };
-    ratatui::run(|terminal| loop {
+    pito_tui::ratatui::run(|terminal| loop {
         terminal.draw(|frame| draw(frame, &mut app))?;
         if let Event::Key(press) = event::read()? {
             if press.code == KeyCode::Char('q') {
@@ -112,7 +112,7 @@ fn main() -> std::io::Result<()> {
 `List::key` answers with a `Step`: `Moved` when the selection moved, `Held`
 for a list key that moved nothing (up on the first row), `Open(index)` for
 enter, and `Pass` for a key that isn't the list's, which your app can use for
-its own commands. [Handle keys and clicks](keys-and-clicks.md) has the
+its own commands. [Handle keys and clicks](../keys-and-clicks/) has the
 details.
 
 ## Changing the rows
@@ -120,4 +120,4 @@ details.
 Replace the rows with `set_rows` when your data changes: the selection stays
 on its index, clamped to the new length. `push` adds one row and `clear`
 empties the list. To change a few texts or colours between frames without
-building new rows, see [Update rows in place](live-rows.md).
+building new rows, see [Update rows in place](../live-rows/).

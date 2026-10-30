@@ -5,7 +5,7 @@ sidebar:
   order: 11
 ---
 
-![Four footers with a notice under the hints, in the muted legend, accent, good and alert tones, and a long alert notice marked over() that wraps across the hint rows above the pinned hint](../images/notices.png)
+![Four footers with a notice under the hints, in the muted legend, accent, good and alert tones, and a long alert notice marked over() that wraps across the hint rows above the pinned hint](../../images/footer/notices.png)
 
 Under the hints sits one line for a legend, a result or a warning. Pass it as
 an `Option`, so the app keeps one footer whether there is a notice or not:
@@ -31,7 +31,7 @@ The picture is the gallery's `notices` scene, with these styles:
 
 ```rust
 use pito_tui::footer::Styles;
-use ratatui::style::{Color, Modifier, Style};
+use pito_tui::ratatui::style::{Color, Modifier, Style};
 
 const DIM: Style = Style::new().add_modifier(Modifier::DIM);
 

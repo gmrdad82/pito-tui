@@ -5,10 +5,10 @@ sidebar:
   order: 14
 ---
 
-![An import runs; d asks "Delete the 12 photos?" over the hint line, the choice moves between Yes and No and No keeps them; ctrl+c shows "Press ctrl+c again to quit", a second ctrl+c asks "The import is still running. Quit anyway?", and y quits](../images/confirm.gif)
+![An import runs; d asks "Delete the 12 photos?" over the hint line, the choice moves between Yes and No and No keeps them; ctrl+c shows "Press ctrl+c again to quit", a second ctrl+c asks "The import is still running. Quit anyway?", and y quits](../../images/footer/confirm.gif)
 
 A confirm has two halves: `Confirm` holds the choice and turns keys into an
-answer, and `ConfirmBar` draws the question in the app's words. The crate
+answer, and `ConfirmBar` draws the question in the app's words. The footer
 returns the answer and never runs anything.
 
 ```rust
@@ -71,5 +71,5 @@ it with `Confirm::new().keys(..)`.
   through `styles(..)`.
 
 The clip above is the gallery's `confirm` scene,
-`cargo run --example gallery --features crossterm -- confirm`, which also
-shows the [quit guard](quit-guard.md).
+`cargo run --example footer_gallery -- confirm`, which also
+shows the [quit guard](../quit-guard/).

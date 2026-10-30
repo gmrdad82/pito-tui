@@ -5,7 +5,7 @@ sidebar:
   order: 12
 ---
 
-![The header narrowing two columns at a time from 76 to 8 and widening back: full names, then short names, then only the current section named, then numbers only, while the groups go to short names and first letters](../images/fit.gif)
+![The header narrowing two columns at a time from 76 to 8 and widening back: full names, then short names, then only the current section named, then numbers only, while the groups go to short names and first letters](../../images/header/fit.gif)
 
 The header never wraps and never needs a layout from the app. When the width
 runs out, each row abbreviates step by step:
@@ -50,10 +50,10 @@ dropped, so a multi-line message reads as one line.
 
 ## Watch it
 
-The clip above is `examples/fit.rs`. Run it from a clone of the repository:
+The clip above is `examples/header_fit.rs`. Run it from a clone of pito-tui:
 
 ```sh
-cargo run --example fit --features crossterm
+cargo run --example header_fit
 ```
 
 `<` or left narrows the header two columns at a time, `>` or right widens
