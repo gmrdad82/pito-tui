@@ -24,11 +24,11 @@ cargo run --release --example list_versus
 frame. One run on an AMD Ryzen 9 9950X under Linux:
 
 ```text
-pito-list bench: 20000 frames of a 20000-row list at 150x40: mean 236.5 µs, worst 849.9 µs
-pito-list bench: 20000 frames of a lazy 100000-row list in groups of 25 at 150x40: mean 225.8 µs, worst 551.1 µs
-pito-list bench: 20000 frames of a 20000-row list with a range, kept colours, a styled header and four rows rewritten a frame at 150x40: mean 242.6 µs, worst 8754.9 µs
-pito-list bench: 20000 frames of a 20000-row list with columns that fit their cells, a cursor style and the drawn columns read at 150x40: mean 265.7 µs, worst 1336.1 µs
-pito-list bench: 20000 frames of a shared 100000-item vector built on demand and handed over every frame, with a scrollbar and a count, at 150x40: mean 252.5 µs, worst 1653.3 µs
+list bench: 20000 frames of a 20000-row list at 150x40: mean 236.5 µs, worst 849.9 µs
+list bench: 20000 frames of a lazy 100000-row list in groups of 25 at 150x40: mean 225.8 µs, worst 551.1 µs
+list bench: 20000 frames of a 20000-row list with a range, kept colours, a styled header and four rows rewritten a frame at 150x40: mean 242.6 µs, worst 8754.9 µs
+list bench: 20000 frames of a 20000-row list with columns that fit their cells, a cursor style and the drawn columns read at 150x40: mean 265.7 µs, worst 1336.1 µs
+list bench: 20000 frames of a shared 100000-item vector built on demand and handed over every frame, with a scrollbar and a count, at 150x40: mean 252.5 µs, worst 1653.3 µs
 ```
 
 The means stay close whatever the list's length, since only the rows on
@@ -44,8 +44,8 @@ frame with a counting allocator. ratatui's own layout cache is on for its
 
 ```text
 20000 items, 5 columns and a header at 150x40, the selection moving, 2000 frames each
-pito-list, owned rows: mean 237.0 µs, 0.0 allocations and 0 bytes a frame
-pito-list, shared vector built on demand: mean 237.3 µs, 292.4 allocations and 19663 bytes a frame
+list, owned rows: mean 237.0 µs, 0.0 allocations and 0 bytes a frame
+list, shared vector built on demand: mean 237.3 µs, 292.4 allocations and 19663 bytes a frame
 ratatui Table, every row built each frame: mean 17490.0 µs, 260062.0 allocations and 51844944 bytes a frame
 ratatui Table, visible rows only, scrolled by the app: mean 159.1 µs, 569.0 allocations and 106032 bytes a frame
 ```

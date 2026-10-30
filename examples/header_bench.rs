@@ -43,7 +43,7 @@ fn measure(name: &str, frames: u32, width: u16, mut draw: impl FnMut(u32, &mut B
     }
     let mean = total / frames.max(1);
     println!(
-        "pito-header bench: {name}: {frames} frames at {width}x{HEIGHT}: mean {:.2} µs, worst {:.1} µs",
+        "header bench: {name}: {frames} frames at {width}x{HEIGHT}: mean {:.2} µs, worst {:.1} µs",
         mean.as_secs_f64() * 1e6,
         worst.as_secs_f64() * 1e6
     );
