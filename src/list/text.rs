@@ -92,6 +92,7 @@ struct Scan {
     parted: bool,
     word: Option<Spot>,
     part: Option<Spot>,
+    fill: Spot,
 }
 
 impl Scan {
@@ -110,6 +111,7 @@ impl Scan {
             parted: false,
             word: None,
             part: None,
+            fill: Spot::default(),
         }
     }
 
@@ -180,6 +182,12 @@ impl Scan {
         self.prev = Some(kind);
         self.count += 1;
         self.used = self.used.saturating_add(cells);
+        if kind != Kind::Space && self.used <= self.limit {
+            self.fill = Spot {
+                count: self.count,
+                cells: self.used,
+            };
+        }
     }
 
     fn done(&self, room: usize) -> bool {
@@ -193,7 +201,7 @@ impl Scan {
                 cells: self.used,
             };
         }
-        let spot = self.part.or(self.word).unwrap_or_default();
+        let spot = self.part.or(self.word).unwrap_or(self.fill);
         Fit {
             keep: Some(spot.count),
             cells: spot.cells.saturating_add(1).min(room),
@@ -220,7 +228,7 @@ pub(crate) fn fit<'t>(runs: impl Iterator<Item = &'t str>, room: usize) -> Fit {
     scan.fit(room)
 }
 
-/// Returns `None` when `text` fits in `room` cells; otherwise `Some(kept)`, the longest whole-word (or name-part) prefix that leaves a cell for the "…" the caller draws after it. `kept` may be empty.
+/// Returns `None` when `text` fits in `room` cells; otherwise `Some(kept)`, the longest whole-word (or name-part) prefix that leaves a cell for the "…" the caller draws after it, or, when no whole word fits, the longest prefix of whole graphemes that does. `kept` is empty only when not even one grapheme fits.
 pub fn cut(text: &str, room: usize) -> Option<&str> {
     let keep = fit(iter::once(text), room).keep?;
     let end = text

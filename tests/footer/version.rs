@@ -89,7 +89,7 @@ fn a_narrow_bar_drops_the_version_before_any_hint() {
         rows(footer, 68)[1],
         "↑↓ move · enter open · / search · s stop · ctrl+c twice quit"
     );
-    assert_eq!(rows(footer, 10)[1], "ctrl+c …");
+    assert_eq!(rows(footer, 10)[1], "ctrl+c tw…");
     for width in 0..=130 {
         let bare = footer.version("", "");
         assert_eq!(footer.height(width), bare.height(width), "{width}");

@@ -49,7 +49,8 @@ The terminal narrows from 96 to 38 columns and widens back. Each column has a
 minimum, a preferred width and a drop priority: when the width runs out the
 highest priority drops first (Size, then Version here), a `pinned()` column
 never drops, and the flexible column (the message) takes what's left and cuts
-after a whole word with "…" (`pito_tui::list::cut` gives apps the same cut).
+after a whole word with "…", or keeps the start of a single long word, such as
+an email, when no word fits (`pito_tui::list::cut` gives apps the same cut).
 `fit(max)` sizes a column to its widest cell on screen, `right()` aligns
 numbers, and `rest()` lets one cell run across the columns after it. Widths
 are Unicode-aware, so diacritics, wide glyphs and "…" measure and clip
@@ -186,7 +187,7 @@ for width in [44, 24] {
 #   } else {
 #       &[
 #           "  Job           Message",
-#           "  deploy api    …",
+#           "  deploy api    uploadi…",
 #           "▌ build docs    waiting…",
 #           "  rotate logs   starts…",
 #       ]
@@ -205,7 +206,7 @@ fit):
   rotate logs     ops      starts at 02:00
 
   Job           Message
-  deploy api    …
+  deploy api    uploadi…
 ▌ build docs    waiting…
   rotate logs   starts…
 ```

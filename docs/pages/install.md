@@ -330,7 +330,7 @@ for width in [44, 24] {
 #   } else {
 #       &[
 #           "  Job           Message",
-#           "  deploy api    …",
+#           "  deploy api    uploadi…",
 #           "▌ build docs    waiting…",
 #           "  rotate logs   starts…",
 #       ]
@@ -349,7 +349,7 @@ doesn't fit):
   rotate logs     ops      starts at 02:00
 
   Job           Message
-  deploy api    …
+  deploy api    uploadi…
 ▌ build docs    waiting…
   rotate logs   starts…
 ```

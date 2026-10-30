@@ -37,13 +37,13 @@ With Rust installed, the same lines work on Linux, macOS and Windows:
 ```sh
 cargo new hello
 cd hello
-cargo add pito-tui --git https://github.com/gmrdad82/pito-tui --tag v2.2.0
+cargo add pito-tui --git https://github.com/gmrdad82/pito-tui --tag v2.2.1
 ```
 
 or by hand in `Cargo.toml`:
 
 ```toml
-pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v2.2.0" }
+pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v2.2.1" }
 ```
 
 That one line brings ratatui 0.30 and crossterm 0.29, reachable as
@@ -611,8 +611,9 @@ and draw-time charts.
   the screen that asked, an optional callback after every draw with the time
   it took, and width-aware text helpers (`text::cut` and `clip` after a whole
   word, a `/`, `-` or `_` with "…", never after a bare number, dropping whole
-  " · " parts; `fit`, `wrap` at spaces, `hard_wrap` at the width). The status
-  line, tab tail, fold titles and toasts cut the same way.
+  " · " parts, and keeping the start of a single long word when no word fits;
+  `fit`, `wrap` at spaces, `hard_wrap` at the width). The status line, tab
+  tail, fold titles and toasts cut the same way.
 - **Headless.** `Tui::shot` draws the app at any size after a list of keys,
   `Tui::advance` moves the run's clock (the hourglass as if it had run that
   long, deadlines ticking), `dump::text` and `dump::ansi` print the result,
@@ -1738,7 +1739,8 @@ The terminal narrows from 96 to 38 columns and widens back. Each column has a
 minimum, a preferred width and a drop priority: when the width runs out the
 highest priority drops first (Size, then Version here), a `pinned()` column
 never drops, and the flexible column (the message) takes what's left and cuts
-after a whole word with "…" (`pito_tui::list::cut` gives apps the same cut).
+after a whole word with "…", or keeps the start of a single long word, such as
+an email, when no word fits (`pito_tui::list::cut` gives apps the same cut).
 `fit(max)` sizes a column to its widest cell on screen, `right()` aligns
 numbers, and `rest()` lets one cell run across the columns after it. Widths
 are Unicode-aware, so diacritics, wide glyphs and "…" measure and clip
@@ -1878,7 +1880,7 @@ for width in [44, 24] {
 #   } else {
 #       &[
 #           "  Job           Message",
-#           "  deploy api    …",
+#           "  deploy api    uploadi…",
 #           "▌ build docs    waiting…",
 #           "  rotate logs   starts…",
 #       ]
@@ -1897,7 +1899,7 @@ fit):
   rotate logs     ops      starts at 02:00
 
   Job           Message
-  deploy api    …
+  deploy api    uploadi…
 ▌ build docs    waiting…
   rotate logs   starts…
 ```
