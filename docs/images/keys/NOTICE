@@ -1,0 +1,4 @@
+demo.gif is a capture of this crate's own example (example/src/bin/ratatui.rs),
+recorded with prec from ../../render/terminal.toml and made into a GIF with pcod
+(pito-codecs). It is © 2026 Cătălin Ilinca, under the MIT licence like the code
+(see ../../LICENSE). The names and logos in it stay as ../../TRADEMARKS.md says.

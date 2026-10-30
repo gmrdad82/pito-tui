@@ -5,6 +5,8 @@ sidebar:
   order: 0
 ---
 
+![The keymap's help sheet: opened with ?, following the mode as tab switches it, searched with / for drop, then closed with esc](../images/keys/demo.gif)
+
 `pito_tui::keys` is one keymap per app. The app declares its keys once, in
 groups, with the modes and contexts each answers in; from that one
 declaration come the action a key does, the footer's hints for wherever the
