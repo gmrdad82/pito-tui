@@ -25,11 +25,11 @@ draws five cases into a 40-row buffer and prints the mean and the worst frame
 of each:
 
 ```text
-pito-header bench: nav rows: 200000 frames at 150x40: mean 1.75 µs, worst 117.1 µs
-pito-header bench: full header: 200000 frames at 150x40: mean 6.81 µs, worst 138.0 µs
-pito-header bench: full header, drilled in: 200000 frames at 150x40: mean 4.39 µs, worst 1013.7 µs
-pito-header bench: full header, abbreviated: 200000 frames at 40x40: mean 4.69 µs, worst 598.3 µs
-pito-header bench: hit test: 200000 frames at 150x40: mean 0.13 µs, worst 77.4 µs
+header bench: nav rows: 200000 frames at 150x40: mean 1.75 µs, worst 117.1 µs
+header bench: full header: 200000 frames at 150x40: mean 6.81 µs, worst 138.0 µs
+header bench: full header, drilled in: 200000 frames at 150x40: mean 4.39 µs, worst 1013.7 µs
+header bench: full header, abbreviated: 200000 frames at 40x40: mean 4.69 µs, worst 598.3 µs
+header bench: hit test: 200000 frames at 150x40: mean 0.13 µs, worst 77.4 µs
 ```
 
 That run was on an AMD Ryzen 9 9950X. The worst frame is mostly the one the

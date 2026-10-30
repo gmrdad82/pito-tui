@@ -22,7 +22,7 @@ A number after `--` sets the frames: `cargo run --release --example footer_bench
 100000`. It prints the mean and the worst frame, then the mean of each part:
 
 ```text
-pito-footer bench: 20000 frames at 150x40: mean 38.5 µs, worst … µs
+footer bench: 20000 frames at 150x40: mean 38.5 µs, worst … µs
   hints and notice: 8.37 µs
   status row: 7.61 µs
   wrapped hints: 5.85 µs
