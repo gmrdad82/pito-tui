@@ -8,7 +8,7 @@ The folders header/, footer/, hourglass/ and list/ hold the pictures of
 pito_tui::header, ::footer, ::hourglass and ::list, made from their own examples
 (examples/<module>_*.rs) and recorded from ../../render/<module>/; they are ©
 2026 Cătălin Ilinca under the MIT licence the same way, and ../../NOTICE.md names
-the source of each.
+the source of each. keys/ holds the help sheet's GIF with its own NOTICE beside it.
 pitomd-wordmark.svg is the PITO MD wordmark, copied by ../../bin/marks from the
 PITO MD brand masters; it is not under the MIT licence (see ../../NOTICE.md and
 ../../TRADEMARKS.md).

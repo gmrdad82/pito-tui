@@ -86,6 +86,9 @@ are as TRADEMARKS.md says. The images of the shell are named in
   `docs/images/list/charts/bench.toml` (the output of `examples/list_bench.rs`)
   and `docs/images/list/charts/frame-time.toml` (the output of
   `examples/list_versus.rs`), measured on 2026-10-14.
+- `docs/images/keys/`: `demo.gif` is the `?` help sheet of the keymap's
+  standalone ratatui example, recorded with prec and made into a GIF with pcod
+  (pito-codecs); its notice, `docs/images/keys/NOTICE`, is kept beside it.
 
 ## The PITO MD wordmark
 

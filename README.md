@@ -1933,6 +1933,8 @@ a first list in an app to 100,000 items built on demand.
 
 ## Keys
 
+<p align="center"><img src="docs/images/keys/demo.gif" alt="The keymap's help sheet: opened with ?, following the mode as tab switches it, searched with / for drop, then closed with esc"></p>
+
 `pito_tui::keys` is one keymap per app. The app declares its keys once, in
 groups, with the modes and contexts each answers in; from that one
 declaration come the action a key does, the footer's hints for wherever the
