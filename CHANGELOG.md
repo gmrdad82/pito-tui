@@ -10,8 +10,7 @@ number may break an app; the middle number adds, the last one fixes.
 
 - The header, footer, hourglass and list are part of pito-tui: `pito_tui::header`, `pito_tui::footer`, `pito_tui::hourglass` and `pito_tui::list` are modules of the crate, with their tests, examples (`cargo run --example <module>_<name>`), renders, guides and images, and the four git dependencies on pito-header, pito-footer, pito-hourglass and pito-list are gone.
 - Every public path under `pito_tui::` is unchanged, so an app that imports through pito-tui builds as before.
-- `Key::from(crossterm::event::KeyEvent)` is always there in all four modules; it no longer waits for a `crossterm` feature.
-- An app that pinned pito-header, pito-footer, pito-hourglass or pito-list itself drops those lines for pito-tui's one line and imports through `pito_tui::header`, `pito_tui::footer`, `pito_tui::hourglass` and `pito_tui::list`.
+- An app that pinned pito-header, pito-footer, pito-hourglass or pito-list itself drops those lines for pito-tui's one line and imports through `pito_tui::header`, `pito_tui::footer`, `pito_tui::hourglass` and `pito_tui::list`. It no longer needs `features = ["crossterm"]`: the header's, footer's and list's `Key::from(crossterm::event::KeyEvent)` is always there.
 - The README, the module pages and docs.pitomd.com carry every section, guide and image of the four: a part each in the README, a section each in the docs, and one install page.
 - Each module's earlier releases are listed in its own changelog: [pito-header](docs/changelogs/pito-header.md), [pito-footer](docs/changelogs/pito-footer.md), [pito-hourglass](docs/changelogs/pito-hourglass.md) and [pito-list](docs/changelogs/pito-list.md).
 

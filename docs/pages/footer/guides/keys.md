@@ -25,7 +25,7 @@ as `pito_tui::crossterm`:
 
 ```rust
 use pito_tui::footer::Key;
-use pito_tui::ratatui::crossterm::event::{self, Event};
+use pito_tui::crossterm::event::{self, Event};
 
 if let Event::Key(event) = event::read()? {
     let key = Key::from(event);

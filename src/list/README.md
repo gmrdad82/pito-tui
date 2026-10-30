@@ -24,7 +24,7 @@ is **70× faster** than a ratatui `Table` built from every row.
 | Frame time, 100,000 items built on demand | 292 µs mean (lazy, in groups), 354 µs (shared vector, scrollbar and count) |
 | Heap allocations in a warm frame, owned rows | 0 (held by a counting-allocator test) |
 | Against ratatui 0.30 `Table`, 20,000 items | 309 µs vs 21,692 µs, 0 vs 260,062 allocations a frame |
-| Source | 2,068 lines of Rust in `src/list/` |
+| Source | 2,165 lines of Rust in `src/list/` |
 
 Measured once on 2026-10-14 on an AMD Ryzen 9 9950X under Linux, Rust 1.97.1,
 release profile, with `cargo run --release --example list_bench` and
@@ -51,9 +51,9 @@ highest priority drops first (Size, then Version here), a `pinned()` column
 never drops, and the flexible column (the message) takes what's left and cuts
 after a whole word with "…" (`pito_tui::list::cut` gives apps the same cut).
 `fit(max)` sizes a column to its widest cell on screen, `right()` aligns
-numbers, and `rest()` lets one cell run across the columns after it (the
-release note above). Widths are Unicode-aware, so diacritics, wide glyphs and
-"…" measure and clip cleanly.
+numbers, and `rest()` lets one cell run across the columns after it. Widths
+are Unicode-aware, so diacritics, wide glyphs and "…" measure and clip
+cleanly.
 
 ![The demo list at 96 columns: Job, Version, Owner, Size and Message all shown](docs/images/list/columns-96.png)
 

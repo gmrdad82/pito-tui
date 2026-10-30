@@ -70,7 +70,7 @@ are as TRADEMARKS.md says. The images of the shell are named in
   `examples/hourglass_demo.rs`, `examples/hourglass_gallery.rs` and
   `examples/hourglass_fit.rs`, recorded with prec from
   `render/hourglass/render/terminal.toml` (shots `hourglass_demo`,
-  `hourglass_gallery` and `hourglass_fit`) and made GIFs with pcod
+  `hourglass_gallery` and `hourglass_fit`) and made into GIFs with pcod
   ([pito-codecs](https://github.com/gmrdad82/pito-codecs)); `frames.png` is
   `examples/hourglass_frames.rs`, a prec still (shot `hourglass_frames`);
   `draw-time.png` is drawn by pito-compare's `pcmp` from `draw-time.toml`,
@@ -83,9 +83,9 @@ are as TRADEMARKS.md says. The images of the shell are named in
   stills of `examples/list_demo.rs` at 96, 46 and 38 columns, rendered with
   prec from the `list_narrow` shot; `bench-bars.png` and
   `frame-time-paired.png` are charts drawn with pito-compare from
-  `charts/bench.toml` (the output of `examples/list_bench.rs`) and
-  `charts/frame-time.toml` (the output of `examples/list_versus.rs`), measured
-  on 2026-10-14.
+  `docs/images/list/charts/bench.toml` (the output of `examples/list_bench.rs`)
+  and `docs/images/list/charts/frame-time.toml` (the output of
+  `examples/list_versus.rs`), measured on 2026-10-14.
 
 ## The PITO MD wordmark
 

@@ -30,7 +30,8 @@ Works on Linux, Windows and macOS.
 - [Frames and timing](guides/frames-and-timing/): `frame_at`, `band_at`, `CYCLE` and `FRAMES`.
 - [Performance](guides/performance/): the draw time per area and how it's measured.
 - [API reference](../api/pito_tui/hourglass/index.html): the `cargo doc` pages.
-- [Changelog](../changelog/): every release.
+- [Changelog](../changelog/): every release, and
+  [the hourglass's earlier releases](../changelogs/pito-hourglass/).
 
 ## Part of pito-tui
 

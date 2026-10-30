@@ -22,7 +22,7 @@ the app, in any language.
   deadline wakes it, and redraws only what changed.
 - **One line in `Cargo.toml`** brings the shell with its header, footer,
   hourglass and list; 7 direct dependencies, 2 of them only on Unix.
-- **A 1.7 MB demo** (stripped release build), from 8,768 lines of Rust.
+- **A 1.7 MB demo** (stripped release build of 0.4.1).
 
 Works on Linux, Windows and macOS.
 
@@ -133,10 +133,11 @@ clock a frame at a time. The machine was busy with other work (load average
 about 58 on 32 threads), which shows in the worst frames; every one still
 fits the frame budget. Not measured on macOS or Windows.
 
-Size and build, the same day and machine: the demo's release build is 2.3 MB,
-1.7 MB stripped; `src/` is 8,768 lines of Rust, tests included; the crate has
-11 direct dependencies and 71 in all on Linux; a clean release build of the
-demo, every dependency included, takes 39 s.
+Size and build of 0.4.1, the same day and machine: the demo's release build
+is 2.3 MB, 1.7 MB stripped, and a clean release build of the demo, every
+dependency included, takes 39 s. `src/` is 21,486 lines of Rust, tests
+included, the header, footer, hourglass and list among them; the crate has 7
+direct dependencies, 2 of them only on Unix.
 
 ## Features
 
@@ -833,7 +834,7 @@ its own.
 | Full header, drawn at 150 columns | **8.7 µs** a frame (mean of 200,000) |
 | Nav rows alone / a click hit-test | **2.1 µs** / **0.11 µs** |
 | Allocations while drawing or hit-testing | **0** (a counting allocator in the tests holds it) |
-| Size | **about 1,540 lines** of Rust, 75 tests |
+| Size | **about 1,570 lines** of Rust, 110 tests |
 
 Measured on 2026-10-14 on an AMD Ryzen 9 9950X with Rust 1.97.1:
 `cargo run --release --example header_bench 200000` for the times. The chart
@@ -1114,7 +1115,7 @@ own loop draws it on its own.
   **38.5 µs** for a frame that draws every widget the footer has: 0.23% of a
   60 fps frame.
 - **Zero allocations** while drawing: a counting allocator in the tests holds it.
-- **2,078 lines** of Rust.
+- **2,357 lines** of Rust.
 
 ### A first footer
 
@@ -1243,7 +1244,7 @@ is drawn with [pito-compare](https://github.com/gmrdad82/pito-compare) from
 |---|---|
 | Frame of all six parts, mean | 38.5 µs |
 | Allocations while drawing | 0 |
-| Lines of Rust in `src/footer/`, blank lines left out | 2,078 |
+| Lines of Rust in `src/footer/`, blank lines left out | 2,357 |
 
 ### Every footer feature in detail
 
@@ -1666,7 +1667,7 @@ is **70× faster** than a ratatui `Table` built from every row.
 | Frame time, 100,000 items built on demand | 292 µs mean (lazy, in groups), 354 µs (shared vector, scrollbar and count) |
 | Heap allocations in a warm frame, owned rows | 0 (held by a counting-allocator test) |
 | Against ratatui 0.30 `Table`, 20,000 items | 309 µs vs 21,692 µs, 0 vs 260,062 allocations a frame |
-| Source | 2,068 lines of Rust in `src/list/` |
+| Source | 2,165 lines of Rust in `src/list/` |
 
 Measured once on 2026-10-14 on an AMD Ryzen 9 9950X under Linux, Rust 1.97.1,
 release profile, with `cargo run --release --example list_bench` and
@@ -1693,9 +1694,9 @@ highest priority drops first (Size, then Version here), a `pinned()` column
 never drops, and the flexible column (the message) takes what's left and cuts
 after a whole word with "…" (`pito_tui::list::cut` gives apps the same cut).
 `fit(max)` sizes a column to its widest cell on screen, `right()` aligns
-numbers, and `rest()` lets one cell run across the columns after it (the
-release note above). Widths are Unicode-aware, so diacritics, wide glyphs and
-"…" measure and clip cleanly.
+numbers, and `rest()` lets one cell run across the columns after it. Widths
+are Unicode-aware, so diacritics, wide glyphs and "…" measure and clip
+cleanly.
 
 ![The demo list at 96 columns: Job, Version, Owner, Size and Message all shown](docs/images/list/columns-96.png)
 

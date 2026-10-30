@@ -17,7 +17,7 @@ its own.
 | Full header, drawn at 150 columns | **8.7 µs** a frame (mean of 200,000) |
 | Nav rows alone / a click hit-test | **2.1 µs** / **0.11 µs** |
 | Allocations while drawing or hit-testing | **0** (a counting allocator in the tests holds it) |
-| Size | **about 1,540 lines** of Rust, 75 tests |
+| Size | **about 1,570 lines** of Rust, 110 tests |
 
 Measured on 2026-10-14 on an AMD Ryzen 9 9950X with Rust 1.97.1:
 `cargo run --release --example header_bench 200000` for the times. The chart

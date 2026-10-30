@@ -18,7 +18,7 @@ every word, every key and every style, so any language works.
   **38.5 µs** for a frame that draws every widget the footer has: 0.23% of a
   60 fps frame.
 - **Zero allocations** while drawing: a counting allocator in the tests holds it.
-- **2,078 lines** of Rust.
+- **2,357 lines** of Rust.
 
 Works on Linux, Windows and macOS.
 
@@ -37,7 +37,8 @@ Works on Linux, Windows and macOS.
   - [Measure the drawing speed](guides/speed/)
 - [API reference](../api/pito_tui/footer/index.html): every type and method, from
   `cargo doc`.
-- [Changelog](../changelog/): every release, newest first.
+- [Changelog](../changelog/): every release, newest first, and
+  [the footer's earlier releases](../changelogs/pito-footer/).
 
 ## Part of pito-tui
 

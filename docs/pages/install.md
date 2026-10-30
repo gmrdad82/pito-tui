@@ -134,8 +134,8 @@ $ cargo run --release --example demo -- --dump 72x14 --keys "tab"
 The header, footer, hourglass and list also draw on their own into any
 ratatui frame or buffer, for an app that keeps its own loop or wants one of
 them inside a screen. They need nothing beyond the same pito-tui line: each
-draws straight into ratatui's buffer, and each module's `Key` comes from
-crossterm's `KeyEvent` with `Key::from`.
+draws straight into ratatui's buffer, and the header's, footer's and list's
+`Key` comes from crossterm's `KeyEvent` with `Key::from`.
 
 ### The header on its own
 

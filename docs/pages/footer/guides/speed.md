@@ -33,14 +33,14 @@ pito-footer bench: 20000 frames at 150x40: mean 38.5 µs, worst … µs
 
 Those are the numbers measured once on 2026-10-14 on an AMD Ryzen 9 9950X
 under Linux with Rust 1.97.1, release profile, while other renders ran on the
-machine. A frame of all six parts takes 0.23% of a 60 fps frame. The worst frame depends on the machine's load, so it is left
-out here.
+machine. A frame of all six parts takes 0.23% of a 60 fps frame. The worst
+frame depends on the machine's load, so it is left out here.
 
 | | |
 |---|---|
 | Frame of all six parts, mean | 38.5 µs |
 | Allocations while drawing | 0 |
-| Lines of Rust in `src/footer/`, blank lines left out | 2,078 |
+| Lines of Rust in `src/footer/`, blank lines left out | 2,357 |
 
 The chart is drawn with
 [pito-compare](https://docs.pitomd.com/pito-compare/) from pito-tui's

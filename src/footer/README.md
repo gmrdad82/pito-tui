@@ -14,7 +14,7 @@ own loop draws it on its own.
   **38.5 µs** for a frame that draws every widget the footer has: 0.23% of a
   60 fps frame.
 - **Zero allocations** while drawing: a counting allocator in the tests holds it.
-- **2,078 lines** of Rust.
+- **2,357 lines** of Rust.
 
 ## A first footer
 
@@ -141,7 +141,7 @@ is drawn with [pito-compare](https://github.com/gmrdad82/pito-compare) from
 |---|---|
 | Frame of all six parts, mean | 38.5 µs |
 | Allocations while drawing | 0 |
-| Lines of Rust in `src/footer/`, blank lines left out | 2,078 |
+| Lines of Rust in `src/footer/`, blank lines left out | 2,357 |
 
 ## Every footer feature in detail
 

@@ -30,7 +30,7 @@ Works on Linux, Windows and macOS.
 | Frame time, 100,000 items built on demand | 292 µs mean (lazy, in groups), 354 µs (shared vector, scrollbar and count) |
 | Heap allocations in a warm frame, owned rows | 0 (held by a counting-allocator test) |
 | Against ratatui 0.30 `Table`, 20,000 items | 309 µs vs 21,692 µs, 0 vs 260,062 allocations a frame |
-| Source | 2,068 lines of Rust in `src/list/` |
+| Source | 2,165 lines of Rust in `src/list/` |
 
 Measured once on 2026-10-14 on an AMD Ryzen 9 9950X under Linux, Rust 1.97.1,
 release profile, with `cargo run --release --example list_bench` and
@@ -53,7 +53,8 @@ release profile, with `cargo run --release --example list_bench` and
   - [Measure it on your machine](guides/measure/)
 - [Every feature and the API](reference/api/) has the whole API on one
   page, and the [generated API reference](../api/pito_tui/list/index.html) every item.
-- The [changelog](../changelog/) lists what each release changed.
+- The [changelog](../changelog/) lists what each release changed, and
+  [the list's earlier releases](../changelogs/pito-list/) are listed on their own.
 
 ## Part of pito-tui
 

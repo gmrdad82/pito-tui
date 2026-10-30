@@ -70,7 +70,7 @@ let footer = Footer::new(&HINTS)
 
 ```rust
 use std::time::{Duration, Instant};
-use pito_tui::ratatui::crossterm::event;
+use pito_tui::crossterm::event;
 
 let wait = guard
     .deadline()

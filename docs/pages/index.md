@@ -25,7 +25,7 @@ the app, in any language.
   deadline wakes it, and redraws only what changed.
 - **One line in `Cargo.toml`** brings the shell with its header, footer,
   hourglass and list; 7 direct dependencies, 2 of them only on Unix.
-- **A 1.7 MB demo** (stripped release build), from 8,768 lines of Rust.
+- **A 1.7 MB demo** (stripped release build of 0.4.1).
 
 Works on Linux, Windows and macOS.
 
@@ -82,7 +82,7 @@ your own app.
 The code is MIT licensed, by Catalin Ilinca. The PITO MD name and its logos,
 and the names and logos of every PITO MD app and game, are © Catalin Ilinca,
 all rights reserved, and are not covered by the MIT licence. The GIFs and the
-chart are captures and measurements of the demo and the widgets' examples,
+charts are captures and measurements of the demo and the widgets' examples,
 under the MIT licence like the code. The look of the header, footer, list and
 hourglass is in the style of HEY's terminal UI by 37signals, and the
 hourglass's frames come from
