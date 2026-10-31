@@ -4,7 +4,7 @@ use unicode_width::UnicodeWidthStr;
 
 const TWO: [Column<'static>; 2] = [Column::new("Name", 8, 8), Column::new("Note", 4, 0)];
 
-const SAMPLES: [&str; 15] = [
+const SAMPLES: [&str; 18] = [
     "",
     "deploy the api",
     "src/view.rs",
@@ -20,6 +20,9 @@ const SAMPLES: [&str; 15] = [
     "  leading and trailing  ",
     "build 12 · deploy api · x",
     "• item one two",
+    "household@example.com",
+    "first.last@example.com and more",
+    "12日本 x",
 ];
 
 #[test]
@@ -44,12 +47,32 @@ fn a_cut_keeps_whole_words_and_drops_the_spaces_before_the_ellipsis() {
 }
 
 #[test]
-fn a_value_where_no_whole_word_fits_keeps_nothing() {
-    assert_eq!(cut("deployment", 5), Some(""));
-    assert_eq!(cut("deploy the api", 6), Some(""));
+fn a_value_where_no_whole_word_fits_keeps_its_start() {
+    assert_eq!(cut("deployment", 5), Some("depl"));
+    assert_eq!(cut("deploy the api", 6), Some("deplo"));
+    assert_eq!(cut("1234567", 6), Some("12345"));
+    assert_eq!(
+        cut("household@example.com", 20),
+        Some("household@example.c")
+    );
+    assert_eq!(cut("first.last@example.com", 16), Some("first.last@exam"));
+    assert_eq!(cut("first.last@example.com", 11), Some("first.last"));
+    assert_eq!(cut("first.last@example.com", 4), Some("fir"));
+}
+
+#[test]
+fn a_room_of_one_keeps_only_the_ellipsis() {
     assert_eq!(cut("ab", 1), Some(""));
+    assert_eq!(cut("household@example.com", 1), Some(""));
     assert_eq!(cut("abc", 0), Some(""));
-    assert_eq!(cut("1234567", 6), Some(""));
+    assert_eq!(cut("日本語", 2), Some(""));
+}
+
+#[test]
+fn a_whole_word_still_wins_whenever_one_fits() {
+    assert_eq!(cut("me household@example.com", 20), Some("me"));
+    assert_eq!(cut("deploy the api", 7), Some("deploy"));
+    assert_eq!(cut("deploy the api", 10), Some("deploy"));
 }
 
 #[test]
@@ -57,20 +80,20 @@ fn names_cut_after_a_slash_a_dash_or_an_underscore() {
     assert_eq!(cut("src/view.rs", 8), Some("src/"));
     assert_eq!(cut("billing-team-lead", 14), Some("billing-team-"));
     assert_eq!(cut("billing-team-lead", 13), Some("billing-"));
-    assert_eq!(cut("billing-team", 6), Some(""));
+    assert_eq!(cut("billing-team", 6), Some("billi"));
     assert_eq!(cut("snake_case_name", 12), Some("snake_case_"));
     assert_eq!(cut("/usr/local/bin", 9), Some("/usr/"));
-    assert_eq!(cut("-flag", 3), Some(""));
+    assert_eq!(cut("-flag", 3), Some("-f"));
 }
 
 #[test]
 fn a_cut_never_lands_right_after_a_bare_number() {
     assert_eq!(cut("uploaded 12 files", 15), Some("uploaded"));
-    assert_eq!(cut("12 files", 5), Some(""));
-    assert_eq!(cut("2026-10-26 release", 15), Some(""));
+    assert_eq!(cut("12 files", 5), Some("12 f"));
+    assert_eq!(cut("2026-10-26 release", 15), Some("2026-10-26 rel"));
     assert_eq!(cut("12.5 kB left", 10), Some("12.5 kB"));
     assert_eq!(cut("v1.2 build", 8), Some("v1.2"));
-    assert_eq!(cut("12日本", 4), Some(""));
+    assert_eq!(cut("12日本", 4), Some("12"));
 }
 
 #[test]
@@ -78,6 +101,8 @@ fn wide_glyphs_cut_between_glyphs_and_never_in_half() {
     assert_eq!(cut("日本語のテキスト", 5), Some("日本"));
     assert_eq!(cut("日本語", 4), Some("日"));
     assert_eq!(cut("日本語", 1), Some(""));
+    assert_eq!(cut("1😀x", 3), Some("1"));
+    assert_eq!(cut("1😀xy", 4), Some("1😀"));
     assert_eq!(cut("a日本", 3), Some("a"));
     assert_eq!(cut("deploy 日本語", 10), Some("deploy 日"));
     assert_eq!(cut("😀😀 smile", 3), Some("😀"));
@@ -86,7 +111,8 @@ fn wide_glyphs_cut_between_glyphs_and_never_in_half() {
 #[test]
 fn graphemes_stay_whole_and_tabs_count_as_spaces() {
     assert_eq!(cut("cafe\u{301} au lait", 8), Some("cafe\u{301} au"));
-    assert_eq!(cut("cafe\u{301}s", 4), Some(""));
+    assert_eq!(cut("cafe\u{301}s", 4), Some("caf"));
+    assert_eq!(cut("cafe\u{301}st", 5), Some("cafe\u{301}"));
     assert_eq!(cut("tab\there", 5), Some("tab"));
 }
 
@@ -96,7 +122,7 @@ fn spaced_separators_drop_whole_parts() {
     assert_eq!(cut(parts, 24), Some("build · deploy api"));
     assert_eq!(cut(parts, 18), Some("build"));
     assert_eq!(cut(parts, 6), Some("build"));
-    assert_eq!(cut(parts, 5), Some(""));
+    assert_eq!(cut(parts, 5), Some("buil"));
     assert_eq!(cut("a · b", 2), Some("a"));
     assert_eq!(cut("build 12 · deploy", 12), Some("build"));
     assert_eq!(cut("first part is long · b", 8), Some("first"));
@@ -153,4 +179,23 @@ fn a_cell_of_parts_cuts_at_a_word_and_ends_in_the_style_it_cuts() {
     let drawn = draw_with(&mut list, &TWO, 20, 2, |view| view.styles(STYLES));
     assert_eq!(drawn.text[1], "  deploy…   x");
     assert_eq!(drawn.marks[1], "..ggggggf");
+}
+
+#[test]
+fn an_email_column_of_twenty_cells_shows_the_start_of_the_address() {
+    let columns = [Column::new("Login", 20, 20), Column::new("Note", 4, 0)];
+    let mut list = List::new().with_rows([
+        Row::new(["household@example.com", "x"]),
+        Row::new(["first.last@example.com", "y"]),
+        Row::new(["me@example.com", "z"]),
+    ]);
+    let drawn = draw_with(&mut list, &columns, 30, 3, |view| view);
+    assert_eq!(
+        drawn.text,
+        [
+            "▌ household@example.c…  x",
+            "  first.last@example.…  y",
+            "  me@example.com        z",
+        ]
+    );
 }

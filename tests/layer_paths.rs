@@ -424,7 +424,7 @@ fn more_toasts_than_fit_are_dropped_not_drawn_out_of_bounds() {
     let mut tui = run(vec![Act::Toast(Toast::new("a".repeat(200)))]);
     let buffer = frame(&mut tui);
     let text = dump::text(&buffer);
-    assert!(text.contains('…') && !text.contains("aaaa"), "{text}");
+    assert!(text.contains("aaaa…"), "{text}");
     assert!(text.contains('╮'), "{text}");
 }
 

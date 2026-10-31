@@ -550,7 +550,17 @@ mod tests {
         assert_eq!(row(&buf, 0), "─ a long… ──");
         let mut buf = Buffer::empty(Rect::new(0, 0, 4, 1));
         rule(&mut buf, &[], "deployment", &[]);
-        assert_eq!(row(&buf, 0), " … ─");
+        assert_eq!(row(&buf, 0), " d… ");
+    }
+
+    #[test]
+    fn a_status_label_of_one_long_word_keeps_its_start() {
+        let mut buf = Buffer::empty(Rect::new(0, 0, 40, 1));
+        rule(&mut buf, &parts("household@example.com"), "T", &[]);
+        assert_eq!(
+            row(&buf, 0),
+            format!("─ household@exa… ─ T {}", "─".repeat(19))
+        );
     }
 
     #[test]
@@ -568,6 +578,7 @@ mod tests {
         assert_eq!(drawn_width(&spans, 9), 7);
         assert_eq!(drawn_width(&spans, 14), 14);
         assert_eq!(drawn_width(&spans, 0), 0);
-        assert_eq!(drawn_width(&spans, 5), 1);
+        assert_eq!(drawn_width(&spans, 5), 5);
+        assert_eq!(drawn_width(&spans, 1), 1);
     }
 }

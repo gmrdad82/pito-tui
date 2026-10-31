@@ -68,7 +68,7 @@ fn pinned_columns_past_the_area_stop_at_its_right_edge() {
         }
     }
     assert_eq!(line(&buf, 0, 0, 20), "  Name        Owner ");
-    assert_eq!(line(&buf, 1, 0, 20), "▌ deploy api  …     ");
+    assert_eq!(line(&buf, 1, 0, 20), "▌ deploy api  billi…");
     assert_eq!(list.columns(), [(0, 2, 10), (1, 14, 6)]);
 }
 
@@ -106,7 +106,7 @@ fn a_right_column_at_the_edge_aligns_to_the_area() {
     assert_eq!(line(&buf, 1, 0, 20), "▌ alpha        12345");
     assert_eq!(
         line(&buf, 2, 0, 20),
-        format!("  bravo{}…{}", " ".repeat(7), " ".repeat(5))
+        format!("  bravo{}12345…", " ".repeat(7))
     );
     assert_eq!(list.columns(), [(0, 2, 10), (1, 14, 6)]);
 }
@@ -132,7 +132,7 @@ fn a_list_at_a_non_zero_x_leaves_both_sides_alone() {
     }
     untouched_outside(&buf, area);
     same_inside(&buf, &alone);
-    assert_eq!(line(&buf, 2, 10, 30), "▌ ⧗ deploy api  …   ");
+    assert_eq!(line(&buf, 2, 10, 30), "▌ ⧗ deploy api  bil…");
 }
 
 #[test]
@@ -194,7 +194,7 @@ fn a_cursor_and_mark_wider_than_the_area_stay_inside() {
         .header(true)
         .render(area, &mut buf);
     untouched_outside(&buf, area);
-    assert_eq!(line(&buf, 1, 5, 17), format!("…{}", " ".repeat(11)));
+    assert_eq!(line(&buf, 1, 5, 17), format!("{}…", "▌".repeat(11)));
 }
 
 #[test]

@@ -35,7 +35,7 @@ fn a_right_column_pads_on_the_left_and_aligns_its_header() {
             "▌ ab          12  x",
             "  cd       12345  y",
             "  ef      123456  z",
-            "  gh      …       w",
+            "  gh      12345…  w",
             "",
         ]
     );
@@ -71,11 +71,11 @@ fn a_right_column_clips_as_before() {
     assert_eq!(
         drawn.text,
         [
-            "  Name    …       Note",
-            "▌ a       …       x",
+            "  Name    Kilob…  Note",
+            "▌ a       12345…  x",
             "  b       日本…   y",
-            "  c       …       z",
-            "  d       …       w",
+            "  c       12345…  z",
+            "  d       12345…  w",
             "  e       日本語  v",
         ]
     );
@@ -121,7 +121,7 @@ fn a_right_last_column_ends_at_the_right_edge() {
         [
             "  Name         Total",
             "▌ a               42",
-            "  b       …",
+            "  b       123456789…",
         ]
     );
     assert_eq!(cells(&drawn.text[1]), 20);

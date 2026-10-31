@@ -56,7 +56,7 @@ fn the_least_important_hints_drop_first_and_order_is_kept() {
     assert_eq!(line(48), "↑↓ move · enter open · ctrl+c twice quit");
     assert_eq!(line(39), "↑↓ move · ctrl+c twice quit");
     assert_eq!(line(26), "ctrl+c twice quit");
-    assert_eq!(line(10), "ctrl+c …");
+    assert_eq!(line(10), "ctrl+c tw…");
 }
 
 #[test]
@@ -302,9 +302,9 @@ fn status_segments_drop_and_shrink_by_rank() {
     );
     assert_eq!(
         line(50),
-        " NORMAL  …        ctrl+c twice quit 12:30 page 1/2"
+        " NORMAL  3 selec… ctrl+c twice quit 12:30 page 1/2"
     );
-    assert_eq!(line(30), " NORMAL  …      12:30 page 1/2");
+    assert_eq!(line(30), " NORMAL  3 sel… 12:30 page 1/2");
     assert_eq!(line(8), " NORMAL");
     for width in 1..=130 {
         assert!(
@@ -376,7 +376,7 @@ fn a_status_text_carries_several_styled_spans() {
     let drawn = draw(status, 15, 1);
     assert_eq!(drawn.text[0], "copied…  ●○○ v2");
     assert_eq!(drawn.marks[0], "mmmmmmm  amm mm");
-    assert_eq!(draw(status, 3, 1).text[0], "…");
+    assert_eq!(draw(status, 3, 1).text[0], "co…");
     let empty = [("", GRAY)];
     assert_eq!(Footer::status(&[Segment::spans(&empty)]).height(40), 0);
     for width in 1..=50 {
@@ -400,7 +400,7 @@ fn the_gap_moves_the_hints_that_follow_a_segment() {
     assert_eq!(row(status.gap(3), 30), "main   q quit");
     assert_eq!(row(status.gap(0), 30), "mainq quit");
     assert_eq!(row(status.gap(1), 12), "main q quit");
-    assert_eq!(row(status.gap(3), 12), "main   q …");
+    assert_eq!(row(status.gap(3), 12), "main   q qu…");
     let right = [
         Segment::text("main", Style::new().fg(Color::White)).right(),
         Segment::hints(&QUIT).right(),
@@ -475,7 +475,7 @@ fn a_cut_label_keeps_whole_words_and_ends_in_an_ellipsis() {
     assert_eq!(row(16), "q quit the…");
     assert_eq!(row(12), "q quit the…");
     assert_eq!(row(9), "q quit…");
-    assert_eq!(row(4), "q …");
+    assert_eq!(row(4), "q q…");
 }
 
 #[test]
@@ -489,5 +489,19 @@ fn a_cut_legend_drops_whole_parts_between_separators() {
     assert_eq!(row(26), "build · deploy api · tests");
     assert_eq!(row(22), "build · deploy api…");
     assert_eq!(row(12), "build…");
-    assert_eq!(row(5), "…");
+    assert_eq!(row(5), "buil…");
+}
+
+#[test]
+fn a_cut_legend_of_one_long_word_keeps_its_start() {
+    let row = |width: u16| {
+        let footer = Footer::new(&[])
+            .rule(false)
+            .notice(Some(Notice::legend("household@example.com")));
+        draw(footer, width, 1).text.remove(0)
+    };
+    assert_eq!(row(21), "household@example.com");
+    assert_eq!(row(20), "household@example.c…");
+    assert_eq!(row(2), "h…");
+    assert_eq!(row(1), "…");
 }

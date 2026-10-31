@@ -75,6 +75,7 @@ struct Scan {
     parted: bool,
     word: Option<Spot>,
     part: Option<Spot>,
+    fill: Spot,
 }
 
 impl Scan {
@@ -93,6 +94,7 @@ impl Scan {
             parted: false,
             word: None,
             part: None,
+            fill: Spot::default(),
         }
     }
 
@@ -163,6 +165,12 @@ impl Scan {
         self.prev = Some(kind);
         self.count += 1;
         self.used = self.used.saturating_add(cells);
+        if kind != Kind::Space && self.used <= self.limit {
+            self.fill = Spot {
+                count: self.count,
+                cells: self.used,
+            };
+        }
     }
 
     fn done(&self, room: usize) -> bool {
@@ -173,7 +181,7 @@ impl Scan {
         if self.used <= room {
             return None;
         }
-        Some(self.part.or(self.word).unwrap_or_default().count)
+        Some(self.part.or(self.word).unwrap_or(self.fill).count)
     }
 }
 
@@ -244,8 +252,22 @@ mod tests {
     fn cuts_after_whole_words() {
         assert_eq!(head("deploy the api", 12), Some("deploy the"));
         assert_eq!(head("deploy the api", 10), Some("deploy"));
-        assert_eq!(head("deployment", 5), Some(""));
+        assert_eq!(head("deployment", 5), Some("depl"));
         assert_eq!(head("abc", 0), Some(""));
+        assert_eq!(head("ab", 1), Some(""));
+    }
+
+    #[test]
+    fn keeps_the_start_of_a_word_when_no_whole_word_fits() {
+        assert_eq!(
+            head("household@example.com", 20),
+            Some("household@example.c")
+        );
+        assert_eq!(head("first.last@example.com", 8), Some("first.l"));
+        assert_eq!(head("me household@example.com", 20), Some("me"));
+        assert_eq!(head("12日本", 4), Some("12"));
+        assert_eq!(head("1😀x", 3), Some("1"));
+        assert_eq!(head("cafe\u{301}st", 5), Some("cafe\u{301}"));
     }
 
     #[test]
@@ -258,7 +280,7 @@ mod tests {
     #[test]
     fn never_cuts_right_after_a_bare_number() {
         assert_eq!(head("uploaded 12 files", 15), Some("uploaded"));
-        assert_eq!(head("12 files", 5), Some(""));
+        assert_eq!(head("12 files", 5), Some("12 f"));
         assert_eq!(head("12.5 kB left", 10), Some("12.5 kB"));
     }
 
@@ -266,6 +288,7 @@ mod tests {
     fn cuts_between_wide_glyphs() {
         assert_eq!(head("日本語のテキスト", 5), Some("日本"));
         assert_eq!(head("日本語", 1), Some(""));
+        assert_eq!(head("日本語", 2), Some(""));
     }
 
     #[test]
@@ -273,7 +296,7 @@ mod tests {
         let parts = "build · deploy api · tests";
         assert_eq!(head(parts, 24), Some("build · deploy api"));
         assert_eq!(head(parts, 18), Some("build"));
-        assert_eq!(head(parts, 5), Some(""));
+        assert_eq!(head(parts, 5), Some("buil"));
     }
 
     #[test]
