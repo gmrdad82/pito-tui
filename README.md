@@ -37,13 +37,13 @@ With Rust installed, the same lines work on Linux, macOS and Windows:
 ```sh
 cargo new hello
 cd hello
-cargo add pito-tui --git https://github.com/gmrdad82/pito-tui --tag v2.2.1
+cargo add pito-tui --git https://github.com/gmrdad82/pito-tui --tag v2.3.0
 ```
 
 or by hand in `Cargo.toml`:
 
 ```toml
-pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v2.2.1" }
+pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v2.3.0" }
 ```
 
 That one line brings ratatui 0.30 and crossterm 0.29, reachable as
@@ -263,6 +263,15 @@ where the terminal honours that, and in kitty the wheel's arrow
 press-and-release pairs are dropped; either way the wheel doesn't move a list
 like arrow keys, and real arrows and held keys work as before.
 
+### Select and copy with the mouse captured
+
+An app that captures the mouse for the wheel and clicks still lets the user
+copy what is on screen: a drag with the left button highlights the cells,
+over the screen, the header, the footer, lists, logs, modals and the `?`
+sheet alike, and the release copies them to the clipboard, through OSC 52
+and the platform's clipboard command both. On by default
+([Selection](#selection)).
+
 ### A header, a footer, an hourglass and a list of its own
 
 The shell draws with four widgets that are part of the crate, and an app
@@ -360,11 +369,21 @@ and draw-time charts.
   may call it, the first call gives the terminal back and waits for a frame
   being drawn to finish, later calls do nothing, and the shell draws nothing
   after it.
+- **Text selection with the mouse captured.** A drag with the left button
+  selects any drawn cells, terminal-style from the pressed cell to the
+  released one with whole rows between, highlights them in
+  `Palette::selection` while the button is held and until the next press or
+  key, and copies them on release through OSC 52 (up to `COPY_MAX`) and the
+  platform's clipboard command, with `Words::copied` as a toast when the app
+  gives it. A click is still a click; `Tui::select(false)` turns it off,
+  `Screen::drags` keeps a screen's own drags, and shift-drag is left to the
+  terminal. An app on its own loop uses the same `Selection`
+  ([Selection](#selection)).
 - **A palette from one colour, or a whole one.** `Palette::new(accent)`
   derives every style the header, footer, list and hourglass draw with;
   `Palette` also takes each token by hand (base, ink, strong, muted,
-  accent, selected, good, warn, bad, rule, line, glass, shimmer, title,
-  inactive, focus, small). `Cx::palette` swaps it while the app runs, and
+  accent, selected, selection, good, warn, bad, rule, line, glass, shimmer,
+  title, inactive, focus, small). `Cx::palette` swaps it while the app runs, and
   the hourglass follows. `Palette::tone(Tone)` turns the shell's `Tone`
   (`Ink`, `Strong`, `Muted`, `Accent`, `Good`, `Warn`, `Bad`) into a style
   for toasts and modal status lines. Named colour roles, one per app mode,
@@ -662,7 +681,7 @@ Tui::new(name, version, accent: Color) -> Tui<E>          // E: the app's worker
   .nav_keys(NavKeys) .help(Option<Help>) .quit(Mode) .quit_window(Duration)
   .quit_keys(&[footer::Key]) .quit_sticky(bool) .quit_tone(footer::Tone) .quit_hints(bool)
   .stop_keys(&[footer::Key]) .eager(bool) .keep_facts(bool)
-  .modes(Modes) .activities(Activities) .overlay(header::Section, &[footer::Key], impl Screen<E>)
+  .modes(Modes) .select(bool) .clipboard(impl select::Clip) .activities(Activities) .overlay(header::Section, &[footer::Key], impl Screen<E>)
   .app(impl Screen<E>) .gate(impl Screen<E>, shut: bool)
   .band(impl Band) .top_band(impl Band) .lit_again(bool) .through_keys(&[footer::Key])
   .header_look(fn(Header) -> Header) .footer_look(fn(Footer, width: u16) -> Footer)
@@ -674,7 +693,7 @@ Tui::new(name, version, accent: Color) -> Tui<E>          // E: the app's worker
   changed(source), go(screen) -> bool, start() -> Flow  // a quit from go comes back from start, settle or the next wake
   pump(), settle() -> Flow, advance(Duration) -> Flow, draw(&mut Frame), busy(), current(), names()
   find::<T>(), find_mut::<T>(), sender(), waker(screen), set_palette(..), set_words(..), set_layout(..)
-  set_keys_now(keys::Now), sheet() -> &keys::Sheet
+  set_keys_now(keys::Now), sheet() -> &keys::Sheet, selection() -> &Selection
   frame(w, h) -> Buffer, shot(w, h, &[KeyEvent], settle) -> Buffer, bench(w, h, frames) -> Vec<Bench>
 pub enum Flow { Stay, Quit }
 
@@ -703,6 +722,7 @@ pub trait Screen<E>: Any {                                 // every method but d
   fn left(&self, room: u16, help: Option<&str>) -> Option<Vec<(String, Style)>>;  // the whole left side
   fn notice(&self) -> Option<Notice>;  fn legend(&self) -> Option<&str>;
   fn typing(&self) -> bool;
+  fn drags(&self) -> bool;                                 // true: a press over its area starts no selection
   fn input(&self) -> Option<InputBar>;  fn crumb(&self) -> Option<String>;
   fn selected(&self) -> usize;  fn busy(&self) -> usize;
   fn animating(&self) -> bool;  fn deadline(&self) -> Option<Instant>;
@@ -790,17 +810,26 @@ keys::Panel::new() .still(bool)                            // the ? sheet drawn:
 keys::Chord::parse(text) -> Result<Chord, Unknown>, from_crossterm(&KeyEvent) -> Option<Chord>,
   new(Key, Mods), plain(Key), char(c), ctrl(c);  footer::Hint::from(keys::Hint)
 Palette::new(accent: Color)                                // every token a pub field and a builder
-  .base .ink .strong .muted .accent .selected .good .warn .bad .rule .line .glass .shimmer
+  .base .ink .strong .muted .accent .selected .selection .good .warn .bad .rule .line .glass .shimmer
   .title .inactive .focus .small (Style)  .bar(Option<list::Bar>) .count(Option<list::Count>)
   mono(), tone(Tone) -> Style, header() -> header::Styles, footer() -> footer::Styles,
   list() -> list::Styles, view(&mut List, &[Column]) -> ListView, hourglass(elapsed, label, hint) -> Hourglass
 Words::new()                                               // every word empty until the app sets it
-  .help .again .yes .no .choose .leave .too_small .waiting (text)  .busy(Fn(usize) -> String)
+  .help .again .yes .no .choose .leave .too_small .waiting .copied (text)  .busy(Fn(usize) -> String)
 
 Term::enter(Modes) -> io::Result<Term>                     // restored on drop and on a UI-thread panic
 restore() -> bool                                          // any thread, once: true if it gave the terminal back
   terminal(), modes(), draw(FnOnce(&mut Frame)), mouse(bool)
 Modes::new()  .alternate(true) .paste(true) .mouse(false) .focus(false)
+Selection::new()                                           // the shell's own, or an own loop's
+  feed(MouseEvent) -> select::Fed, clear(), shown(), dragging(), range() -> Option<(Position, Position)>,
+  take(&Buffer) -> Option<String>, text(&Buffer) -> String, paint(&mut Buffer, Style)
+pub enum select::Fed { Pass, Press, Click, Drag, Done }    // Drag and Done are the selection's; after Done, take at the next draw
+select::send(text, &mut dyn select::Clip) -> bool         // OSC 52 up to COPY_MAX, then the clipboard command
+pub trait select::Clip { fn osc(&mut self, sequence: &str); fn command(&mut self, text: &str); }
+select::System::new()                                      // stdout, and Tool::find() on the first copy
+select::Tool { program, args }  find(), pick(os, wayland, x11, Fn(&str) -> bool), bytes(text), spawn(text)
+  Tool::PBCOPY, CLIP, WL_COPY, XCLIP, XSEL
 Pace, FRAME (8.333 ms), wait_until(now, dirty, &Pace, deadlines)
 pub enum Wake<E> { Input(Event), Lost(io::Error), Event(screen, E), Loaded(screen, generation, E), Activity(Activity),
   Command(screen, command::Report),                        // a command's lines and exit, from the shell's runner
@@ -2157,6 +2186,122 @@ A rail of clips and a cut in two modes, a player with a context, a note, a
 quiet bind and the `?` sheet with search; `--dump WxH keys…` prints one
 frame as text after those keys. Its tape for prec is kept in
 `render/keys/`.
+
+## Selection
+
+An app that captures the mouse (`Modes::mouse(true)`, for the wheel and
+clicks) takes the terminal's own text selection away. The shell gives it
+back: drag with the left button over anything on screen (the screen's own
+drawing, the header, the footer, lists, logs, modals, toasts, the `?` sheet)
+and the cells are highlighted while the button is held and copied to the
+clipboard on release.
+
+- **On by default** in every app on `Tui` that captures the mouse. An app
+  that doesn't capture it gets no mouse events, so the terminal keeps its
+  own selection and nothing changes.
+- **A click is still a click.** The press always reaches the screen; a
+  press and release on the same cell reaches it whole. Once the pointer
+  moves a cell, the drag and the release belong to the selection.
+- **Like a terminal's.** From the pressed cell to the released one, whole
+  rows between, in either direction. Wide glyphs are copied once, combining
+  marks stay with their letter, each row's trailing blanks are trimmed and
+  the rows are joined with new lines.
+- **The highlight** is `Palette::selection`, reversed by default so it reads
+  over any colour (a cell that is already reversed flips back), painted over
+  the whole frame after everything else. It stays until the next press or
+  key. A steady frame with a selection shown allocates nothing; only the
+  frame after a release takes the text.
+- **Off for an app:** `Tui::select(false)`.
+- **A screen that drags** answers `Screen::drags` with `true`: a press over
+  its area then reaches it whole (press, drag, release) and starts no
+  selection; the header and footer around it stay selectable.
+- **A toast in the app's words:** `Words::copied`, empty by default, shows
+  after each copy. The shell says nothing of its own.
+- **Shift-drag is the terminal's.** Most terminals keep shift-drag for their
+  own selection even while an app captures the mouse; if one passes it on,
+  pito-tui doesn't select.
+
+### Where the copy goes
+
+Each copy goes two ways at once, so it lands wherever either works:
+
+- **OSC 52** to the terminal, up to `COPY_MAX` (48 KiB); longer text skips it.
+- **The platform's clipboard command** when one is on `PATH`: `pbcopy` on
+  macOS, `clip.exe` on Windows, `wl-copy` under Wayland (`WAYLAND_DISPLAY`
+  set), else `xclip -selection clipboard` or `xsel --clipboard --input`
+  under X11 (`DISPLAY` set). It is looked up on the first copy and runs on a
+  thread of its own with no window, so the loop never waits for it.
+
+With OSC 52 off in the terminal and no command (over SSH to a host with no
+display, say), nothing is copied. `Tui::clipboard(sink)` hands both to the
+app's own `select::Clip` instead, the way tests keep off the real clipboard.
+
+Tested headless only, by the crate's tests on Linux and macOS. Untested in a
+real terminal: Ghostty, kitty, Alacritty, foot, WezTerm, GNOME Terminal,
+Konsole, iTerm2, Terminal.app and Windows Terminal; the clipboard commands
+are untested on macOS and Windows.
+
+### On a loop of its own
+
+An app that keeps its own loop feeds `Selection` its mouse events and keeps
+the ones it answers `Pass`, `Press` or `Click` for itself. After drawing each
+frame, it takes the text a release left (once) and paints the highlight;
+`select::System::new()` is the real clipboard:
+
+```rust
+use pito_tui::crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use pito_tui::ratatui::{buffer::Buffer, style::{Color, Modifier}};
+use pito_tui::select::{self, Clip, Fed};
+use pito_tui::{Palette, Selection};
+
+struct Kept(Vec<String>);
+
+impl Clip for Kept {
+    fn osc(&mut self, _sequence: &str) {}
+
+    fn command(&mut self, text: &str) {
+        self.0.push(text.to_string());
+    }
+}
+
+let mouse = |kind, column, row| MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE };
+let palette = Palette::new(Color::Cyan);
+let mut selection = Selection::new();
+let mut clipboard = Kept(Vec::new());
+let mut frame = Buffer::with_lines(["alpha beta", "gamma delta"]);
+let mut mine = Vec::new();
+
+for event in [
+    mouse(MouseEventKind::Down(MouseButton::Left), 6, 0),
+    mouse(MouseEventKind::Drag(MouseButton::Left), 4, 1),
+    mouse(MouseEventKind::Up(MouseButton::Left), 4, 1),
+] {
+    if !matches!(selection.feed(event), Fed::Drag | Fed::Done) {
+        mine.push(event.kind);
+    }
+}
+
+if let Some(text) = selection.take(&frame) {
+    select::send(&text, &mut clipboard);
+}
+selection.paint(&mut frame, palette.selection);
+
+assert_eq!(mine, [MouseEventKind::Down(MouseButton::Left)]);
+assert_eq!(clipboard.0, ["beta\ngamma"]);
+assert!(frame[(6, 0)].modifier.contains(Modifier::REVERSED));
+assert!(!frame[(5, 1)].modifier.contains(Modifier::REVERSED));
+```
+
+### Try the selection demo
+
+```sh
+cargo run --example select_demo
+cargo run --example select_demo -- --dump 90x24 drag 8,5 40,13
+```
+
+The first runs it: drag over the sky, the list or the log. The second
+prints one frame after a scripted drag, the highlight in reverse video,
+then the text it copied.
 
 ## Adopting pito-tui
 

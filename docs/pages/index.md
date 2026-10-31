@@ -66,6 +66,7 @@ your own app.
   - [Give the terminal back, always](guides/terminal/)
   - [Move an existing app onto the shell](guides/adopting/)
   - [Fold sections](guides/folds/)
+  - [Select and copy text](guides/selection/)
 - The four widgets and the keymap, each a section of its own:
   - [The header](header/): groups of numbered sections, drill-in with a
     breadcrumb, and rows that abbreviate to fit.

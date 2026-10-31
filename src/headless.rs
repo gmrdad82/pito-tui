@@ -28,6 +28,7 @@ impl<E: Send + 'static> Tui<E> {
         if let Err(never) = terminal.draw(|frame| self.draw(frame)) {
             match never {}
         }
+        self.deliver();
         terminal.backend().buffer().clone()
     }
 

@@ -32,6 +32,7 @@ pub struct Palette {
     pub muted: Style,
     pub accent: Style,
     pub selected: Style,
+    pub selection: Style,
     pub good: Style,
     pub warn: Style,
     pub bad: Style,
@@ -66,6 +67,7 @@ impl Palette {
             muted,
             accent: lit,
             selected: lit.add_modifier(Modifier::BOLD),
+            selection: Style::new().add_modifier(Modifier::REVERSED),
             good: Style::new().fg(GOOD),
             warn: Style::new().fg(WARN),
             bad: Style::new().fg(BAD),
@@ -93,6 +95,7 @@ impl Palette {
             muted: bare(self.muted).add_modifier(Modifier::DIM),
             accent: bare(self.accent).add_modifier(Modifier::BOLD),
             selected: bare(self.selected).add_modifier(Modifier::REVERSED),
+            selection: bare(self.selection).add_modifier(Modifier::REVERSED),
             good: bare(self.good).add_modifier(Modifier::BOLD),
             warn: bare(self.warn)
                 .add_modifier(Modifier::BOLD)
@@ -143,6 +146,11 @@ impl Palette {
 
     pub const fn selected(mut self, style: Style) -> Self {
         self.selected = style;
+        self
+    }
+
+    pub const fn selection(mut self, style: Style) -> Self {
+        self.selection = style;
         self
     }
 
@@ -294,7 +302,7 @@ mod tests {
         Tone::Bad,
     ];
 
-    fn every(palette: &Palette) -> [Style; 17] {
+    fn every(palette: &Palette) -> [Style; 18] {
         [
             palette.base,
             palette.ink,
@@ -302,6 +310,7 @@ mod tests {
             palette.muted,
             palette.accent,
             palette.selected,
+            palette.selection,
             palette.good,
             palette.warn,
             palette.bad,
@@ -340,6 +349,10 @@ mod tests {
         assert_eq!(palette.rule, lit_bold);
         assert_eq!(palette.title, lit_bold);
         assert_eq!(palette.focus, lit_bold.add_modifier(Modifier::REVERSED));
+        assert_eq!(
+            palette.selection,
+            Style::new().add_modifier(Modifier::REVERSED)
+        );
         assert_eq!(palette.bar, None);
         assert_eq!(palette.count, None);
         assert!(!palette.mono);
@@ -378,6 +391,7 @@ mod tests {
         assert!(has(palette.muted, Modifier::DIM));
         assert!(has(palette.accent, Modifier::BOLD));
         assert!(has(palette.selected, Modifier::REVERSED));
+        assert!(has(palette.selection, Modifier::REVERSED));
         assert!(has(palette.good, Modifier::BOLD));
         assert!(has(palette.warn, Modifier::BOLD | Modifier::UNDERLINED));
         assert!(has(palette.bad, Modifier::REVERSED));
@@ -475,13 +489,14 @@ mod tests {
             .fg(Color::Magenta)
             .add_modifier(Modifier::ITALIC);
         let base = Palette::new(ACCENT);
-        let set: [(Palette, Pick); 17] = [
+        let set: [(Palette, Pick); 18] = [
             (base.base(style), |p| p.base),
             (base.ink(style), |p| p.ink),
             (base.strong(style), |p| p.strong),
             (base.muted(style), |p| p.muted),
             (base.accent(style), |p| p.accent),
             (base.selected(style), |p| p.selected),
+            (base.selection(style), |p| p.selection),
             (base.good(style), |p| p.good),
             (base.warn(style), |p| p.warn),
             (base.bad(style), |p| p.bad),
@@ -524,6 +539,7 @@ mod tests {
             .inactive(Style::new().fg(Color::Indexed(15)))
             .focus(Style::new().fg(Color::Indexed(16)))
             .small(Style::new().fg(Color::Indexed(17)))
+            .selection(Style::new().fg(Color::Indexed(18)))
     }
 
     #[test]

@@ -630,6 +630,15 @@ impl<E: Send + 'static> Tui<E> {
     }
 
     pub fn draw(&mut self, frame: &mut Frame) {
+        self.compose(frame);
+        let buffer = frame.buffer_mut();
+        if let Some(text) = self.selection.take(buffer) {
+            self.clipped = Some(text);
+        }
+        self.selection.paint(buffer, self.drawn.selection);
+    }
+
+    fn compose(&mut self, frame: &mut Frame) {
         let area = frame.area();
         let palette = self.drawn;
         frame.render_widget(Block::new().style(palette.base), area);

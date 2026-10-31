@@ -3,11 +3,15 @@ use std::io::{self, Write};
 pub const COPY_MAX: usize = 48 * 1024;
 
 pub fn copy(text: &str) -> bool {
-    if text.len() > COPY_MAX {
+    let Some(sequence) = osc52(text) else {
         return false;
-    }
+    };
     let mut out = io::stdout();
-    write!(out, "\x1b]52;c;{}\x07", base64(text.as_bytes())).is_ok() && out.flush().is_ok()
+    out.write_all(sequence.as_bytes()).is_ok() && out.flush().is_ok()
+}
+
+pub fn osc52(text: &str) -> Option<String> {
+    (text.len() <= COPY_MAX).then(|| format!("\x1b]52;c;{}\x07", base64(text.as_bytes())))
 }
 
 pub fn base64(bytes: &[u8]) -> String {
@@ -111,6 +115,15 @@ mod tests {
         }
         let reversed: Vec<u8> = (0..=255).rev().collect();
         assert_eq!(decode(&base64(&reversed)), reversed);
+    }
+
+    #[test]
+    fn osc52_wraps_the_base64_text_up_to_the_limit_and_refuses_past_it() {
+        assert_eq!(osc52("hi").as_deref(), Some("\x1b]52;c;aGk=\x07"));
+        assert_eq!(osc52("").as_deref(), Some("\x1b]52;c;\x07"));
+        let full = osc52(&"a".repeat(COPY_MAX)).unwrap();
+        assert!(full.starts_with("\x1b]52;c;YWFh") && full.ends_with('\x07'));
+        assert_eq!(osc52(&"a".repeat(COPY_MAX + 1)), None);
     }
 
     #[test]

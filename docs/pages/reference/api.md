@@ -14,6 +14,8 @@ The header, footer, hourglass and list each have an API page of their own:
 [the hourglass](../../api/pito_tui/hourglass/index.html) and
 [the list](../../list/reference/api/); the keymap's is in the sketch below,
 and [Keys](../../keys/) shows it in use.
+[Select and copy text](../../guides/selection/) shows `Selection` in the
+shell and on a loop of its own.
 
 ```text
 Tui::new(name, version, accent: Color) -> Tui<E>          // E: the app's worker answers
@@ -24,7 +26,7 @@ Tui::new(name, version, accent: Color) -> Tui<E>          // E: the app's worker
   .nav_keys(NavKeys) .help(Option<Help>) .quit(Mode) .quit_window(Duration)
   .quit_keys(&[footer::Key]) .quit_sticky(bool) .quit_tone(footer::Tone) .quit_hints(bool)
   .stop_keys(&[footer::Key]) .eager(bool) .keep_facts(bool)
-  .modes(Modes) .activities(Activities) .overlay(header::Section, &[footer::Key], impl Screen<E>)
+  .modes(Modes) .select(bool) .clipboard(impl select::Clip) .activities(Activities) .overlay(header::Section, &[footer::Key], impl Screen<E>)
   .app(impl Screen<E>) .gate(impl Screen<E>, shut: bool)
   .band(impl Band) .top_band(impl Band) .lit_again(bool) .through_keys(&[footer::Key])
   .header_look(fn(Header) -> Header) .footer_look(fn(Footer, width: u16) -> Footer)
@@ -36,7 +38,7 @@ Tui::new(name, version, accent: Color) -> Tui<E>          // E: the app's worker
   changed(source), go(screen) -> bool, start() -> Flow  // a quit from go comes back from start, settle or the next wake
   pump(), settle() -> Flow, advance(Duration) -> Flow, draw(&mut Frame), busy(), current(), names()
   find::<T>(), find_mut::<T>(), sender(), waker(screen), set_palette(..), set_words(..), set_layout(..)
-  set_keys_now(keys::Now), sheet() -> &keys::Sheet
+  set_keys_now(keys::Now), sheet() -> &keys::Sheet, selection() -> &Selection
   frame(w, h) -> Buffer, shot(w, h, &[KeyEvent], settle) -> Buffer, bench(w, h, frames) -> Vec<Bench>
 pub enum Flow { Stay, Quit }
 
@@ -64,6 +66,7 @@ pub trait Screen<E>: Any {                                 // every method but d
   fn left(&self, room: u16, help: Option<&str>) -> Option<Vec<(String, Style)>>;  // the whole left side
   fn notice(&self) -> Option<Notice>;  fn legend(&self) -> Option<&str>;
   fn typing(&self) -> bool;
+  fn drags(&self) -> bool;                                 // true: a press over its area starts no selection
   fn input(&self) -> Option<InputBar>;  fn crumb(&self) -> Option<String>;
   fn selected(&self) -> usize;  fn busy(&self) -> usize;
   fn animating(&self) -> bool;  fn deadline(&self) -> Option<Instant>;
@@ -151,17 +154,26 @@ keys::Panel::new() .still(bool)                            // the ? sheet drawn:
 keys::Chord::parse(text) -> Result<Chord, Unknown>, from_crossterm(&KeyEvent) -> Option<Chord>,
   new(Key, Mods), plain(Key), char(c), ctrl(c);  footer::Hint::from(keys::Hint)
 Palette::new(accent: Color)                                // every token a pub field and a builder
-  .base .ink .strong .muted .accent .selected .good .warn .bad .rule .line .glass .shimmer
+  .base .ink .strong .muted .accent .selected .selection .good .warn .bad .rule .line .glass .shimmer
   .title .inactive .focus .small (Style)  .bar(Option<list::Bar>) .count(Option<list::Count>)
   mono(), tone(Tone) -> Style, header() -> header::Styles, footer() -> footer::Styles,
   list() -> list::Styles, view(&mut List, &[Column]) -> ListView, hourglass(elapsed, label, hint) -> Hourglass
 Words::new()                                               // every word empty until the app sets it
-  .help .again .yes .no .choose .leave .too_small .waiting (text)  .busy(Fn(usize) -> String)
+  .help .again .yes .no .choose .leave .too_small .waiting .copied (text)  .busy(Fn(usize) -> String)
 
 Term::enter(Modes) -> io::Result<Term>                     // restored on drop and on a UI-thread panic
 restore() -> bool                                          // any thread, once: true if it gave the terminal back
   terminal(), modes(), draw(FnOnce(&mut Frame)), mouse(bool)
 Modes::new()  .alternate(true) .paste(true) .mouse(false) .focus(false)
+Selection::new()                                           // the shell's own, or an own loop's
+  feed(MouseEvent) -> select::Fed, clear(), shown(), dragging(), range() -> Option<(Position, Position)>,
+  take(&Buffer) -> Option<String>, text(&Buffer) -> String, paint(&mut Buffer, Style)
+pub enum select::Fed { Pass, Press, Click, Drag, Done }    // Drag and Done are the selection's; after Done, take at the next draw
+select::send(text, &mut dyn select::Clip) -> bool         // OSC 52 up to COPY_MAX, then the clipboard command
+pub trait select::Clip { fn osc(&mut self, sequence: &str); fn command(&mut self, text: &str); }
+select::System::new()                                      // stdout, and Tool::find() on the first copy
+select::Tool { program, args }  find(), pick(os, wayland, x11, Fn(&str) -> bool), bytes(text), spawn(text)
+  Tool::PBCOPY, CLIP, WL_COPY, XCLIP, XSEL
 Pace, FRAME (8.333 ms), wait_until(now, dirty, &Pace, deadlines)
 pub enum Wake<E> { Input(Event), Lost(io::Error), Event(screen, E), Loaded(screen, generation, E), Activity(Activity),
   Command(screen, command::Report),                        // a command's lines and exit, from the shell's runner
