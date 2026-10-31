@@ -11,10 +11,10 @@ deploy = ""
 
 [[test_track.jobs]]
 name = "gate"
-command = "bin/gate"
-host = "os:linux"
+command = "bin/gate --shard {shard}/{shards}"
+split = true
 
 [[test_track.jobs]]
-name = "mac"
-command = "bin/gate --fast"
-host = "os:macos"
+name = "signals-linux-only"
+command = "cargo nextest run --all-features --no-tests=pass --test signals"
+needs = ["os:linux"]
