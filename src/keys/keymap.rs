@@ -272,6 +272,7 @@ pub struct Keymap<A> {
     words: Words,
     ranked: Vec<Ranked>,
     anywhere: Vec<Spot>,
+    help_rank: u8,
 }
 
 impl<A> Default for Keymap<A> {
@@ -294,6 +295,7 @@ impl<A> Keymap<A> {
             words: Words::default(),
             ranked: Vec::new(),
             anywhere: Vec::new(),
+            help_rank: 0,
         };
         keymap.words(Words::default())
     }
@@ -320,6 +322,11 @@ impl<A> Keymap<A> {
     pub fn joiner(mut self, joiner: impl Into<Text>) -> Self {
         self.joiner = joiner.into();
         self.settle();
+        self
+    }
+
+    pub fn help_rank(mut self, rank: u8) -> Self {
+        self.help_rank = rank;
         self
     }
 
@@ -419,7 +426,7 @@ impl<A> Keymap<A> {
             if !now.holds(bind.when) || skip(bind) {
                 continue;
             }
-            if bind.rank > 0
+            if bind.rank > self.help_rank
                 && let Some(help) = help.take()
             {
                 put(help, true);
@@ -511,7 +518,7 @@ impl<A> Keymap<A> {
         Hint {
             keys: self.help.binds[0].keys.as_str(),
             does: &self.words.hint,
-            rank: 0,
+            rank: self.help_rank,
         }
     }
 

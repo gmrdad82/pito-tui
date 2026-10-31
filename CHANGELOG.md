@@ -4,6 +4,12 @@ Every release of pito-tui, newest first. Versions follow [Semantic
 Versioning](https://semver.org/): from 1.0.0 on, only a change in the first
 number may break an app; the middle number adds, the last one fixes.
 
+## v2.4.0 — 2026-10-31
+
+### Added
+
+- `Keymap::help_rank(rank)` sets where the footer's `? help` sits among the keymap's hints: after every shown bind ranked `rank` or lower and before the first ranked higher. The default, 0, keeps today's place; `u8::MAX` puts it last, as pito-tui 1.x footers show it. It stays pinned, so it never drops for width while `?` opens the sheet; the open sheet's footer and `Keymap::hints` follow the same place, and the help hint carries that rank. A steady frame still allocates nothing.
+
 ## v2.3.0 — 2026-10-31
 
 ### Added

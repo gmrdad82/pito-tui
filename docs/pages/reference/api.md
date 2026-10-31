@@ -139,7 +139,7 @@ capture::Recorder::new(dir) -> io::Result<Recorder>        // frames from an app
 capture::Recorder::against(dir) -> io::Result<Recorder>    // the same frames compared with a capture instead
   .screen(index, name, &Buffer) .record(script name, &Buffer) -> io::Result<()>, frames(), finish() -> io::Result<Vec<Difference>>
 
-keys::Keymap::new() .modes(&[Mode]) .group(name, [Bind]) .words(keys::Words) .joiner(text)
+keys::Keymap::new() .modes(&[Mode]) .group(name, [Bind]) .words(keys::Words) .joiner(text) .help_rank(u8)
   action(Now, Chord) -> Option<&A>, hints(Now) -> Vec<keys::Hint>, ticker(Now) -> Vec<keys::Line>,
   clashes() -> Vec<Clash>, button(), groups(), order()
 keys::bind(keys, does, action) .on(Mode) .modes(&[Mode]) .when(When) .shown(text) .note(text) .rank(u8) .quiet()
