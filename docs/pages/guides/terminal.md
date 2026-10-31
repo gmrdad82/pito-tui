@@ -9,8 +9,10 @@ sidebar:
 
 `Tui::run` enters the terminal through `Term`: raw mode, the alternate screen
 and bracketed paste, plus mouse capture and focus events only when the app
-asks with `Tui::modes(Modes::new().mouse(true))`. `Term` remembers each one it
-turned on, and turns exactly those off again:
+asks with `Tui::modes(Modes::new().mouse(true))`; with mouse capture on, a
+drag selects and copies text through the shell instead of the terminal
+([Select and copy text](../selection/)). `Term` remembers each one it turned
+on, and turns exactly those off again:
 
 - on quit, and when `run` returns an error;
 - on a panic on the UI thread, before the panic message prints;

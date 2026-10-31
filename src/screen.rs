@@ -141,6 +141,10 @@ pub trait Screen<E>: Any {
         false
     }
 
+    fn drags(&self) -> bool {
+        false
+    }
+
     fn input(&self) -> Option<InputBar<'_>> {
         None
     }
