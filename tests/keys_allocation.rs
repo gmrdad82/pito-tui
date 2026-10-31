@@ -268,10 +268,12 @@ fn a_steady_frame_with_the_help_hint_ranked_last_allocates_nothing() {
             let row = shown
                 .lines()
                 .find(|row| row.contains("? help"))
-                .unwrap_or_default();
+                .unwrap_or_default()
+                .trim_end()
+                .trim_end_matches("steady v1.0.0")
+                .trim_end();
             assert!(
-                row.trim_end().ends_with("right keeps · ? help")
-                    || row.trim_end().ends_with("ctrl+z undoes · ? help"),
+                row.ends_with("right keeps · ? help") || row.ends_with("ctrl+z undoes · ? help"),
                 "{shown}"
             );
         }
