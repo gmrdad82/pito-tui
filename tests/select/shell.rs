@@ -52,9 +52,15 @@ fn a_drag_across_rows_copies_them_joined_by_new_lines() {
     let before = tui.frame(SIZE.0, SIZE.1);
     let (beta, _) = ends(&before, "beta");
     let (start, _) = ends(&before, "epsilon");
+    let (gamma, _) = ends(&before, "gamma delta");
+    assert_eq!(gamma.0, start.0);
     sweep(&mut tui, beta, (start.0 + 2, start.1));
     tui.frame(SIZE.0, SIZE.1);
-    assert_eq!(sink.sent(), copied("beta\ngamma delta\neps"));
+    let gutter = " ".repeat(usize::from(start.0));
+    assert_eq!(
+        sink.sent(),
+        copied(&format!("beta\n{gutter}gamma delta\n{gutter}eps"))
+    );
 }
 
 #[test]
