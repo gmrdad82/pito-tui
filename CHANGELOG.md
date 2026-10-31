@@ -4,6 +4,17 @@ Every release of pito-tui, newest first. Versions follow [Semantic
 Versioning](https://semver.org/): from 1.0.0 on, only a change in the first
 number may break an app; the middle number adds, the last one fixes.
 
+## v2.3.0 — 2026-10-31
+
+### Added
+
+- Text selection in every app that captures the mouse: a drag with the left button selects any drawn cells (the screen, the header, the footer, lists, logs, modals, toasts, the `?` sheet), highlights them while the button is held and until the next press or key, and copies them on release. On by default on `Tui`; `Tui::select(false)` turns it off. A press still reaches the screen, and a press and release on one cell is a click as before; once the pointer moves a cell, the drag and release are the selection's. Shift-drag is left to the terminal.
+- `pito_tui::select`, usable on any loop: `Selection` (`feed(MouseEvent) -> Fed`, `take`, `text`, `paint`, `range`, `clear`) streams like a terminal from the pressed cell to the released one with whole rows between, reads wide glyphs once, keeps combining marks, trims each row's trailing blanks and joins rows with new lines; a steady frame with a selection shown allocates nothing.
+- Copy on release through OSC 52 (up to `COPY_MAX`) and the platform's clipboard command when one is on `PATH` (`pbcopy`, `clip.exe`, `wl-copy`, `xclip -selection clipboard`, `xsel --clipboard --input`), spawned on a thread of its own with no window. `select::Clip` is the sink, `select::System` the real clipboard, `Tui::clipboard(sink)` swaps it, and `select::send` sends one text.
+- `Screen::drags`: a screen that answers `true` keeps its own drags, and a press over its area starts no selection.
+- `Palette::selection`, the highlight, reversed by default (a cell that is already reversed flips back); `Words::copied`, a toast after each copy, empty by default; `Tui::selection()`.
+- `examples/select_demo.rs`: scenery, a list and a log with mouse capture; `--dump WxH drag C,R C,R` prints one frame with the highlight and the copied text.
+
 ## v2.2.1 — 2026-10-31
 
 ### Fixed

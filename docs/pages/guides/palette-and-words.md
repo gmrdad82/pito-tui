@@ -11,9 +11,11 @@ sidebar:
 
 `Tui::new(name, version, accent)` derives every style the header, footer,
 list and hourglass draw with from the accent. `Palette` also takes each token
-by hand: `base`, `ink`, `strong`, `muted`, `accent`, `selected`, `good`,
-`warn`, `bad`, `rule`, `line`, `glass`, `shimmer`, `title`, `inactive`,
-`focus` and `small`, each a ratatui `Style`.
+by hand: `base`, `ink`, `strong`, `muted`, `accent`, `selected`,
+`selection`, `good`, `warn`, `bad`, `rule`, `line`, `glass`, `shimmer`,
+`title`, `inactive`, `focus` and `small`, each a ratatui `Style`.
+`selection` is the highlight of a mouse selection, reversed by default
+([Select and copy text](../selection/)).
 
 ```rust
 fn palette(accent: Color) -> Palette {
@@ -77,6 +79,7 @@ Words::new()
     .leave("y quit · n stay")
     .too_small("Make the window at least 40 × 12")
     .waiting("esc stops waiting")
+    .copied("Copied")
 ```
 
 | Word | Where it shows |
@@ -89,6 +92,7 @@ Words::new()
 | `leave` | the quit question's hint line (falls back to `choose`) |
 | `too_small` | the message when the window is under `min_size` (40 × 12 by default) |
 | `waiting` | the hint under the hourglass |
+| `copied` | a toast after a mouse selection is copied |
 
 `Cx::words(..)` swaps them while the app runs, a language change, say. The
 activity band and screen take theirs from `Activities`

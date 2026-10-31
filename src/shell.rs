@@ -14,7 +14,7 @@ use crate::header::{Action, Group, Header, Nav, NavKeys, Section, Step as Move};
 use crate::keys::{self, Chord, Keymap, Map, Now, Panel, Sheet, When};
 use crate::list::Step;
 use crossterm::event::{Event, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
-use ratatui::layout::Rect;
+use ratatui::layout::{Position, Rect};
 use ratatui::style::{Color, Style};
 
 use crate::activity::{Activities, Activity, Board, Change, State};
@@ -28,6 +28,7 @@ use crate::model::{Item, Model};
 use crate::pace::{Pace, wait_until};
 use crate::palette::Palette;
 use crate::screen::{Band, Cx, Job, Outbox, Phase, Screen};
+use crate::select::{self, Clip, Fed, Selection, System};
 use crate::signal;
 use crate::term::{Modes, Term, restore};
 use crate::wake::{Wake, Waker, listen};
@@ -157,6 +158,10 @@ pub struct Tui<E> {
     pub(crate) delay: Duration,
     pub(crate) least: Duration,
     pub(crate) version_fit: bool,
+    select: bool,
+    pub(crate) selection: Selection,
+    clip: Box<dyn Clip>,
+    pub(crate) clipped: Option<String>,
 }
 
 impl<E: Send + 'static> Tui<E> {
@@ -234,6 +239,10 @@ impl<E: Send + 'static> Tui<E> {
             delay: Duration::ZERO,
             least: Duration::ZERO,
             version_fit: false,
+            select: true,
+            selection: Selection::new(),
+            clip: Box::new(System::new()),
+            clipped: None,
         };
         tui.rearm();
         tui
@@ -516,6 +525,21 @@ impl<E: Send + 'static> Tui<E> {
         self
     }
 
+    pub fn select(mut self, on: bool) -> Self {
+        self.select = on;
+        self.selection.clear();
+        self
+    }
+
+    pub fn clipboard(mut self, sink: impl Clip + 'static) -> Self {
+        self.clip = Box::new(sink);
+        self
+    }
+
+    pub fn selection(&self) -> &Selection {
+        &self.selection
+    }
+
     pub fn modes(mut self, modes: Modes) -> Self {
         self.modes = modes;
         self
@@ -701,6 +725,7 @@ impl<E: Send + 'static> Tui<E> {
         if key.kind == KeyEventKind::Release {
             return Flow::Stay;
         }
+        self.selection.clear();
         self.pressed = Some(key);
         let flow = self.route(key);
         self.pressed = None;
@@ -1078,6 +1103,9 @@ impl<E: Send + 'static> Tui<E> {
     }
 
     pub fn mouse(&mut self, mouse: MouseEvent) -> Flow {
+        if matches!(self.choose(mouse), Fed::Drag | Fed::Done) {
+            return Flow::Stay;
+        }
         if self.out.takeover.is_some() || !self.out.modals.is_empty() || self.panel.is_open() {
             return Flow::Stay;
         }
@@ -1113,6 +1141,44 @@ impl<E: Send + 'static> Tui<E> {
         let area = self.content;
         self.call(index, |screen, cx| screen.mouse(mouse, area, cx));
         self.apply()
+    }
+
+    fn choose(&mut self, mouse: MouseEvent) -> Fed {
+        if !self.select {
+            return Fed::Pass;
+        }
+        if mouse.kind == MouseEventKind::Down(MouseButton::Left)
+            && self.drags_at(Position::new(mouse.column, mouse.row))
+        {
+            self.selection.clear();
+            return Fed::Pass;
+        }
+        self.selection.feed(mouse)
+    }
+
+    fn drags_at(&self, at: Position) -> bool {
+        self.out.takeover.is_none()
+            && self.out.modals.is_empty()
+            && !self.panel.is_open()
+            && self.content.contains(at)
+            && self
+                .current()
+                .and_then(|index| self.screens.get(index))
+                .is_some_and(|slot| slot.screen.drags())
+    }
+
+    pub(crate) fn deliver(&mut self) -> bool {
+        let Some(text) = self.clipped.take() else {
+            return false;
+        };
+        if !select::send(&text, self.clip.as_mut()) {
+            return false;
+        }
+        if !self.words.copied.is_empty() {
+            let toast = Toast::new(self.words.copied.clone());
+            self.toasts.push((self.moment + toast.lasting, toast));
+        }
+        true
     }
 
     fn click(&mut self, kind: Row, line: Rect, column: u16) {
@@ -1682,7 +1748,7 @@ impl<E: Send + 'static> Tui<E> {
                 let began = Instant::now();
                 term.draw(|frame| self.draw(frame))?;
                 pace.drew(moment);
-                dirty = false;
+                dirty = self.deliver();
                 if let Some(after) = self.after.as_mut() {
                     after(began.elapsed());
                 }

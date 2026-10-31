@@ -15,6 +15,7 @@ pub struct Words {
     pub leave: Text,
     pub too_small: Text,
     pub waiting: Text,
+    pub copied: Text,
     pub busy: Arc<dyn Fn(usize) -> String + Send + Sync>,
 }
 
@@ -29,6 +30,7 @@ impl Words {
             leave: Cow::Borrowed(""),
             too_small: Cow::Borrowed(""),
             waiting: Cow::Borrowed(""),
+            copied: Cow::Borrowed(""),
             busy: Arc::new(|_| String::new()),
         }
     }
@@ -73,6 +75,11 @@ impl Words {
         self
     }
 
+    pub fn copied(mut self, text: impl Into<Text>) -> Self {
+        self.copied = text.into();
+        self
+    }
+
     pub fn busy(mut self, words: impl Fn(usize) -> String + Send + Sync + 'static) -> Self {
         self.busy = Arc::new(words);
         self
@@ -96,6 +103,7 @@ impl fmt::Debug for Words {
             .field("leave", &self.leave)
             .field("too_small", &self.too_small)
             .field("waiting", &self.waiting)
+            .field("copied", &self.copied)
             .finish_non_exhaustive()
     }
 }
@@ -104,7 +112,7 @@ impl fmt::Debug for Words {
 mod tests {
     use super::*;
 
-    fn fixed(words: &Words) -> [&str; 8] {
+    fn fixed(words: &Words) -> [&str; 9] {
         [
             &words.help,
             &words.again,
@@ -114,13 +122,14 @@ mod tests {
             &words.leave,
             &words.too_small,
             &words.waiting,
+            &words.copied,
         ]
     }
 
     #[test]
     fn the_shell_has_no_words_of_its_own() {
         for words in [Words::new(), Words::default()] {
-            assert_eq!(fixed(&words), [""; 8]);
+            assert_eq!(fixed(&words), [""; 9]);
             for busy in [0, 1, 7, usize::MAX] {
                 assert_eq!((words.busy)(busy), "");
             }
@@ -138,6 +147,7 @@ mod tests {
             Words::new().leave("leave"),
             Words::new().too_small("too small"),
             Words::new().waiting("waiting"),
+            Words::new().copied("copied"),
         ];
         let names = [
             "help",
@@ -148,6 +158,7 @@ mod tests {
             "leave",
             "too small",
             "waiting",
+            "copied",
         ];
         for (index, words) in set.iter().enumerate() {
             let shown = fixed(words);
