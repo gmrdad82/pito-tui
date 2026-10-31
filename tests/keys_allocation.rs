@@ -93,6 +93,20 @@ static KEYS: LazyLock<Keymap<u8>> = LazyLock::new(|| {
         )
 });
 
+static LAST: LazyLock<Keymap<u8>> = LazyLock::new(|| {
+    Keymap::new()
+        .modes(&[RAIL])
+        .group(
+            "Rail",
+            [
+                bind("right", "keeps", 0).on(RAIL),
+                bind("left", "drops", 1).on(RAIL).rank(1),
+                bind("ctrl+z", "undoes", 4).rank(2),
+            ],
+        )
+        .help_rank(u8::MAX)
+});
+
 struct Plain;
 
 impl Screen<()> for Plain {
@@ -233,6 +247,33 @@ fn a_steady_frame_over_a_typing_screen_allocates_nothing_with_or_without_help() 
             let (count, shown) = steady(&mut tui, width, height);
             assert_eq!(count, 0, "{lets} {keys} {width}x{height}");
             assert_eq!(shown.contains("? help"), lets, "{shown}");
+        }
+    }
+}
+
+#[test]
+fn a_steady_frame_with_the_help_hint_ranked_last_allocates_nothing() {
+    for keys in ["", "?"] {
+        for (width, height) in SIZES {
+            let mut tui = Tui::new("steady", "1.0.0", Color::Cyan)
+                .nav_keys(NavKeys::NONE)
+                .screen("Clips", Plain)
+                .keymap(&LAST)
+                .keys_now(Now::new(RAIL))
+                .still_sheet(true);
+            tui.start();
+            press(&mut tui, keys);
+            let (count, shown) = steady(&mut tui, width, height);
+            assert_eq!(count, 0, "{keys} {width}x{height}");
+            let row = shown
+                .lines()
+                .find(|row| row.contains("? help"))
+                .unwrap_or_default();
+            assert!(
+                row.trim_end().ends_with("right keeps · ? help")
+                    || row.trim_end().ends_with("ctrl+z undoes · ? help"),
+                "{shown}"
+            );
         }
     }
 }

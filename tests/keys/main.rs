@@ -1,6 +1,7 @@
 mod chord;
 mod common;
 mod dumps;
+mod help_rank;
 mod hints;
 mod model;
 mod panel;

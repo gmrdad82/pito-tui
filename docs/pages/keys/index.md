@@ -107,6 +107,10 @@ hints and the open sheet follow. The shell holds one place for the whole app,
 so an app with several screens also calls `cx.keys_now(self.now())` from
 `Screen::entered`, and a tab back to a screen shows that screen's keys at
 once. Hints the app passes to `Tui::hints` still show, after the keymap's.
+A typing state, such as a search field or a rename, is best declared as a
+mode of its own, with the keys that act while typing (`enter saves`, `esc
+cancels`), and set with `cx.keys_now` when typing starts and ends: the
+footer's hints then follow what the keys really do while typing.
 
 ## The model
 
@@ -129,6 +133,13 @@ once. Hints the app passes to `Tui::hints` still show, after the keymap's.
   footer's priority, 0 first, as `footer::Hint::rank`; the footer drops the
   highest ranks first when the width runs out. **.quiet()**: on the sheet
   only, never in the footer.
+- **Keymap::help_rank(n)**: where `? help` sits among the footer's hints:
+  after every shown bind ranked `n` or lower, before the first ranked
+  higher. The default, 0, puts it after the rank-0 binds; `u8::MAX` puts it
+  last, where pito-tui 1.x footers show it, so an app moving to the keymap
+  keeps the footer its users know. Wherever it sits it never drops for
+  width, and the open sheet's footer and `keys.hints(now)` keep the same
+  place.
 - **Now { mode, when }**: where the app is: `Now::new(CUT).when(&[PLAYING])`.
 
 ## What it answers
