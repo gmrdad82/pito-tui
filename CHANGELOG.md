@@ -57,10 +57,9 @@ number may break an app; the middle number adds, the last one fixes.
 
 ### Changed
 
-- Lists move half a page on ctrl+d and ctrl+u with `pito_tui::list::Keys::new()`. An app that reads ctrl+d or ctrl+u itself while a list has focus no longer gets them: the list used to pass them on with `Step::Pass`, and now it takes them.
+- Lists move half a page on ctrl+d and ctrl+u with `pito_tui::list::Keys::new()`. An app that reads ctrl+d or ctrl+u itself while a list has focus no longer gets them: the list used to pass them on with `pito_tui::list::Step::Pass`, and now it takes them.
 - `pito_tui::list::Keys::VIM`'s ctrl+d and ctrl+u move half a page instead of a whole page. Page Down and Page Up still move a whole page.
 - The list demo (`cargo run --example list_demo`) names the half and whole page keys in its footer and puts "ctrl+c twice quit" right after the move keys, so an 80-column terminal keeps it.
-
 - The header, footer, hourglass and list are part of pito-tui: `pito_tui::header`, `pito_tui::footer`, `pito_tui::hourglass` and `pito_tui::list` are modules of the crate, with their tests, examples (`cargo run --example <module>_<name>`), renders, guides and images, and the four git dependencies on pito-header, pito-footer, pito-hourglass and pito-list are gone.
 - Every public path under `pito_tui::` is unchanged, so an app that imports through pito-tui builds as before.
 - An app that pinned pito-header, pito-footer, pito-hourglass or pito-list itself drops those lines for pito-tui's one line and imports through `pito_tui::header`, `pito_tui::footer`, `pito_tui::hourglass` and `pito_tui::list`. It no longer needs `features = ["crossterm"]`: the header's, footer's and list's `Key::from(crossterm::event::KeyEvent)` is always there.

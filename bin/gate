@@ -2,31 +2,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export CARGO_NET_GIT_FETCH_WITH_CLI=true
-fast=false
-slice=
-while [ $# -gt 0 ]; do
-  case $1 in
-    --fast) fast=true ;;
-    --shard)
-      slice=${2:?bin/gate: --shard takes N/M}
-      shift
-      ;;
-  esac
-  shift
-done
 cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
-if [ -n "$slice" ]; then
-  cargo nextest run --all-features --no-tests=pass --partition "count:$slice" -E 'not binary_id(pito-tui::signals)'
-  if [ "${slice%%/*}" != 1 ]; then
-    echo "gate shard $slice: green"
-    exit 0
-  fi
-else
-  cargo nextest run --all-features --no-tests=pass
-fi
+cargo nextest run --all-features --no-tests=pass
 cargo test --all-features --doc
-if $fast; then
+if [ "${1:-}" = --fast ]; then
   echo "fast gate: green"
 else
   cargo build --release --example demo
