@@ -1,5 +1,4 @@
 name = "pito-tui"
-mac_overflow = true
 
 [gate]
 fast = "cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings"
@@ -12,9 +11,3 @@ deploy = ""
 [[test_track.jobs]]
 name = "gate"
 command = "bin/gate"
-needs = ["os:linux"]
-
-[[test_track.jobs]]
-name = "mac"
-command = "bin/gate --fast"
-needs = ["os:macos"]
