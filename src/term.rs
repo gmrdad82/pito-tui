@@ -170,14 +170,22 @@ fn turn_on(modes: Modes) -> io::Result<()> {
     ON.fetch_or(RAW, Ordering::SeqCst);
     switch(&ON, ALTERNATE, &mut out, modes.alternate)?;
     #[cfg(not(windows))]
-    if modes.alternate && modes.wheel_keys {
-        ON.fetch_or(WHEEL, Ordering::SeqCst);
+    {
+        ON.fetch_or(wheel_flag(modes), Ordering::SeqCst);
+        switch(&ON, KEYS, &mut out, modes.alternate)?;
     }
-    #[cfg(not(windows))]
-    switch(&ON, KEYS, &mut out, modes.alternate)?;
     switch(&ON, PASTE, &mut out, modes.paste)?;
     switch(&ON, MOUSE, &mut out, modes.mouse)?;
     switch(&ON, FOCUS, &mut out, modes.focus)
+}
+
+#[cfg(not(windows))]
+pub(crate) const fn wheel_flag(modes: Modes) -> u8 {
+    if modes.alternate && modes.wheel_keys {
+        WHEEL
+    } else {
+        0
+    }
 }
 
 pub(crate) fn drops_wheel(on: u8) -> bool {
@@ -373,6 +381,22 @@ mod tests {
         assert!(!drops_wheel(RAW | ALTERNATE));
         assert!(!drops_wheel(RAW | ALTERNATE | WHEEL));
         assert!(!drops_wheel(WHEEL));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn wheel_keys_are_asked_for_only_on_the_alternate_screen() {
+        assert_eq!(wheel_flag(Modes::new()), 0);
+        assert_eq!(wheel_flag(Modes::new().wheel_keys(true)), WHEEL);
+        assert_eq!(
+            wheel_flag(Modes::new().mouse(false).wheel_keys(true)),
+            WHEEL
+        );
+        assert_eq!(
+            wheel_flag(Modes::new().alternate(false).wheel_keys(true)),
+            0
+        );
+        assert_eq!(wheel_flag(Modes::new().alternate(false)), 0);
     }
 
     #[test]
