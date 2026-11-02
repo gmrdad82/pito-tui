@@ -164,7 +164,7 @@ Words::new()                                               // every word empty u
 Term::enter(Modes) -> io::Result<Term>                     // restored on drop and on a UI-thread panic
 restore() -> bool                                          // any thread, once: true if it gave the terminal back
   terminal(), modes(), draw(FnOnce(&mut Frame)), mouse(bool)
-Modes::new()  .alternate(true) .paste(true) .mouse(false) .focus(false)
+Modes::new()  .alternate(true) .paste(true) .mouse(false) .focus(false) .wheel_keys(false)
 Selection::new()                                           // the shell's own, or an own loop's
   feed(MouseEvent) -> select::Fed, clear(), shown(), dragging(), range() -> Option<(Position, Position)>,
   take(&Buffer) -> Option<String>, text(&Buffer) -> String, paint(&mut Buffer, Style)

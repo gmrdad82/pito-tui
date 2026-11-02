@@ -26,6 +26,7 @@ pub(crate) const PASTE: u8 = 4;
 pub(crate) const MOUSE: u8 = 8;
 pub(crate) const FOCUS: u8 = 16;
 pub(crate) const KEYS: u8 = 32;
+pub(crate) const WHEEL: u8 = 64;
 
 const SCROLL_OFF: &[u8] = b"\x1b[?1007l";
 const SCROLL_ON: &[u8] = b"\x1b[?1007h";
@@ -39,6 +40,7 @@ pub struct Modes {
     pub paste: bool,
     pub mouse: bool,
     pub focus: bool,
+    pub wheel_keys: bool,
 }
 
 impl Modes {
@@ -48,6 +50,7 @@ impl Modes {
             paste: true,
             mouse: false,
             focus: false,
+            wheel_keys: false,
         }
     }
 
@@ -68,6 +71,11 @@ impl Modes {
 
     pub const fn focus(mut self, on: bool) -> Self {
         self.focus = on;
+        self
+    }
+
+    pub const fn wheel_keys(mut self, on: bool) -> Self {
+        self.wheel_keys = on;
         self
     }
 }
@@ -134,7 +142,11 @@ fn switch(on: &AtomicU8, flag: u8, out: &mut impl Write, enable: bool) -> io::Re
         (ALTERNATE, false) => execute!(out, LeaveAlternateScreen)?,
         (KEYS, true) => {
             queue!(out, PushKeyboardEnhancementFlags(KEY_FLAGS))?;
-            out.write_all(SCROLL_OFF)?;
+            if on.load(Ordering::SeqCst) & WHEEL != 0 {
+                out.write_all(SCROLL_ON)?;
+            } else {
+                out.write_all(SCROLL_OFF)?;
+            }
             out.flush()?;
         }
         (KEYS, false) => {
@@ -158,14 +170,22 @@ fn turn_on(modes: Modes) -> io::Result<()> {
     ON.fetch_or(RAW, Ordering::SeqCst);
     switch(&ON, ALTERNATE, &mut out, modes.alternate)?;
     #[cfg(not(windows))]
+    if modes.alternate && modes.wheel_keys {
+        ON.fetch_or(WHEEL, Ordering::SeqCst);
+    }
+    #[cfg(not(windows))]
     switch(&ON, KEYS, &mut out, modes.alternate)?;
     switch(&ON, PASTE, &mut out, modes.paste)?;
     switch(&ON, MOUSE, &mut out, modes.mouse)?;
     switch(&ON, FOCUS, &mut out, modes.focus)
 }
 
-pub(crate) fn keys() -> bool {
-    ON.load(Ordering::SeqCst) & KEYS != 0
+pub(crate) fn drops_wheel(on: u8) -> bool {
+    on & (KEYS | WHEEL) == KEYS
+}
+
+pub(crate) fn wheel_dropped() -> bool {
+    drops_wheel(ON.load(Ordering::SeqCst))
 }
 
 fn live() -> bool {
@@ -305,6 +325,69 @@ mod tests {
             .expect("left the alternate screen");
         assert!(pop < scroll && scroll < leave, "{written:?}");
         assert_eq!(written.matches("\x1b[<1u").count(), 1, "{written:?}");
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn the_keyboard_flags_turn_alternate_scroll_off_by_default() {
+        let on = AtomicU8::new(RAW | ALTERNATE);
+        let mut out = Vec::new();
+        switch(&on, KEYS, &mut out, true).unwrap();
+        let written = String::from_utf8(out).unwrap();
+        assert!(written.contains("\x1b[?1007l"), "{written:?}");
+        assert!(!written.contains("\x1b[?1007h"), "{written:?}");
+        let push = written.find("\x1b[>").expect("pushed the keyboard flags");
+        assert!(written[push..].contains('u'), "{written:?}");
+        assert_eq!(on.load(Ordering::SeqCst), RAW | ALTERNATE | KEYS);
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn wheel_keys_keep_alternate_scroll_on_and_give_it_back_on_exit() {
+        let on = AtomicU8::new(RAW | ALTERNATE | WHEEL);
+        let mut out = Vec::new();
+        switch(&on, KEYS, &mut out, true).unwrap();
+        let written = String::from_utf8(out).unwrap();
+        assert!(written.contains("\x1b[?1007h"), "{written:?}");
+        assert!(!written.contains("\x1b[?1007l"), "{written:?}");
+        let push = written.find("\x1b[>").expect("pushed the keyboard flags");
+        assert!(written[push..].contains('u'), "{written:?}");
+        let mut back = Vec::new();
+        assert_eq!(undo(&on, &mut back, || {}), RAW | ALTERNATE | WHEEL | KEYS);
+        let written = String::from_utf8(back).unwrap();
+        assert_eq!(written.matches("\x1b[<1u").count(), 1, "{written:?}");
+        let scroll = written
+            .find("\x1b[?1007h")
+            .expect("gave alternate scroll back");
+        let leave = written
+            .find("\x1b[?1049l")
+            .expect("left the alternate screen");
+        assert!(scroll < leave, "{written:?}");
+        assert_eq!(on.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn the_wheel_is_dropped_only_while_the_flags_are_pushed_without_wheel_keys() {
+        assert!(drops_wheel(RAW | ALTERNATE | KEYS));
+        assert!(!drops_wheel(RAW | ALTERNATE | KEYS | WHEEL));
+        assert!(!drops_wheel(RAW | ALTERNATE));
+        assert!(!drops_wheel(RAW | ALTERNATE | WHEEL));
+        assert!(!drops_wheel(WHEEL));
+    }
+
+    #[test]
+    fn wheel_keys_are_off_by_default_and_the_builder_turns_only_them_on() {
+        assert!(!Modes::new().wheel_keys);
+        let modes = Modes::new().mouse(false).wheel_keys(true);
+        assert!(modes.wheel_keys);
+        assert_eq!(
+            modes,
+            Modes {
+                wheel_keys: true,
+                ..Modes::new()
+            }
+        );
+        assert_eq!(modes.wheel_keys(false), Modes::new());
     }
 
     #[test]

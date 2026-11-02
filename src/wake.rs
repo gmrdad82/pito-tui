@@ -92,7 +92,7 @@ pub fn listen<E: Send + 'static>(sender: Sender<Wake<E>>) -> JoinHandle<()> {
             let now = Instant::now();
             filter.expire(now, &mut out);
             let lost = match read {
-                Ok(Some(input)) if term::keys() => {
+                Ok(Some(input)) if term::wheel_dropped() => {
                     filter.feed(input, now, &mut out);
                     None
                 }
