@@ -33,6 +33,13 @@ captured, each wheel step still arrives as an arrow press and its release a
 few milliseconds later; the shell drops those pairs, so the wheel doesn't move
 a list like arrow keys. Real arrows and held keys are unchanged.
 
+`Modes::new().wheel_keys(true)` keeps alternate scroll on while the flags are
+pushed. With the mouse not captured, each wheel step then arrives as an arrow
+press, kitty's pairs too, and moves a list like the arrow keys, while a drag
+still selects text in the terminal. On exit alternate scroll is given back as
+before. With `mouse(true)` the terminal reports the wheel as mouse events, and
+`wheel_keys` changes nothing.
+
 ## An app's own panic hook
 
 A hook the app installs before `run` still runs, after the shell has given

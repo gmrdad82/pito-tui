@@ -16,7 +16,9 @@ clipboard on release.
 
 There is nothing to wire: every app on `Tui` that captures the mouse
 selects. An app that doesn't capture it gets no mouse events, so the
-terminal keeps its own selection and nothing changes.
+terminal keeps its own selection and nothing changes; it can still get the
+wheel as arrow keys with `Modes::wheel_keys(true)` (see [the
+terminal](../terminal/)).
 
 ```rust
 Tui::new("notes", env!("CARGO_PKG_VERSION"), accent)

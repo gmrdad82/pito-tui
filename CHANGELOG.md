@@ -4,6 +4,12 @@ Every release of pito-tui, newest first. Versions follow [Semantic
 Versioning](https://semver.org/): from 1.0.0 on, only a change in the first
 number may break an app; the middle number adds, the last one fixes.
 
+## v2.5.0 — 2026-11-02
+
+### Added
+
+- `Modes::wheel_keys(true)` keeps the terminal's alternate scroll on while the shell pushes the keyboard flags, so an app that leaves the mouse to the terminal (`mouse(false)`, a drag selects text) gets each wheel step as an arrow press, in kitty too, instead of no wheel at all; alternate scroll is given back on exit as before. Off by default; with mouse capture on it changes nothing.
+
 ## v2.4.0 — 2026-10-31
 
 ### Added
