@@ -37,13 +37,13 @@ With Rust installed, the same lines work on Linux, macOS and Windows:
 ```sh
 cargo new hello
 cd hello
-cargo add pito-tui --git https://github.com/gmrdad82/pito-tui --tag v2.4.0
+cargo add pito-tui --git https://github.com/gmrdad82/pito-tui --tag v2.5.0
 ```
 
 or by hand in `Cargo.toml`:
 
 ```toml
-pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v2.4.0" }
+pito-tui = { git = "https://github.com/gmrdad82/pito-tui", tag = "v2.5.0" }
 ```
 
 That one line brings ratatui 0.30 and crossterm 0.29, reachable as
@@ -262,6 +262,9 @@ event types and turns off its alternate scroll, so the wheel sends no arrows
 where the terminal honours that, and in kitty the wheel's arrow
 press-and-release pairs are dropped; either way the wheel doesn't move a list
 like arrow keys, and real arrows and held keys work as before.
+`Modes::new().wheel_keys(true)` keeps alternate scroll on instead: with the
+mouse not captured each wheel step arrives as an arrow press, in kitty too,
+and moves a list like the arrow keys; with `mouse(true)` it changes nothing.
 
 ### Select and copy with the mouse captured
 
@@ -363,7 +366,10 @@ and draw-time charts.
   the keyboard event-type flags and turns off alternate scroll, so the wheel
   sends no arrows where the terminal honours that, in kitty the wheel's arrow
   pairs are dropped, and the wheel doesn't move a list like arrow keys; real
-  arrows and held keys are unchanged. A panic on a worker thread leaves the
+  arrows and held keys are unchanged. With `Modes::new().wheel_keys(true)`
+  it keeps alternate scroll on, so with the mouse not captured each wheel
+  step arrives as an arrow press, in kitty too; with `mouse(true)` it
+  changes nothing. A panic on a worker thread leaves the
   running app alone. The app's own panic hook still runs after it, and a
   hook that ends the process calls `pito_tui::restore()` first: any thread
   may call it, the first call gives the terminal back and waits for a frame
@@ -820,7 +826,7 @@ Words::new()                                               // every word empty u
 Term::enter(Modes) -> io::Result<Term>                     // restored on drop and on a UI-thread panic
 restore() -> bool                                          // any thread, once: true if it gave the terminal back
   terminal(), modes(), draw(FnOnce(&mut Frame)), mouse(bool)
-Modes::new()  .alternate(true) .paste(true) .mouse(false) .focus(false)
+Modes::new()  .alternate(true) .paste(true) .mouse(false) .focus(false) .wheel_keys(false)
 Selection::new()                                           // the shell's own, or an own loop's
   feed(MouseEvent) -> select::Fed, clear(), shown(), dragging(), range() -> Option<(Position, Position)>,
   take(&Buffer) -> Option<String>, text(&Buffer) -> String, paint(&mut Buffer, Style)
@@ -2209,7 +2215,8 @@ clipboard on release.
 
 - **On by default** in every app on `Tui` that captures the mouse. An app
   that doesn't capture it gets no mouse events, so the terminal keeps its
-  own selection and nothing changes.
+  own selection and nothing changes; it can still get the wheel as arrow
+  keys with `Modes::wheel_keys(true)`.
 - **A click is still a click.** The press always reaches the screen; a
   press and release on the same cell reaches it whole. Once the pointer
   moves a cell, the drag and the release belong to the selection.
