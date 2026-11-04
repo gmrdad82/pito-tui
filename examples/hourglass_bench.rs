@@ -47,7 +47,7 @@ fn main() {
     println!("unit = \"NANOSECONDS PER DRAW\"");
     println!("better = \"lower\"");
     println!("suffix = \" NS\"");
-    println!("parties = [{{ name = \"PITO-HOURGLASS\" }}]");
+    println!("parties = [{{ name = \"PITO-TUI\" }}]");
     println!("rows = [");
     for (width, height, label) in CASES {
         let ns = nanos_per_draw(width, height);
