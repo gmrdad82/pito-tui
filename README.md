@@ -28,7 +28,7 @@ the app, in any language.
 
 Works on Linux, Windows and macOS.
 
-Got questions or doubts? Ping me on Discord: https://discord.gg/XsNcn3kYzn
+Got questions or doubts? Ping me on Discord: <https://discord.gg/XsNcn3kYzn>
 
 ## Install and first use
 
