@@ -4,6 +4,12 @@ Every release of pito-tui, newest first. Versions follow [Semantic
 Versioning](https://semver.org/): from 1.0.0 on, only a change in the first
 number may break an app; the middle number adds, the last one fixes.
 
+## v2.5.1 — 2026-11-05
+
+### Fixed
+
+- The hourglass draw-time chart and its performance guide name the party PITO-TUI, not PITO-HOURGLASS, now that the hourglass is a module of this crate.
+
 ## v2.5.0 — 2026-11-02
 
 ### Added
