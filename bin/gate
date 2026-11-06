@@ -2,13 +2,73 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export CARGO_NET_GIT_FETCH_WITH_CLI=true
+
+changed() {
+  { git diff --name-only main -- . 2>/dev/null; git ls-files --others --exclude-standard; } | sort -u
+}
+
+fast_tests() {
+  local files all=0 docs=0 lib=0 f name base
+  local -a targets=()
+  files=$(changed)
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    case "$f" in
+      Cargo.toml|Cargo.lock|bin/gate|rust-toolchain*|.cargo/*|build.rs) all=1 ;;
+      tests/*)
+        name=${f#tests/}; name=${name%%/*}; name=${name%.rs}
+        targets+=("$name") ;;
+      examples/*)
+        name=${f#examples/}; name=${name%%/*}; name=${name%.rs}
+        if grep -q "name = \"$name\"" Cargo.toml; then targets+=("$name"); fi ;;
+      src/*)
+        lib=1; docs=1
+        name=${f#src/}; name=${name%%/*}; name=${name%.rs}
+        base=0
+        for t in tests/"$name".rs tests/"$name"/main.rs tests/"$name"_*.rs; do
+          if [ -e "$t" ]; then
+            t=${t#tests/}; t=${t%%/*}; targets+=("${t%.rs}"); base=1
+          fi
+        done
+        if [ "$base" = 0 ] && [ "$name" != lib ] && ! grep -q "^#\[cfg(test)\]" "$f" 2>/dev/null; then all=1; fi
+        if [ "$name" = lib ]; then all=1; fi ;;
+      README.md|docs/pages/*) docs=1 ;;
+    esac
+  done <<< "$files"
+
+  if [ "$all" = 1 ]; then
+    echo "fast gate: shared config or core change, running every test"
+    cargo nextest run --all-features --no-tests=pass
+    cargo test --all-features --doc
+    return
+  fi
+  if [ "$lib" = 0 ] && [ "$docs" = 0 ] && [ "${#targets[@]}" = 0 ]; then
+    echo "fast gate: nothing testable changed, no tests run"
+    return
+  fi
+  if [ "$lib" = 1 ] || [ "${#targets[@]}" -gt 0 ]; then
+    local expr="" t
+    if [ "$lib" = 1 ]; then expr="kind(lib)"; fi
+    for t in $(printf '%s\n' "${targets[@]:-}" | sort -u); do
+      [ -n "$t" ] || continue
+      expr="${expr:+$expr | }binary($t)"
+    done
+    echo "fast gate: tests for $expr"
+    cargo nextest run --all-features --no-tests=pass -E "$expr"
+  fi
+  if [ "$docs" = 1 ]; then
+    cargo test --all-features --doc
+  fi
+}
+
 cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
-cargo nextest run --all-features --no-tests=pass
-cargo test --all-features --doc
 if [ "${1:-}" = --fast ]; then
+  fast_tests
   echo "fast gate: green"
 else
+  cargo nextest run --all-features --no-tests=pass
+  cargo test --all-features --doc
   cargo build --release --example demo
   echo "full gate: green"
 fi

@@ -2587,7 +2587,7 @@ with `crumb` naming where the user is.
 --all-features -- -D warnings`, the tests (`cargo nextest run`, then this
 README's examples, each widget's module page and the list's docs pages as
 doctests) and the release build of the demo.
-`bin/gate --fast` leaves the release build out. The tests are a safety net for what would hurt if it
+`bin/gate --fast` leaves the release build out and runs only the tests for what changed against main (every test when `Cargo.toml`, `Cargo.lock` or the gate changes). The tests are a safety net for what would hurt if it
 broke: the frame pacing, the terminal restore, the key order, the load
 generations and the dump formats. The header, footer, hourglass, list and
 keys keep their own tests in `tests/<module>/`, drawing through ratatui's
