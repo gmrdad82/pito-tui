@@ -1,8 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 src="$(cd "$(dirname "$0")/.." && pwd)/skills/pito-tui"
-for dir in "$HOME/.agents/skills" "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.pi/agent/skills"; do
+uninstall=0
+[ "${1:-}" = --uninstall ] && uninstall=1
+homes=("$HOME/.agents/skills" "$HOME/.claude/skills")
+[ -d "$HOME/.codex" ] && homes+=("$HOME/.codex/skills")
+[ -d "$HOME/.pi" ] && homes+=("$HOME/.pi/agent/skills")
+for dir in "${homes[@]}"; do
+  target="$dir/pito-tui"
+  if [ "$uninstall" = 1 ]; then
+    if [ -L "$target" ] && [ "$(readlink "$target")" = "$src" ]; then
+      rm "$target"
+      echo "removed $target"
+    fi
+    continue
+  fi
   mkdir -p "$dir"
-  ln -sfn "$src" "$dir/pito-tui"
-  echo "$dir/pito-tui -> $src"
+  if [ -e "$target" ] || [ -L "$target" ]; then
+    if [ ! -L "$target" ] || [ "$(readlink "$target")" != "$src" ]; then
+      if [ ! -L "$target" ] || ! case "$(readlink "$target")" in */skills/pito-tui) true ;; *) false ;; esac; then
+        echo "$target isn't pito-tui's own, left alone"
+        continue
+      fi
+    fi
+  fi
+  ln -sfn "$src" "$target"
+  echo "$target -> $src"
 done

@@ -106,5 +106,8 @@ fi
 [ "$broken" = 0 ] || exit 1
 
 tarball=$out/docs-$tag.tar.gz
-tar -czf "$tarball" -C "$stage" docs
+mkdir -p "$stage/skills" "$stage/bin"
+cp -R skills/pito-tui "$stage/skills/pito-tui"
+cp bin/link-skill bin/link-skill.ps1 "$stage/bin/"
+tar -czf "$tarball" -C "$stage" docs skills bin
 echo "$tarball"

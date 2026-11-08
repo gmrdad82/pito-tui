@@ -73,17 +73,30 @@ shell deletes that glue; the app's screens and data stay as they are.
 ## Let agents find the shell's skill
 
 pito-tui carries an agent skill, `skills/pito-tui`, for agents building on it. A git
-dependency lands in cargo's checkouts, where no agent looks, so each developer links it
-once from a checkout of the pinned tag:
+dependency lands in cargo's checkouts, where no agent looks, so each developer installs
+it once from a checkout of the pinned tag (or from the release archive, which carries
+the skill and both scripts):
 
 ```sh
 git clone --branch <tag> https://github.com/gmrdad82/pito-tui
 pito-tui/bin/link-skill
 ```
 
-`bin/link-skill` links the skill into `~/.agents/skills`, `~/.claude/skills`,
-`~/.codex/skills` and `~/.pi/agent/skills`. Run it again from a newer checkout after
-moving the pin.
+pito-tui ships no installed binary, so the skill is a developer install. On Linux and
+macOS `bin/link-skill` links the checkout's `skills/pito-tui`; on Windows
+`bin/link-skill.ps1` copies it (run it again after every update, as a copy goes stale).
+
+| Agent | Home |
+|---|---|
+| Claude Code | `~/.claude/skills` |
+| Codex | `~/.codex/skills`, only when `~/.codex` exists |
+| Pi | `~/.pi/agent/skills`, only when `~/.pi` exists |
+| Other agents | `~/.agents/skills` |
+
+On Windows the homes sit under `%USERPROFILE%`. A same-named folder that isn't
+pito-tui's own is left alone, with a line saying so. Run `bin/link-skill --uninstall`
+(or `bin/link-skill.ps1 -Uninstall`) to remove what the install placed. Run the install
+again from a newer checkout after moving the pin.
 
 ## Moving over, step by step
 
