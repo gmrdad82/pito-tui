@@ -70,6 +70,21 @@ shell deletes that glue; the app's screens and data stay as they are.
 | The too-small guard, a centred message, OSC 52, text helpers | `min_size` and `Words::too_small`, `message`, `Cx::copy`, `text` |
 | Dump size and key parsing, text and ANSI output, a bench loop | `dump::*`, `Tui::shot`, `Tui::bench` |
 
+## Let agents find the shell's skill
+
+pito-tui carries an agent skill, `skills/pito-tui`, for agents building on it. A git
+dependency lands in cargo's checkouts, where no agent looks, so each developer links it
+once from a checkout of the pinned tag:
+
+```sh
+git clone --branch <tag> https://github.com/gmrdad82/pito-tui
+pito-tui/bin/link-skill
+```
+
+`bin/link-skill` links the skill into `~/.agents/skills`, `~/.claude/skills`,
+`~/.codex/skills` and `~/.pi/agent/skills`. Run it again from a newer checkout after
+moving the pin.
+
 ## Moving over, step by step
 
 1. **One pin.** Put the pito-tui line from [Install](../../install/) in

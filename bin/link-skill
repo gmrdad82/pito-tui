@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+src="$(cd "$(dirname "$0")/.." && pwd)/skills/pito-tui"
+for dir in "$HOME/.agents/skills" "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.pi/agent/skills"; do
+  mkdir -p "$dir"
+  ln -sfn "$src" "$dir/pito-tui"
+  echo "$dir/pito-tui -> $src"
+done
