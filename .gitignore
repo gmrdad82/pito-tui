@@ -1,7 +1,8 @@
 tmp/
 target/
 node_modules/
-.claude/
+.claude/*
+!.claude/skills/
 /.dev/
 /AGENTS.md
 /CLAUDE.md
