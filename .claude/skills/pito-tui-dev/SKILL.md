@@ -36,7 +36,7 @@ Read the matching in-repo doc before changing the area:
 - **Generic building blocks only, no words of the shell's own, drawing reads the loop's moment.** An app's gap enters already rewritten as a general primitive (`AGENTS.md`).
 - **A steady frame allocates nothing.** The `tests/*_allocation.rs` fail on a new allocation in a draw path.
 - **No comments in code.** Keep dependencies few: `Cargo.toml` lists them all, `rustix` and `signal-hook` only for Unix. The crate builds on Linux, macOS and Windows, so Unix-only code stays behind `cfg(unix)`.
-- **This repo is public.** No private repo, internal path, person, price, key or plan in any tracked file, docs pages included (`bin/docs-bundle` refuses `/home/`, `/Users/` and `C:\Users`). A pre-push guard checks the tree for anything internal; its accepted findings are in `.public-allow`.
+- **This repo is public.** No private repo, internal path, person, price, key or plan in any tracked file, docs pages included (`bin/docs-bundle` refuses `/home/`, `/Users/` and `C:\Users`). A pre-push guard checks the tree and the pushed commits for anything internal. `.public-allow` clears only a private-marker line (one line per accepted finding, with its reason), never an agent-file path; a push the guard refuses is reported to the maintainer, not pushed around with `--no-verify`.
 - **Stage by name, never the ignored files above.** Commits are signed and end with the Co-Authored-By trailer. Never force-push, amend, rewrite history, stash, or checkout, reset or clean the maintainer's tree.
 - **Other repos get a Dispatch plan**, never a write: apps built on pito-tui are other repos.
 
