@@ -108,6 +108,7 @@ pub struct Header<'a> {
     closing: bool,
     notice: Option<Fact<'a>>,
     drill: Drill,
+    groups_always: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -138,6 +139,7 @@ impl<'a> Header<'a> {
             closing: false,
             notice: None,
             drill: Drill::Replace,
+            groups_always: false,
         }
     }
 
@@ -236,6 +238,11 @@ impl<'a> Header<'a> {
         self
     }
 
+    pub(crate) fn groups_always(mut self, always: bool) -> Self {
+        self.groups_always = always;
+        self
+    }
+
     pub fn height(&self) -> u16 {
         let replaced = self.replaced();
         u16::from(self.title.is_some())
@@ -264,10 +271,15 @@ impl<'a> Header<'a> {
     }
 
     fn bar(&self) -> NavBar<'a> {
-        NavBar::new(self.nav)
+        let bar = NavBar::new(self.nav)
             .styles(self.styles)
             .lit(self.lit)
-            .underline(self.underline)
+            .underline(self.underline);
+        if self.groups_always && !self.nav.groups().is_empty() {
+            bar.groups(true)
+        } else {
+            bar
+        }
     }
 
     fn rows(&self, area: Rect) -> Rows {

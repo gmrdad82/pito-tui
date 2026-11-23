@@ -281,7 +281,8 @@ impl<E: Send + 'static> Tui<E> {
             .title(Some(title))
             .left_pairs(left)
             .right_pairs(status)
-            .facts_pairs(facts);
+            .facts_pairs(facts)
+            .groups_always(self.groups_always);
         let header = match self.header_look {
             Some(look) => look(header),
             None => header,
@@ -440,7 +441,8 @@ impl<E: Send + 'static> Tui<E> {
                     self.title_rule(buf, at, &self.title, left, status);
                 }
                 Row::Groups => {
-                    if self.model.groups.len() < 2 {
+                    let groups = self.model.groups.len();
+                    if groups < 2 && !(self.groups_always && groups == 1) {
                         continue;
                     }
                     self.group_labels().draw(buf, at);

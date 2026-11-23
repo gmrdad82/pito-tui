@@ -4,6 +4,12 @@ Every release of pito-tui, newest first. Versions follow [Semantic
 Versioning](https://semver.org/): from 1.0.0 on, only a change in the first
 number may break an app; the middle number adds, the last one fixes.
 
+## v2.7.0 — 2026-11-24
+
+### Added
+
+- `Tui::groups_always(bool)` draws the groups row even when an app has only one group, so that group's name shows above the tabs the way several groups do, in the header module's own layout and in a `Head` with `Row::Groups`. Off by default, so every app looks exactly as before; with it on, focus and keys behave as with one group, and `tab` still steps sections.
+
 ## v2.6.0 — 2026-11-08
 
 ### Added

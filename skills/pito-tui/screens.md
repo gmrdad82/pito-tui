@@ -13,6 +13,7 @@ Tui::new("demo", VERSION, accent)
 - Tabs: `tab`/`shift+tab` move between groups, `]`/`[` between tabs, a digit goes to a
   tab, `esc` or `q` go back. `Tui::nav_keys(..)` changes them; `NavKeys::NONE` turns them off.
   `Tui::group(Group::new("Work"))` starts a group before its screens.
+- `Tui::groups_always(true)` draws the groups row for a lone group too, its name above the tabs; off by default, and `tab` still steps sections.
 - Header and footer: `facts` (row under the tabs), `hints` (`Hint::new("↑↓", "scroll")`,
   higher `.rank(n)` dropped first, `.pinned()` stays), `status_parts(room)`, `lead(room)`,
   `badge()`, `notice`, `Cx::say(text, tone)`. `fact_spans()` and `hint_list()` are the

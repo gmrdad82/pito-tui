@@ -25,7 +25,7 @@ Tui::new(name, version, accent: Color) -> Tui<E>          // E: the app's worker
   .layout(Layout) .role(name, Style) .monochrome(bool) .hourglass_timing(delay, least) .version_fit(bool)
   .nav_keys(NavKeys) .help(Option<Help>) .quit(Mode) .quit_window(Duration)
   .quit_keys(&[footer::Key]) .quit_sticky(bool) .quit_tone(footer::Tone) .quit_hints(bool)
-  .stop_keys(&[footer::Key]) .eager(bool) .keep_facts(bool)
+  .stop_keys(&[footer::Key]) .eager(bool) .keep_facts(bool) .groups_always(bool)
   .modes(Modes) .select(bool) .clipboard(impl select::Clip) .activities(Activities) .overlay(header::Section, &[footer::Key], impl Screen<E>)
   .app(impl Screen<E>) .gate(impl Screen<E>, shut: bool)
   .band(impl Band) .top_band(impl Band) .lit_again(bool) .through_keys(&[footer::Key])
@@ -209,7 +209,8 @@ with `?` to hide them (with no keymap; with one, `?` opens the sheet),
 quits on a double `ctrl+c` within 2 s and asks first
 while any screen is busy (`Mode::Ask`), stops a load on `esc`, reads a screen
 the first time it is shown (`eager(true)` reads them all at start), hides the
-facts row while a screen is drilled in (`keep_facts(true)` keeps it), has no
+facts row while a screen is drilled in (`keep_facts(true)` keeps it), draws no groups row for a lone
+group (`groups_always(true)` draws it above the tabs), has no
 activity band or screen until the app gives it `Activities` (the band then
 shows unless `band(false)`) or its own `Band`, lights the quit word in the
 accent over an input bar or a confirm (`lit_again`), lets no key past an open

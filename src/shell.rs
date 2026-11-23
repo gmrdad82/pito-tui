@@ -136,6 +136,7 @@ pub struct Tui<E> {
     pub(crate) quit_hints: bool,
     eager: bool,
     pub(crate) keep_facts: bool,
+    pub(crate) groups_always: bool,
     pub(crate) lit_again: bool,
     pub(crate) out: Outbox<E>,
     pub(crate) inbox: Receiver<Wake<E>>,
@@ -216,6 +217,7 @@ impl<E: Send + 'static> Tui<E> {
             quit_hints: true,
             eager: false,
             keep_facts: false,
+            groups_always: false,
             lit_again: true,
             moved: None,
             out: Outbox::new(sender),
@@ -506,6 +508,11 @@ impl<E: Send + 'static> Tui<E> {
 
     pub fn keep_facts(mut self, keep: bool) -> Self {
         self.keep_facts = keep;
+        self
+    }
+
+    pub fn groups_always(mut self, always: bool) -> Self {
+        self.groups_always = always;
         self
     }
 
