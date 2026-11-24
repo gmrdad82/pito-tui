@@ -24,7 +24,7 @@ use pito_tui::ratatui::{
     text::{Line, Span},
     widgets::{Block, BorderType, Paragraph},
 };
-use pito_tui::text::shimmer;
+use pito_tui::text::{shimmer, shimmer_line};
 use pito_tui::{
     Activities, Activity, Band, Choice, Cx, FRAME, Field, Filter, Focus, Head, Job, Label, Log,
     Modal, Numbers, Palette, Phase, Pick, Row as Stack, Screen, Spot, Takeover, Toast, Tone as Ink,
@@ -191,6 +191,14 @@ impl Screen<Msg> for Home {
             palette.ink,
             Color::White,
         ));
+        lines.push(Line::default());
+        let row = Line::from(vec![
+            Span::styled("render  ", Style::new().fg(Color::Rgb(70, 80, 125))),
+            Span::styled("intro.mov  ", Style::new().fg(Color::Rgb(110, 120, 170))),
+            Span::styled("running  ", Style::new().fg(Color::Rgb(50, 140, 100))),
+            Span::styled("3 of 8", Style::new().fg(Color::Rgb(170, 125, 45))),
+        ]);
+        lines.push(shimmer_line(row, 26, gone, Color::Rgb(255, 255, 255)));
         message(frame, area, lines);
     }
 

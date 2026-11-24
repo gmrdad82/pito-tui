@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::iter;
 use std::time::Duration;
 
@@ -426,6 +427,60 @@ pub fn shimmer_into<'a>(
     }
     if run < text.len() {
         out.push(Span::styled(&text[run..], base));
+    }
+}
+
+pub fn shimmer_line<'a>(line: Line<'a>, width: u16, moment: Duration, glow: Color) -> Line<'a> {
+    let mut spans = Vec::with_capacity(line.spans.len() + 8);
+    shimmer_line_into(&mut spans, &line, width, moment, glow);
+    Line {
+        spans,
+        style: line.style,
+        alignment: line.alignment,
+    }
+}
+
+pub fn shimmer_line_into<'a>(
+    out: &mut Vec<Span<'a>>,
+    line: &Line<'a>,
+    width: u16,
+    moment: Duration,
+    glow: Color,
+) {
+    out.clear();
+    let Some(centre) = shimmer_centre(moment, usize::from(width)) else {
+        out.extend(line.spans.iter().cloned());
+        return;
+    };
+    let mut at = 0.0_f64;
+    for span in &line.spans {
+        let text: &str = &span.content;
+        let from = span.style.fg.or(line.style.fg).unwrap_or(Color::Reset);
+        let mut run = 0;
+        for (start, grapheme) in text.grapheme_indices(true) {
+            let cell = grapheme.width();
+            let middle = at + (cell as f64 - 1.0).max(0.0) / 2.0;
+            at += cell as f64;
+            let strength = shimmer_strength(centre, middle);
+            if strength > 0.0 {
+                if run < start {
+                    out.push(piece(span, text, run, start, span.style));
+                }
+                let style = span.style.fg(crate::progress::mix(from, glow, strength));
+                out.push(piece(span, text, start, start + grapheme.len(), style));
+                run = start + grapheme.len();
+            }
+        }
+        if run < text.len() {
+            out.push(piece(span, text, run, text.len(), span.style));
+        }
+    }
+}
+
+fn piece<'a>(span: &Span<'a>, text: &str, from: usize, to: usize, style: Style) -> Span<'a> {
+    match &span.content {
+        Cow::Borrowed(whole) => Span::styled(&whole[from..to], style),
+        Cow::Owned(_) => Span::styled(text[from..to].to_string(), style),
     }
 }
 
@@ -960,5 +1015,124 @@ mod shimmer_tests {
     fn a_text_without_a_colour_still_glows_toward_the_glow() {
         let line = shimmer(TEXT, at(550), Style::new(), GLOW);
         assert!(line.spans.iter().any(|span| span.style.fg == Some(GLOW)));
+    }
+}
+
+#[cfg(test)]
+mod shimmer_line_tests {
+    use super::*;
+
+    const GLOW: Color = Color::Rgb(255, 255, 255);
+    const RED: Color = Color::Rgb(200, 0, 0);
+    const GREEN: Color = Color::Rgb(0, 200, 0);
+    const BLUE: Color = Color::Rgb(0, 0, 200);
+
+    fn at(ms: u64) -> Duration {
+        Duration::from_millis(ms)
+    }
+
+    fn row() -> Line<'static> {
+        Line::from(vec![
+            Span::styled("aaaaaaaaaa", Style::new().fg(RED)),
+            Span::styled("bbbbbbbbbb", Style::new().fg(GREEN)),
+            Span::styled("cccccccccc", Style::new().fg(BLUE)),
+        ])
+    }
+
+    fn colours(line: &Line) -> Vec<Option<Color>> {
+        line.spans
+            .iter()
+            .flat_map(|s| s.content.chars().map(|_| s.style.fg))
+            .collect()
+    }
+
+    fn bases() -> Vec<Option<Color>> {
+        colours(&row())
+    }
+
+    fn lit(ms: u64) -> Vec<usize> {
+        let got = colours(&shimmer_line(row(), 30, at(ms), GLOW));
+        let base = bases();
+        (0..30).filter(|&i| got[i] != base[i]).collect()
+    }
+
+    #[test]
+    fn one_band_crosses_the_span_boundaries_at_absolute_columns() {
+        assert_eq!(shimmer_centre(at(550), 30), Some(14.5));
+        assert_eq!(lit(550), (11..=18).collect::<Vec<_>>());
+        let got = colours(&shimmer_line(row(), 30, at(550), GLOW));
+        let brightness = |c: Option<Color>| match c {
+            Some(Color::Rgb(r, g, b)) => u32::from(r) + u32::from(g) + u32::from(b),
+            _ => 0,
+        };
+        let peak = (0..30).max_by_key(|&i| brightness(got[i])).unwrap();
+        assert!(peak == 14 || peak == 15);
+        assert!(brightness(got[14]) > brightness(got[11]));
+        assert!(brightness(got[15]) > brightness(got[18]));
+        assert!(brightness(got[14]) > brightness(bases()[14]));
+        assert!(brightness(got[15]) > brightness(bases()[15]));
+        assert_eq!(lit(0), Vec::<usize>::new());
+        let early = shimmer_centre(at(280), 30).unwrap();
+        let expected: Vec<usize> = (0..30)
+            .filter(|&i| shimmer_strength(early, i as f64) > 0.0)
+            .collect();
+        assert!(!expected.is_empty() && expected[0] == 0);
+        assert_eq!(lit(280), expected);
+    }
+
+    #[test]
+    fn spans_keep_their_colours_away_from_the_glow() {
+        let got = colours(&shimmer_line(row(), 30, at(550), GLOW));
+        let base = bases();
+        for i in (0..11).chain(19..30) {
+            assert_eq!(got[i], base[i]);
+        }
+        for i in 11..=18 {
+            assert_ne!(got[i], base[i]);
+        }
+    }
+
+    #[test]
+    fn the_glow_blends_each_spans_own_colour() {
+        let got = colours(&shimmer_line(row(), 30, at(550), GLOW));
+        let strength = shimmer_strength(14.5, 14.0);
+        assert_eq!(got[14], Some(crate::progress::mix(GREEN, GLOW, strength)));
+        let strength = shimmer_strength(14.5, 11.0);
+        assert_eq!(got[11], Some(crate::progress::mix(GREEN, GLOW, strength)));
+    }
+
+    #[test]
+    fn two_dumps_at_one_moment_are_equal_and_text_is_unchanged() {
+        for ms in [0, 280, 550, 900, 1099, 1300] {
+            let one = shimmer_line(row(), 30, at(ms), GLOW);
+            let two = shimmer_line(row(), 30, at(ms), GLOW);
+            assert_eq!(one, two);
+            let text: String = one.spans.iter().map(|s| s.content.as_ref()).collect();
+            assert_eq!(text, "aaaaaaaaaabbbbbbbbbbcccccccccc");
+        }
+    }
+
+    #[test]
+    fn the_pause_between_passes_leaves_the_line_alone() {
+        assert_eq!(shimmer_line(row(), 30, at(1300), GLOW), row());
+    }
+
+    #[test]
+    fn owned_spans_and_wide_glyphs_shimmer_too() {
+        let line = Line::from(vec![
+            Span::styled(String::from("日本語"), Style::new().fg(RED)),
+            Span::styled("ab", Style::new().fg(GREEN)),
+        ]);
+        let out = shimmer_line(line, 8, at(550), GLOW);
+        let text: String = out.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(text, "日本語ab");
+    }
+
+    #[test]
+    fn line_style_and_alignment_survive() {
+        let line = row().style(Style::new().bg(Color::Black)).centered();
+        let out = shimmer_line(line, 30, at(550), GLOW);
+        assert_eq!(out.style, Style::new().bg(Color::Black));
+        assert_eq!(out.alignment, Some(ratatui::layout::Alignment::Center));
     }
 }

@@ -4,7 +4,8 @@ use std::time::Duration;
 
 use pito_tui::progress::{Ramp, meter_into};
 use pito_tui::ratatui::style::{Color, Style};
-use pito_tui::text::shimmer_into;
+use pito_tui::ratatui::text::{Line, Span};
+use pito_tui::text::{shimmer_into, shimmer_line_into};
 
 struct Counting;
 
@@ -85,6 +86,36 @@ fn a_steady_shimmer_frame_allocates_nothing() {
                 text,
                 Duration::from_millis(ms),
                 base,
+                Color::White,
+            );
+        }
+    });
+    assert_eq!(allocations, 0);
+}
+
+#[test]
+fn a_steady_shimmer_line_frame_allocates_nothing() {
+    let line = Line::from(vec![
+        Span::styled("aaaaaaaaaa", Style::new().fg(Color::Rgb(200, 0, 0))),
+        Span::styled("bbbbbbbbbb", Style::new().fg(Color::Rgb(0, 200, 0))),
+        Span::styled("cccccccccc", Style::new().fg(Color::Rgb(0, 0, 200))),
+    ]);
+    let mut spans = Vec::new();
+    shimmer_line_into(
+        &mut spans,
+        &line,
+        30,
+        Duration::from_millis(550),
+        Color::White,
+    );
+    spans.reserve(64);
+    let allocations = counted(|| {
+        for ms in (0..3200).step_by(16) {
+            shimmer_line_into(
+                &mut spans,
+                &line,
+                30,
+                Duration::from_millis(ms),
                 Color::White,
             );
         }
