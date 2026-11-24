@@ -70,11 +70,23 @@ fn a_steady_shimmer_frame_allocates_nothing() {
     let text = "Building the thing for you now";
     let base = Style::new().fg(Color::Rgb(100, 100, 100));
     let mut spans = Vec::new();
-    shimmer_into(&mut spans, text, Duration::from_millis(550), base, Color::White);
+    shimmer_into(
+        &mut spans,
+        text,
+        Duration::from_millis(550),
+        base,
+        Color::White,
+    );
     spans.reserve(64);
     let allocations = counted(|| {
         for ms in (0..3200).step_by(16) {
-            shimmer_into(&mut spans, text, Duration::from_millis(ms), base, Color::White);
+            shimmer_into(
+                &mut spans,
+                text,
+                Duration::from_millis(ms),
+                base,
+                Color::White,
+            );
         }
     });
     assert_eq!(allocations, 0);
