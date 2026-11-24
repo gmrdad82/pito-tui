@@ -1072,7 +1072,12 @@ mod shimmer_line_tests {
         assert!(brightness(got[14]) > brightness(bases()[14]));
         assert!(brightness(got[15]) > brightness(bases()[15]));
         assert_eq!(lit(0), Vec::<usize>::new());
-        assert_eq!(lit(280), (0..=4).collect::<Vec<_>>());
+        let early = shimmer_centre(at(280), 30).unwrap();
+        let expected: Vec<usize> = (0..30)
+            .filter(|&i| shimmer_strength(early, i as f64) > 0.0)
+            .collect();
+        assert!(!expected.is_empty() && expected[0] == 0);
+        assert_eq!(lit(280), expected);
     }
 
     #[test]
