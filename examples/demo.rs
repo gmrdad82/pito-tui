@@ -193,12 +193,12 @@ impl Screen<Msg> for Home {
         ));
         lines.push(Line::default());
         let row = Line::from(vec![
-            Span::styled("render  ", palette.muted),
-            Span::styled("intro.mov  ", palette.ink),
-            Span::styled("running  ", palette.good),
-            Span::styled("3 of 8", palette.warn),
+            Span::styled("render  ", Style::new().fg(Color::Rgb(70, 80, 125))),
+            Span::styled("intro.mov  ", Style::new().fg(Color::Rgb(110, 120, 170))),
+            Span::styled("running  ", Style::new().fg(Color::Rgb(50, 140, 100))),
+            Span::styled("3 of 8", Style::new().fg(Color::Rgb(170, 125, 45))),
         ]);
-        lines.push(shimmer_line(row, 26, gone, Color::White));
+        lines.push(shimmer_line(row, 26, gone, Color::Rgb(255, 255, 255)));
         message(frame, area, lines);
     }
 
