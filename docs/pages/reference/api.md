@@ -198,7 +198,7 @@ FoldState { sections: Vec<(id, collapsed)> };  Placed { title: Rect, body: Rect,
 
 dump::size("120x34"), dump::keys("tab / foo enter ctrl+c") -> Result<Vec<KeyEvent>, word>,
 dump::text(&Buffer), dump::ansi(&Buffer);  Bench { screen, frames, average, worst }
-text::shimmer(text, moment, base, glow) -> Line (a glow sweeping left to right, eased, 1.6 s a pass), clean, cells, split, cut, clip, fit, wrap, hard_wrap;  message(frame, area, text);  message_at(.., Spot)
+text::shimmer(text, moment, base, glow) -> Line (a glow sweeping left to right, eased, 1.6 s a pass), shimmer_line(line, width, moment, glow) -> Line (the same sweep as one band across a styled line, each span keeping its colours; shimmer_line_into reuses a buffer), clean, cells, split, cut, clip, fit, wrap, hard_wrap;  message(frame, area, text);  message_at(.., Spot)
 copy(text), base64(bytes)
 TOP, SIDE, PAD, GAP                                        // Layout::new()'s spacing, in cells
 ```

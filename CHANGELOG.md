@@ -4,6 +4,12 @@ Every release of pito-tui, newest first. Versions follow [Semantic
 Versioning](https://semver.org/): from 1.0.0 on, only a change in the first
 number may break an app; the middle number adds, the last one fixes.
 
+## v2.9.0 — 2026-11-24
+
+### Added
+
+- `text::shimmer_line(line, width, moment, glow)` shimmers an already styled line as one band: a single highlight sweeps left to right across the whole line's cells, over every span, with the same eased timing as `text::shimmer`, each span keeping its own colours and blending them toward the glow by the strength at that cell, so a table row shimmers as one band instead of cell by cell; `shimmer_line_into` reuses a span buffer so a steady frame allocates nothing. The demo's home screen shows a row shimmering this way.
+
 ## v2.8.0 — 2026-11-24
 
 ### Added
