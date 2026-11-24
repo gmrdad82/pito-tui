@@ -129,7 +129,7 @@ pub enum log::Turn { Pass, Taken, Copy(text) };  pub type log::Lines = Arc<Vec<L
 clock::Units::new(second, minute, hour, day) .year(..) .under(..) .now(..)   // the app's unit words
 clock::span(Duration, &Units) -> "1m 2s", span_hours(..) -> "49h 3m", age(Duration, &Units) -> "3m",
   next_span(since, now), next_age(since, now)
-progress::bar(fraction, cells) -> "⣿⣿⣀⣀", percent(fraction), share(fraction, estimate) -> "≈57%", spinner(Duration), SPIN
+progress::bar(fraction, cells) -> "⣿⣿⣀⣀", meter(fraction, cells, &Ramp, track) -> Line (Ramp::load() teal-green-amber-red, Ramp::accent(&Palette), Ramp::new(&[Color])), percent(fraction), share(fraction, estimate) -> "≈57%", spinner(Duration), SPIN
 
 capture::Walk::new() .sizes([(w, h)]) .screens(bool) .script(Script::new(name, [KeyEvent]) .loading() .at(Duration))
 capture::capture(dir, &Walk, Fn() -> Tui<E>) -> io::Result<frames>
@@ -198,7 +198,7 @@ FoldState { sections: Vec<(id, collapsed)> };  Placed { title: Rect, body: Rect,
 
 dump::size("120x34"), dump::keys("tab / foo enter ctrl+c") -> Result<Vec<KeyEvent>, word>,
 dump::text(&Buffer), dump::ansi(&Buffer);  Bench { screen, frames, average, worst }
-text::clean, cells, split, cut, clip, fit, wrap, hard_wrap;  message(frame, area, text);  message_at(.., Spot)
+text::shimmer(text, moment, base, glow) -> Line (a glow sweeping left to right, eased, 1.6 s a pass), clean, cells, split, cut, clip, fit, wrap, hard_wrap;  message(frame, area, text);  message_at(.., Spot)
 copy(text), base64(bytes)
 TOP, SIDE, PAD, GAP                                        // Layout::new()'s spacing, in cells
 ```

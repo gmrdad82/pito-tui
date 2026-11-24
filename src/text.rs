@@ -1,6 +1,10 @@
 use std::iter;
+use std::time::Duration;
 
-use ratatui::style::Style;
+use ratatui::{
+    style::{Color, Style},
+    text::{Line, Span},
+};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
@@ -350,6 +354,79 @@ pub fn hard_wrap(text: &str, width: usize) -> Vec<String> {
         }
     }
     lines
+}
+
+pub const SHIMMER_CYCLE: Duration = Duration::from_millis(1600);
+pub const SHIMMER_SWEEP: Duration = Duration::from_millis(1100);
+pub const SHIMMER_REACH: f64 = 4.0;
+
+fn eased(progress: f64) -> f64 {
+    if progress < 0.5 {
+        4.0 * progress.powi(3)
+    } else {
+        1.0 - (-2.0 * progress + 2.0).powi(3) / 2.0
+    }
+}
+
+pub fn shimmer_centre(moment: Duration, cells: usize) -> Option<f64> {
+    let phase = moment.as_nanos() % SHIMMER_CYCLE.as_nanos();
+    if phase >= SHIMMER_SWEEP.as_nanos() {
+        return None;
+    }
+    let progress = phase as f64 / SHIMMER_SWEEP.as_nanos() as f64;
+    let span = cells as f64 - 1.0 + 2.0 * SHIMMER_REACH;
+    Some(-SHIMMER_REACH + eased(progress) * span)
+}
+
+pub fn shimmer_strength(centre: f64, cell: f64) -> f64 {
+    let near = 1.0 - (cell - centre).abs() / SHIMMER_REACH;
+    if near <= 0.0 {
+        0.0
+    } else {
+        near * near * (3.0 - 2.0 * near)
+    }
+}
+
+pub fn shimmer<'a>(text: &'a str, moment: Duration, base: Style, glow: Color) -> Line<'a> {
+    let mut spans = Vec::with_capacity(text.chars().count().min(256));
+    shimmer_into(&mut spans, text, moment, base, glow);
+    Line::from(spans)
+}
+
+pub fn shimmer_into<'a>(
+    out: &mut Vec<Span<'a>>,
+    text: &'a str,
+    moment: Duration,
+    base: Style,
+    glow: Color,
+) {
+    out.clear();
+    let Some(centre) = shimmer_centre(moment, cells(text)) else {
+        if !text.is_empty() {
+            out.push(Span::styled(text, base));
+        }
+        return;
+    };
+    let from = base.fg.unwrap_or(Color::Reset);
+    let mut at = 0.0_f64;
+    let mut run = 0;
+    for (start, grapheme) in text.grapheme_indices(true) {
+        let width = grapheme.width();
+        let middle = at + (width as f64 - 1.0).max(0.0) / 2.0;
+        at += width as f64;
+        let strength = shimmer_strength(centre, middle);
+        if strength > 0.0 {
+            if run < start {
+                out.push(Span::styled(&text[run..start], base));
+            }
+            let style = base.fg(crate::progress::mix(from, glow, strength));
+            out.push(Span::styled(&text[start..start + grapheme.len()], style));
+            run = start + grapheme.len();
+        }
+    }
+    if run < text.len() {
+        out.push(Span::styled(&text[run..], base));
+    }
 }
 
 #[cfg(test)]
@@ -747,5 +824,141 @@ mod tests {
         assert_eq!(out, [("dep", bold)]);
         let none: [(&str, Style); 0] = [];
         assert_eq!(kept(&none, 0, |_, _| {}), Style::new());
+    }
+}
+
+#[cfg(test)]
+mod shimmer_tests {
+    use super::*;
+
+    const BASE: Color = Color::Rgb(100, 100, 100);
+    const GLOW: Color = Color::Rgb(255, 255, 255);
+
+    fn at(ms: u64) -> Duration {
+        Duration::from_millis(ms)
+    }
+
+    fn lit(text: &str, ms: u64) -> Vec<usize> {
+        let line = shimmer(text, at(ms), Style::new().fg(BASE), GLOW);
+        let mut cells = Vec::new();
+        let mut cell = 0;
+        for span in &line.spans {
+            for _ in span.content.chars() {
+                if span.style.fg != Some(BASE) {
+                    cells.push(cell);
+                }
+                cell += 1;
+            }
+        }
+        cells
+    }
+
+    fn peak(text: &str, ms: u64) -> Option<usize> {
+        let line = shimmer(text, at(ms), Style::new().fg(BASE), GLOW);
+        let mut best = (0_u32, None);
+        let mut cell = 0;
+        for span in &line.spans {
+            for _ in span.content.chars() {
+                if let Some(Color::Rgb(r, ..)) = span.style.fg
+                    && u32::from(r) > best.0.max(100)
+                {
+                    best = (u32::from(r), Some(cell));
+                }
+                cell += 1;
+            }
+        }
+        best.1
+    }
+
+    const TEXT: &str = "Building the thing for you now";
+
+    #[test]
+    fn the_glow_sits_where_the_sweep_has_reached() {
+        assert_eq!(shimmer_centre(at(0), 30), Some(-4.0));
+        assert_eq!(shimmer_centre(at(550), 30), Some(14.5));
+        assert_eq!(peak(TEXT, 550), Some(14));
+        let end = shimmer_centre(at(1099), 30).unwrap();
+        assert!((end - 33.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn the_glow_fades_over_four_cells_each_side() {
+        let cells = lit(TEXT, 550);
+        assert_eq!(cells.first(), Some(&11));
+        assert_eq!(cells.last(), Some(&18));
+        let line = shimmer(TEXT, at(550), Style::new().fg(BASE), GLOW);
+        let red = |cell: usize| {
+            let mut seen = 0;
+            for span in &line.spans {
+                for _ in span.content.chars() {
+                    if seen == cell {
+                        return match span.style.fg {
+                            Some(Color::Rgb(r, ..)) => r,
+                            _ => 0,
+                        };
+                    }
+                    seen += 1;
+                }
+            }
+            0
+        };
+        assert!(red(15) > red(16) && red(16) > red(17) && red(17) > red(18));
+        assert!(red(11) > 100 && red(10) == 100 && red(19) == 100);
+        assert_eq!(red(13), red(16));
+        assert_eq!(red(14), red(15));
+    }
+
+    #[test]
+    fn the_sweep_is_eased_slow_at_the_ends_and_quick_in_the_middle() {
+        let centre = |ms| shimmer_centre(at(ms), 30).unwrap();
+        let start = centre(100) - centre(0);
+        let middle = centre(600) - centre(500);
+        let end = centre(1099) - centre(999);
+        assert!(start < middle / 4.0, "{start} {middle}");
+        assert!(end < middle / 4.0, "{end} {middle}");
+        let mut last = f64::MIN;
+        for ms in (0..1100).step_by(10) {
+            let now = centre(ms);
+            assert!(now >= last);
+            last = now;
+        }
+    }
+
+    #[test]
+    fn a_pass_comes_every_one_point_six_seconds_with_a_pause_between() {
+        assert!(lit(TEXT, 1100).is_empty());
+        assert!(lit(TEXT, 1599).is_empty());
+        assert_eq!(shimmer_centre(at(1600), 30), shimmer_centre(at(0), 30));
+        assert_eq!(lit(TEXT, 1600 + 550), lit(TEXT, 550));
+        assert_eq!(lit(TEXT, 3200 * 40 + 550), lit(TEXT, 550));
+    }
+
+    #[test]
+    fn the_same_moment_is_always_the_same_frame() {
+        for ms in [0, 137, 550, 999, 1100, 4242] {
+            let one = shimmer(TEXT, at(ms), Style::new().fg(BASE), GLOW);
+            let two = shimmer(TEXT, at(ms), Style::new().fg(BASE), GLOW);
+            assert_eq!(one, two);
+        }
+    }
+
+    #[test]
+    fn the_text_is_never_changed_and_an_empty_text_is_an_empty_line() {
+        for ms in [0, 300, 550, 900, 1300] {
+            let line = shimmer("héllo wörld 日本", at(ms), Style::new(), GLOW);
+            let joined: String = line
+                .spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect();
+            assert_eq!(joined, "héllo wörld 日本");
+        }
+        assert!(shimmer("", at(550), Style::new(), GLOW).spans.is_empty());
+    }
+
+    #[test]
+    fn a_text_without_a_colour_still_glows_toward_the_glow() {
+        let line = shimmer(TEXT, at(550), Style::new(), GLOW);
+        assert!(line.spans.iter().any(|span| span.style.fg == Some(GLOW)));
     }
 }

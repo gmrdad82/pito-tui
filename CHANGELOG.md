@@ -4,6 +4,13 @@ Every release of pito-tui, newest first. Versions follow [Semantic
 Versioning](https://semver.org/): from 1.0.0 on, only a change in the first
 number may break an app; the middle number adds, the last one fixes.
 
+## v2.8.0 — 2026-11-24
+
+### Added
+
+- `progress::meter(fraction, cells, &Ramp, track)` draws the Braille bar as a `Line` whose filled cells take their colour from a gradient by their position along the bar, so a short bar stays cool and a long one reaches the hot end, over a quiet track in the style the app passes; `Ramp` holds 2 to 4 colour stops, with `Ramp::load()` (teal, green, amber, red), `Ramp::accent(&Palette)` and `Ramp::new(&[Color])`, and `meter_into` reuses an app's span buffer so a steady frame allocates nothing.
+- `text::shimmer(text, moment, base, glow)` draws text with a soft glow sweeping left to right, eased in and out, one pass about every 1.6 s with a pause between passes and a fade of four cells each side; it reads only the loop's moment, so a dump at a moment is always the same frame, and `shimmer_into` reuses a span buffer.
+
 ## v2.7.0 — 2026-11-24
 
 ### Added

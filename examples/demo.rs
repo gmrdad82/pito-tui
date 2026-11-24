@@ -16,20 +16,23 @@ use pito_tui::footer::{Edit, Hint, Input, InputBar, Key, Tone};
 use pito_tui::header::Section;
 use pito_tui::layer::Event;
 use pito_tui::list::{Bar, Cell, Column, Count, Row};
+use pito_tui::progress::{Ramp, meter};
 use pito_tui::ratatui::{
     Frame,
     layout::{Alignment, Rect},
     style::{Color, Modifier, Style},
-    text::Line,
+    text::{Line, Span},
     widgets::{Block, BorderType, Paragraph},
 };
+use pito_tui::text::shimmer;
 use pito_tui::{
-    Activities, Activity, Band, Choice, Cx, Field, Filter, Focus, Head, Job, Label, Log, Modal,
-    Numbers, Palette, Phase, Pick, Row as Stack, Screen, Spot, Takeover, Toast, Tone as Ink, Tui,
-    Turn, Words, dump, log, matches, message,
+    Activities, Activity, Band, Choice, Cx, FRAME, Field, Filter, Focus, Head, Job, Label, Log,
+    Modal, Numbers, Palette, Phase, Pick, Row as Stack, Screen, Spot, Takeover, Toast, Tone as Ink,
+    Tui, Turn, Words, dump, log, matches, message,
 };
 
 const NAME: &str = "demo";
+const METERS: [(&str, f64); 4] = [("cpu", 0.12), ("ram", 0.41), ("disk", 0.73), ("gpu", 0.97)];
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const ACCENTS: [Color; 3] = [
     Color::Rgb(0x5b, 0x8c, 0xff),
@@ -120,6 +123,7 @@ struct Home {
     due: Option<Instant>,
     last: Option<Instant>,
     now: Option<Instant>,
+    born: Option<Instant>,
     accent: usize,
     command: Option<u64>,
     stack: bool,
@@ -162,14 +166,36 @@ fn build(id: u64, started: Instant, now: Instant) -> Activity {
 
 impl Screen<Msg> for Home {
     fn draw(&mut self, frame: &mut Frame, area: Rect, palette: &Palette) {
-        let lines = vec![
+        let gone = self
+            .now
+            .zip(self.born)
+            .map_or(Duration::ZERO, |(now, born)| {
+                now.saturating_duration_since(born)
+            });
+        let ramp = Ramp::load();
+        let mut lines = vec![
             Line::styled(NAME, palette.selected),
             Line::styled(format!("v{VERSION}"), palette.muted),
+            Line::default(),
         ];
+        for (name, fraction) in METERS {
+            let mut line = meter(fraction, 24, &ramp, palette.muted);
+            line.spans
+                .insert(0, Span::styled(format!("{name:<5}"), palette.ink));
+            lines.push(line);
+        }
+        lines.push(Line::default());
+        lines.push(shimmer(
+            "Building the thing for you…",
+            gone,
+            palette.ink,
+            Color::White,
+        ));
         message(frame, area, lines);
     }
 
     fn moment(&mut self, now: Instant) {
+        self.born.get_or_insert(now);
         self.now = Some(now);
     }
 
@@ -239,7 +265,8 @@ impl Screen<Msg> for Home {
             .last
             .zip(self.now)
             .map(|(last, now)| clock::next_age(last, now));
-        [self.due, label].into_iter().flatten().min()
+        let frame = self.now.map(|now| now + FRAME);
+        [self.due, label, frame].into_iter().flatten().min()
     }
 
     fn tick(&mut self, cx: &mut Cx<'_, Msg>) {

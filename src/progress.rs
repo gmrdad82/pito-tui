@@ -1,5 +1,10 @@
 use std::time::Duration;
 
+use ratatui::{
+    style::{Color, Style},
+    text::{Line, Span},
+};
+
 pub const SPIN: Duration = Duration::from_millis(80);
 pub const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 pub const ABOUT: &str = "≈";
@@ -40,6 +45,107 @@ pub fn bar(fraction: f64, cells: usize) -> String {
     text
 }
 
+const LADDER_STR: [&str; 8] = ["⡀", "⡄", "⡆", "⡇", "⣇", "⣧", "⣷", "⣿"];
+const TRACK_STR: &str = "⣀";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Ramp {
+    stops: [Color; 4],
+    len: usize,
+}
+
+impl Ramp {
+    pub fn new(stops: &[Color]) -> Self {
+        let mut out = [Color::Reset; 4];
+        let len = stops.len().clamp(1, 4);
+        for (slot, stop) in out.iter_mut().zip(stops) {
+            *slot = *stop;
+        }
+        if stops.is_empty() {
+            out[0] = Color::Reset;
+        }
+        Ramp { stops: out, len }
+    }
+
+    pub const fn load() -> Self {
+        Ramp {
+            stops: [
+                Color::Rgb(0x2d, 0xd4, 0xbf),
+                Color::Rgb(0x4a, 0xde, 0x80),
+                Color::Rgb(0xfb, 0xbf, 0x24),
+                Color::Rgb(0xef, 0x44, 0x44),
+            ],
+            len: 4,
+        }
+    }
+
+    pub fn from_accent(accent: Color) -> Self {
+        Ramp {
+            stops: [
+                mix(Color::Rgb(0, 0, 0), accent, 0.45),
+                accent,
+                mix(accent, Color::Rgb(255, 255, 255), 0.4),
+                Color::Reset,
+            ],
+            len: 3,
+        }
+    }
+
+    pub fn accent(palette: &crate::Palette) -> Self {
+        Self::from_accent(palette.accent.fg.unwrap_or(Color::White))
+    }
+
+    pub fn at(&self, position: f64) -> Color {
+        let position = clean(position);
+        if self.len == 1 {
+            return self.stops[0];
+        }
+        let scaled = position * (self.len - 1) as f64;
+        let low = (scaled.floor() as usize).min(self.len - 2);
+        mix(self.stops[low], self.stops[low + 1], scaled - low as f64)
+    }
+}
+
+pub(crate) fn mix(from: Color, to: Color, amount: f64) -> Color {
+    match (from, to) {
+        (Color::Rgb(ar, ag, ab), Color::Rgb(br, bg, bb)) => {
+            let blend = |a: u8, b: u8| {
+                (f64::from(a) + (f64::from(b) - f64::from(a)) * amount).round() as u8
+            };
+            Color::Rgb(blend(ar, br), blend(ag, bg), blend(ab, bb))
+        }
+        _ if amount < 0.5 => from,
+        _ => to,
+    }
+}
+
+pub fn meter(fraction: f64, cells: usize, ramp: &Ramp, track: Style) -> Line<'static> {
+    let mut spans = Vec::with_capacity(cells);
+    meter_into(&mut spans, fraction, cells, ramp, track);
+    Line::from(spans)
+}
+
+pub fn meter_into(
+    out: &mut Vec<Span<'static>>,
+    fraction: f64,
+    cells: usize,
+    ramp: &Ramp,
+    track: Style,
+) {
+    out.clear();
+    let steps = floored(fraction, cells * 8);
+    let (full, part) = (steps / 8, steps % 8);
+    for cell in 0..cells {
+        if cell < full || (cell == full && part > 0) {
+            let glyph = if cell < full { 7 } else { part - 1 };
+            let colour = ramp.at((cell as f64 + 0.5) / cells as f64);
+            out.push(Span::styled(LADDER_STR[glyph], Style::new().fg(colour)));
+        } else {
+            out.push(Span::styled(TRACK_STR, track));
+        }
+    }
+}
+
 pub fn percent(fraction: f64) -> u32 {
     floored(fraction, 100) as u32
 }
@@ -60,6 +166,103 @@ mod tests {
 
     fn chars(text: &str) -> usize {
         text.chars().count()
+    }
+
+    const RAMP: Ramp = Ramp::load();
+
+    fn colours(line: &Line<'_>) -> Vec<Option<Color>> {
+        line.spans.iter().map(|span| span.style.fg).collect()
+    }
+
+    fn glyphs(line: &Line<'_>) -> String {
+        line.spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect()
+    }
+
+    #[test]
+    fn a_meter_draws_the_bar_glyphs_with_a_quiet_track() {
+        let track = Style::new().fg(Color::DarkGray);
+        for step in 0..=20 {
+            let fraction = f64::from(step) / 20.0;
+            let line = meter(fraction, 8, &RAMP, track);
+            assert_eq!(glyphs(&line), bar(fraction, 8), "{fraction}");
+        }
+    }
+
+    #[test]
+    fn a_meter_at_zero_is_all_track_and_keeps_its_style() {
+        let track = Style::new().fg(Color::DarkGray);
+        let line = meter(0.0, 6, &RAMP, track);
+        assert!(line.spans.iter().all(|span| span.style == track));
+        assert_eq!(meter(0.0, 0, &RAMP, track).spans.len(), 0);
+    }
+
+    #[test]
+    fn a_meter_at_a_third_stays_cool_and_the_track_keeps_its_style() {
+        let track = Style::new().fg(Color::DarkGray);
+        let line = meter(0.3, 10, &RAMP, track);
+        let got = colours(&line);
+        for (cell, colour) in got.iter().enumerate().take(3) {
+            let want = RAMP.at((cell as f64 + 0.5) / 10.0);
+            assert_eq!(*colour, Some(want), "cell {cell}");
+        }
+        assert_eq!(got[0], Some(RAMP.at(0.05)));
+        for span in &line.spans[3..] {
+            assert_eq!(span.style, track);
+        }
+        assert_ne!(got[2], Some(RAMP.at(1.0)));
+    }
+
+    #[test]
+    fn a_meter_at_seventy_percent_reaches_amber_and_full_reaches_red() {
+        let track = Style::new();
+        let line = meter(0.7, 10, &RAMP, track);
+        let got = colours(&line);
+        for (cell, colour) in got.iter().enumerate().take(7) {
+            assert_eq!(*colour, Some(RAMP.at((cell as f64 + 0.5) / 10.0)));
+        }
+        assert_eq!(line.spans[7].style, track);
+        let full = colours(&meter(1.0, 10, &RAMP, track));
+        assert!(full.iter().all(Option::is_some));
+        assert_eq!(full[0], Some(RAMP.at(0.05)));
+        assert_eq!(full[9], Some(RAMP.at(0.95)));
+        let Some(Color::Rgb(r, g, _)) = full[9] else {
+            panic!("rgb");
+        };
+        assert!(r > 0xe0 && g < 0x60);
+    }
+
+    #[test]
+    fn a_short_bar_stays_cool_and_a_long_one_runs_hot() {
+        let teal = Color::Rgb(0x2d, 0xd4, 0xbf);
+        assert_eq!(RAMP.at(0.0), teal);
+        assert_eq!(RAMP.at(1.0), Color::Rgb(0xef, 0x44, 0x44));
+        assert_eq!(RAMP.at(1.0 / 3.0), Color::Rgb(0x4a, 0xde, 0x80));
+        assert_eq!(RAMP.at(2.0 / 3.0), Color::Rgb(0xfb, 0xbf, 0x24));
+        let mid = RAMP.at(1.0 / 6.0);
+        assert_eq!(mid, Color::Rgb(0x3c, 0xd9, 0xa0));
+    }
+
+    #[test]
+    fn a_ramp_takes_two_to_four_stops_and_clamps_the_position() {
+        let two = Ramp::new(&[Color::Rgb(0, 0, 0), Color::Rgb(100, 200, 50)]);
+        assert_eq!(two.at(0.5), Color::Rgb(50, 100, 25));
+        assert_eq!(two.at(-3.0), Color::Rgb(0, 0, 0));
+        assert_eq!(two.at(9.0), Color::Rgb(100, 200, 50));
+        assert_eq!(two.at(f64::NAN), Color::Rgb(0, 0, 0));
+        let many = Ramp::new(&[Color::Red; 7]);
+        assert_eq!(many.at(1.0), Color::Red);
+        let accent = Ramp::from_accent(Color::Rgb(200, 100, 50));
+        assert_eq!(accent.at(0.5), Color::Rgb(200, 100, 50));
+        assert!(accent.at(0.0) != accent.at(1.0));
+    }
+
+    #[test]
+    fn a_ramp_from_the_palette_starts_at_its_accent_tone() {
+        let palette = crate::Palette::new(Color::Rgb(200, 100, 50));
+        assert_eq!(Ramp::accent(&palette).at(0.5), Color::Rgb(200, 100, 50));
     }
 
     #[test]
