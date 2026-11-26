@@ -5,7 +5,7 @@ description: "Develop pito-tui itself: the shared Rust TUI shell crate (header, 
 
 # pito-tui-dev
 
-pito-tui is a Rust library (MIT, edition 2024, Rust 1.88+) that gives PITO MD terminal apps their shell: a header, footer, hourglass and list of its own, a panic-safe terminal guard, a 120 fps paced loop, key routing, an activity band and headless dumps. Apps pin it by git tag; it is not on crates.io. This page is the how-to for sessions that change this repo. The rules are in `AGENTS.md` (`CLAUDE.md` imports it): read both and `prompts/RESUME.md` before working, and do not expect this page to restate them.
+pito-tui is a Rust library (MIT, edition 2024, Rust 1.88+) that gives PITO MD terminal apps their shell: a header, footer, hourglass and list of its own, a panic-safe terminal guard, a 120 fps paced loop, key routing, an activity band and headless dumps. Apps pin it by git tag; it is not on crates.io. This page is the how-to for sessions that change this repo. The rules are in `AGENTS.md` (`CLAUDE.md` imports it): read both, and its P99 board (space pito, project pito-tui), before working, and do not expect this page to restate them.
 
 `AGENTS.md`, `CLAUDE.md`, `prompts/`, `dev/`, `pito-app.toml` and `.dev/` are git-ignored and live in the main checkout only, so a fresh worktree has none of them: `git worktree list` names the main checkout, read them there.
 
